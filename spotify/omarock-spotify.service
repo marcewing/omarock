@@ -1,0 +1,17 @@
+# omarock-spotify (spotify/omarock-spotify.py): Spotify for omarock, as the
+# Apple Music bridge's API on 127.0.0.1:8730. It drives Spotify's Soloist
+# (omarock-soloist.service) and uses the Web API as your developer app.
+# Installed by tools/install-spotify from a commit, into
+# ~/.local/share/omarock/spotify/ (never the working tree).
+[Unit]
+Description=omarock-spotify: Spotify for omarock (Soloist and the Web API)
+After=omarock-soloist.service network-online.target
+Wants=omarock-soloist.service
+
+[Service]
+ExecStart=/usr/bin/python3 -I %h/.local/share/omarock/spotify/omarock-spotify.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

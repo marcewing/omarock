@@ -1,0 +1,15 @@
+# omarock's audio bus (audio/omarock-bus.conf), as PipeWire's own
+# filter-chain.service runs one. Installed by tools/install-audio, from a
+# commit, into ~/.local/share/omarock/audio/ (never the working tree).
+[Unit]
+Description=omarock's audio bus: one pinned way out for omarock's sound
+After=pipewire.service pipewire-session-manager.service
+BindsTo=pipewire.service
+
+[Service]
+ExecStart=/usr/bin/pipewire -c %h/.local/share/omarock/audio/omarock-bus.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=pipewire.service

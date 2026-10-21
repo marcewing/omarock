@@ -1,0 +1,150 @@
+#!/bin/bash
+# omarock-doctor: what's set up for omarock and what isn't, with a hint for each
+# problem. It only reads: it changes nothing, plays nothing, and never prints a
+# key, token or password (only whether the file is there, and its mode).
+#
+#   tools/omarock-doctor
+set -uo pipefail
+ok() { printf '  \e[32m✓\e[0m %s\n' "$*"; }
+bad() { printf '  \e[31m✗\e[0m %s\n' "$*"; }
+note() { printf '  \e[33m–\e[0m %s\n' "$*"; }
+head2() { printf '\n\e[1m%s\e[0m\n' "$*"; }
+active() { systemctl --user is-active --quiet "$1"; }
+private_file() {  # FILE WHAT: present and mode 600?
+  if [[ ! -e $1 ]]; then bad "$2: $1 is missing"; return 1; fi
+  local mode; mode=$(stat -c %a "$1")
+  if [[ $mode != 600 ]]; then bad "$2: $1 is mode $mode (chmod 600 it)"; return 1; fi
+  ok "$2: $1 (mode 600)"
+}
+health() { curl -s -m 5 "$1/v1/health" 2>/dev/null; }
+
+plugin=$HOME/.config/omarchy/plugins/marc.omarock
+shelljson=$HOME/.config/omarchy/shell.json
+setting() {  # KEY DEFAULT: omarock's setting, from its entry in shell.json
+  python3 -I - "$shelljson" "$1" "$2" <<'EOF'
+import json, sys
+path, key, default = sys.argv[1:]
+try:
+    d = json.load(open(path))
+    for items in (d.get("bar", {}).get("layout", {}) or {}).values():
+        for it in items:
+            if isinstance(it, dict) and it.get("id") == "marc.omarock" and key in it:
+                v = it[key]
+                print(str(v).lower() if isinstance(v, bool) else v)
+                sys.exit(0)
+except Exception:
+    pass
+print(default)
+EOF
+}
+
+head2 "Omarchy"
+if command -v omarchy >/dev/null; then ok "Omarchy $(omarchy version 2>/dev/null)"; else bad "omarchy isn't installed: omarock is a plugin for Omarchy's bar"; fi
+
+head2 "mpd"
+if command -v mpd >/dev/null; then
+  v=$(mpd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+  if [[ $(printf '%s\n0.24\n' "$v" | sort -V | head -1) == 0.24 ]]; then ok "mpd $v"; else bad "mpd $v: omarock needs 0.24 or later"; fi
+else
+  bad "mpd isn't installed"
+fi
+if active mpd || active mpd.socket; then ok "mpd is running"; else bad "mpd isn't running: systemctl --user enable --now mpd (or mpd.socket)"; fi
+sock=$(setting socket "")
+[[ -z $sock ]] && sock=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
+if [[ -S $sock ]]; then
+  if command -v mpc >/dev/null && MPD_HOST=$sock mpc status >/dev/null 2>&1; then ok "mpd answers on $sock"
+  else note "$sock exists (install mpc to check that mpd answers on it)"; fi
+else
+  bad "no mpd socket at $sock: README.md, Install, 1. mpd"
+fi
+if active mpd-mpris; then ok "mpd-mpris is running (media keys)"; else note "mpd-mpris isn't running: the media keys won't reach mpd (systemctl --user enable --now mpd-mpris)"; fi
+
+head2 "The plugin"
+if [[ -f $plugin/manifest.json ]]; then
+  ok "omarock $(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$plugin/manifest.json") in $plugin"
+else
+  bad "omarock isn't installed: omarchy plugin add https://github.com/marcewing/omarock --enable"
+fi
+if grep -q '"marc.omarock"' "$shelljson" 2>/dev/null; then ok "on the bar"; else note "not on the bar: omarchy plugin enable marc.omarock"; fi
+loaded=$(journalctl --user -b --no-pager 2>/dev/null | grep -o "omarock [0-9.]* loaded" | tail -1)
+[[ -n $loaded ]] && ok "the shell says: $loaded" || note "the shell hasn't logged omarock loading this boot"
+printf '  sources: radio %s, spotify %s, appleMusic %s, siriusXM %s\n' \
+  "$(setting radio true)" "$(setting spotify false)" "$(setting appleMusic false)" "$(setting siriusXM false)"
+
+head2 "Audio bus (optional; Spotify needs it)"
+if [[ -f $HOME/.local/share/omarock/audio/omarock-bus.conf ]]; then
+  pin=$(grep -o 'target.object = "[^"]*"' "$HOME/.local/share/omarock/audio/omarock-bus.conf" | cut -d'"' -f2)
+  ok "installed, pinned to $pin"
+  if pactl list sinks short 2>/dev/null | awk '{print $2}' | grep -qx -- "$pin"; then ok "that output is connected"; else note "that output isn't connected now: the bus waits, silent"; fi
+  if active omarock-bus; then ok "omarock-bus is running"; else bad "omarock-bus isn't running: systemctl --user start omarock-bus"; fi
+  if active omarock-guard; then ok "omarock-guard is running"; else note "omarock-guard isn't running: systemctl --user start omarock-guard"; fi
+  if command -v mpc >/dev/null && MPD_HOST=$sock mpc outputs 2>/dev/null | grep -q "(omarock)"; then ok "mpd plays into the bus"
+  else note "mpd's output isn't the bus: audio/README.md, step 3"; fi
+else
+  note "not installed: audio/README.md"
+fi
+
+if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/omarock-spotify.service ]]; then
+  head2 "Spotify"
+  [[ -x $HOME/.local/lib/omarock-soloist/soloist ]] && ok "Soloist: $("$HOME/.local/lib/omarock-soloist/soloist" --version 2>/dev/null | head -1)" || bad "Soloist isn't installed: tools/update-soloist"
+  [[ -f $HOME/.config/omarock/spotify.json ]] && ok "the developer app: ~/.config/omarock/spotify.json" || bad "no ~/.config/omarock/spotify.json: spotify/README.md, step 2"
+  private_file "$HOME/.config/omarock/soloist-key" "the Soloist key"
+  for u in omarock-soloist omarock-spotify; do active $u && ok "$u is running" || bad "$u isn't running: journalctl --user -u $u"; done
+  h=$(health "$(setting spotifyService http://127.0.0.1:8730)")
+  if [[ -n $h ]]; then
+    python3 -I -c '
+import json, sys, time
+h = json.loads(sys.argv[1]); s = h.get("soloist", {}); w = h.get("web", {})
+print("  " + ("\033[32m✓\033[0m" if s.get("loggedIn") else "\033[31m✗\033[0m") + " Soloist " + ("is signed in" if s.get("loggedIn") else "isn'"'"'t paired yet: spotify/README.md, step 5"))
+print("  " + ("\033[32m✓\033[0m" if w.get("signedIn") else "\033[31m✗\033[0m") + " the Web API " + ("is signed in" + (", until " + time.strftime("%Y-%m-%d", time.localtime(w["signInEndsAt"])) if w.get("signInEndsAt") else "") if w.get("signedIn") else "isn'"'"'t signed in: tools/omarock-sp login"))
+' "$h"
+  else
+    bad "omarock-spotify doesn't answer"
+  fi
+fi
+
+if [[ $(setting siriusXM false) == true ]] || [[ -e $HOME/.config/systemd/user/omarock-sxm.service ]]; then
+  head2 "SiriusXM"
+  private_file "$HOME/.config/omarock/siriusxm.json" "the account"
+  active omarock-sxm && ok "omarock-sxm is running" || bad "omarock-sxm isn't running: journalctl --user -u omarock-sxm"
+  h=$(health "$(setting sxmService http://127.0.0.1:8720)")
+  if [[ -n $h ]]; then
+    python3 -I -c '
+import json, sys
+h = json.loads(sys.argv[1])
+good = h.get("account") and h.get("loggedIn")
+print("  " + ("\033[32m✓\033[0m signed in" if good else "\033[31m✗\033[0m not signed in" + (": " + h["error"] if h.get("error") else ": check ~/.config/omarock/siriusxm.json")))
+' "$h"
+  else
+    bad "omarock-sxm doesn't answer"
+  fi
+fi
+
+if [[ $(setting appleMusic false) == true ]] || [[ -e $HOME/.config/omarock/apple.json ]]; then
+  head2 "Apple Music"
+  bridge=$(setting appleBridge "")
+  if [[ -z $bridge && -f $HOME/.config/omarock/apple.json ]]; then
+    bridge=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("bridge",""))' "$HOME/.config/omarock/apple.json" 2>/dev/null)
+  fi
+  [[ -n $bridge ]] && ok "the bridge: $bridge" || bad "no bridge address: ~/.config/omarock/apple.json (bridge/README.md)"
+  private_file "$(setting appleTokenFile "$HOME/.config/omarock/bridge-token")" "the bridge's token"
+  if [[ -n $bridge ]]; then
+    h=$(health "$bridge")
+    if [[ -n $h ]]; then
+      python3 -I -c '
+import json, sys
+h = json.loads(sys.argv[1])
+print("  " + ("\033[32m✓\033[0m the bridge answers, and may use Apple Music" if h.get("authorized") else "\033[31m✗\033[0m the bridge answers, but Apple Music access isn'"'"'t allowed on the Mac yet"))
+' "$h"
+    else
+      bad "the bridge doesn't answer at $bridge (is the Mac awake, and on the same tailnet?)"
+    fi
+  fi
+  pid=$(systemctl --user show -p MainPID --value mpd 2>/dev/null)
+  if [[ -n $pid && $pid != 0 ]] && grep -q omarock-flac "/proc/$pid/maps" 2>/dev/null; then
+    ok "mpd uses the patched libFLAC$([[ $(setting appleRejoin true) == true ]] && echo '; appleRejoin can be switched off')"
+  else
+    note "mpd uses the stock libFLAC: keep appleRejoin on (it is $(setting appleRejoin true)), or see bridge/README.md for the patch"
+  fi
+fi
+echo

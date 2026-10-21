@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The bridge's launch agent, registered by the app with SMAppService: starts it at
+     login and restarts it if it crashes (not when it quits cleanly). The build copies it
+     into Contents/Library/LaunchAgents as {bundle id}.plist, with the label placeholder set to
+     the bundle id. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>__LABEL__</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/OmarockBridge</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>__LABEL__</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>OMAROCK_BRIDGE_AGENT</key>
+		<string>1</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+</dict>
+</plist>

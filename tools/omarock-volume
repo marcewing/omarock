@@ -1,0 +1,24 @@
+#!/bin/bash
+# omarock-volume: omarock's one volume, the volume of its PipeWire bus
+# "omarock" (audio/omarock-bus.conf), for Claude and the terminal. With the bus
+# in place, mpd's own volume stays at full (mixer_type "none"), so `mpc
+# volume` no longer applies.
+#
+#   omarock-volume          show it (0-100)
+#   omarock-volume 40       set it
+#   omarock-volume +5|-5    turn it up or down
+set -euo pipefail
+id=$(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == "omarock"
+  and .info.props["media.class"] == "Audio/Sink") | .id' | head -1)
+if [[ -z $id ]]; then
+  echo "omarock-volume: no omarock bus in PipeWire (systemctl --user status omarock-bus)" >&2
+  exit 1
+fi
+case "${1:-}" in
+  "") ;;
+  +[0-9]*) wpctl set-volume -l 1.0 "$id" "${1#+}%+" ;;
+  -[0-9]*) wpctl set-volume "$id" "${1#-}%-" ;;
+  [0-9]*) wpctl set-volume -l 1.0 "$id" "$(awk -v v="$1" 'BEGIN { printf "%.2f", (v > 100 ? 100 : v) / 100 }')" ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
+wpctl get-volume "$id" | awk '{ printf "%d%s\n", $2 * 100 + 0.5, ($3 == "[MUTED]" ? " (muted)" : "") }'

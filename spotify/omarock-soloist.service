@@ -1,0 +1,20 @@
+# Spotify's Soloist for omarock: a Spotify Connect speaker named after the machine (%H)
+# that plays into omarock's PipeWire bus (audio/), never straight to a sound
+# card. Its own volume stays at 100: the bus's volume is omarock's one volume.
+# Its WebSocket API (no authentication) listens on this machine only.
+# Installed by tools/install-spotify from a commit; the binary by
+# tools/update-soloist (Spotify's builds expire after 90 days: an expired one
+# exits with 10, which isn't restarted).
+[Unit]
+Description=Spotify's Soloist for omarock (a Connect speaker playing into the omarock bus)
+After=pipewire.service omarock-bus.service network-online.target
+Wants=omarock-bus.service
+
+[Service]
+ExecStart=/bin/sh -c 'exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key "$$(cat %h/.config/omarock/soloist-key)" --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 --pipewire-device omarock --initial-volume 100 --ws 127.0.0.1:8731'
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=10
+
+[Install]
+WantedBy=default.target

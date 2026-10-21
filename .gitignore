@@ -1,0 +1,14 @@
+tools/capture/out/
+node_modules/
+__pycache__/
+
+# bridge (macOS)
+.build/
+*.xcodeproj/
+DerivedData/
+.DS_Store
+bridge/app/build/
+bridge/app/Local.xcconfig
+
+# Personal notes for this checkout (Claude Code reads it; git never sees it)
+CLAUDE.local.md

@@ -1,0 +1,29 @@
+#!/bin/bash
+# update-soloist: fetch Spotify's latest Soloist build for x86_64 and install
+# it into ~/.local/lib/omarock-soloist, restarting omarock-soloist if it
+# changed. Builds expire 90 days after their build date (an expired one exits
+# with 10), so run this at least every couple of months. Spotify's terms: the
+# archive and binary aren't redistributed; this fetches it from Spotify.
+set -euo pipefail
+dest=$HOME/.local/lib/omarock-soloist
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+curl --fail --location -sS -o "$work/soloist.tar.gz" https://soloist-builds.spotifycdn.com/soloist_release_x86_64.tar.gz
+mkdir "$work/x"
+tar -xzf "$work/soloist.tar.gz" -C "$work/x"
+test -x "$work/x/soloist"
+new=$("$work/x/soloist" --version)
+old=$([[ -x $dest/soloist ]] && "$dest/soloist" --version || echo none)
+echo "installed: $old"
+echo "latest:    $new"
+if [[ $new == "$old" ]]; then
+  echo "up to date"
+  exit 0
+fi
+install -d "$dest"
+install -m 755 "$work/x/soloist" "$dest/soloist.new" && mv "$dest/soloist.new" "$dest/soloist"
+cp "$work/x/CHANGELOG.md" "$work/x/THIRD_PARTY_LICENSES.txt" "$dest/"
+if systemctl --user is-active --quiet omarock-soloist; then
+  systemctl --user restart omarock-soloist
+  echo "omarock-soloist restarted"
+fi

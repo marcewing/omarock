@@ -1,0 +1,191 @@
+#!/bin/bash
+# omarock-am: Apple Music from the command line, through the omarock bridge on
+# the Mac (bridge/API.md), the way mpc drives mpd. For you and for Claude.
+#
+#   omarock-am status                  what's playing, and the queue
+#   omarock-am toggle|pause|resume|next|prev
+#   omarock-am seek SECONDS
+#   omarock-am search WORDS…           library and catalog, with ids
+#   omarock-am album|artist|playlist SOURCE ID
+#   omarock-am playlists               your Apple Music playlists
+#   omarock-am genres                  the catalog's genres
+#   omarock-am play KIND SOURCE ID [start]   replace the queue (start: song index)
+#   omarock-am add KIND SOURCE ID      append to the queue
+#   omarock-am next-up KIND SOURCE ID  play after the current song
+#   omarock-am jump INDEX | remove INDEX
+#   omarock-am shuffle on|off | repeat off|one|all
+#   omarock-am playlist-add PLAYLIST_ID KIND SOURCE ID
+#   omarock-am playlist-new NAME [KIND SOURCE ID]
+#   omarock-am on | off                Apple Music mode in mpd (the stream), like omarock's m
+#   omarock-am health
+#   omarock-am authorize             ask for MusicKit access (a dialog on the Mac)
+#   omarock-am raw METHOD PATH [JSON]  any endpoint
+#
+# on, resume, toggle (to playing), next, prev, seek, play and jump take 2 s
+# more: then mpd, if it plays the stream, rejoins it at live, so it can't lag
+# behind the Mac.
+#
+# KIND is song, album, artist or playlist (or queue); SOURCE is catalog or
+# library. Settings: OMAROCK_BRIDGE and OMAROCK_STREAM, else "bridge" and
+# "stream" in ~/.config/omarock/apple.json (as omarock reads them); and the
+# token in ~/.config/omarock/bridge-token.
+set -euo pipefail
+
+CONFIG=$HOME/.config/omarock/apple.json
+config() { [[ -r $CONFIG ]] && jq -r --arg k "$1" '.[$k] // empty' "$CONFIG" 2>/dev/null || true; }
+BRIDGE=${OMAROCK_BRIDGE:-$(config bridge)}
+STREAM=${OMAROCK_STREAM:-$(config stream)}
+TOKEN_FILE=${OMAROCK_BRIDGE_TOKEN:-$HOME/.config/omarock/bridge-token}
+
+die() { echo "omarock-am: $*" >&2; exit 1; }
+
+call() {  # METHOD PATH [JSON]
+  [[ -n $BRIDGE && -n $STREAM ]] || die "no bridge set up: put \"bridge\" and \"stream\" in $CONFIG (bridge/README.md), or set OMAROCK_BRIDGE and OMAROCK_STREAM"
+  local token=""
+  [[ -r $TOKEN_FILE ]] && token=$(<"$TOKEN_FILE")
+  local args=(-sS --max-time 30 -X "$1" -H "Authorization: Bearer ${token//[$'\n\r ']/}" -w '\n%{http_code}')
+  [[ $# -ge 3 ]] && args+=(-H "Content-Type: application/json" --data "$3")
+  local out code
+  out=$(curl "${args[@]}" "$BRIDGE$2") || die "can't reach the bridge at $BRIDGE"
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  if [[ $code != 2* ]]; then
+    die "$(jq -r '.error // empty' <<<"$out" 2>/dev/null || true) (HTTP $code)"
+  fi
+  printf '%s\n' "$out"
+}
+
+item() {  # KIND SOURCE ID → one item as JSON
+  jq -cn --arg k "$1" --arg s "$2" --arg i "${3:-}" '{kind: $k, source: $s, id: $i}'
+}
+
+# A transport or status call, shown. (Assigning first lets a failed call
+# stop the script under set -e.)
+status_of() {
+  local data
+  data=$(call "$@")
+  show_status "$data"
+}
+
+show_status() {
+  jq -r '
+    def t: (. // 0 | floor) as $s | "\($s / 60 | floor):\($s % 60 | tostring | if length < 2 then "0" + . else . end)";
+    (if .song then "\(.state): \(.song.title) — \(.song.artist) (\(.song.album), \(.song.year // "?")) \(.position | t)/\(.song.duration | t)"
+     else "\(.state): nothing loaded" end),
+    "shuffle \(.shuffle) · repeat \(.repeat) · \(.queueLength) in the queue",
+    (.queue | to_entries[] | "\(if .key == $idx then ">" else " " end) \(.key): \(.value.title) — \(.value.artist)")
+  ' --argjson idx "$(jq '.queueIndex - .queueOffset' <<<"$1")" <<<"$1"
+}
+
+# mpd back on the live stream once a change has reached it: 2 s after the
+# bridge's reply (1.5 to 1.8 s, recorded on the Mac). mpd that joined the
+# stream while it was quiet, or fell behind in a network stall, plays late
+# until it reconnects (as omarock's AppleClient.catchUp). Only when the
+# stream is mpd's current song; mpd stopped there starts playing.
+rejoin() {
+  local pos file
+  pos=$(mpc status '%songpos%')
+  [[ $pos =~ ^[0-9]+$ ]] || return 0
+  file=$(mpc -f '%file%' playlist | sed -n "${pos}p")
+  [[ $file == "$STREAM" ]] || return 0
+  sleep 2
+  mpc -q play "$pos"
+}
+
+list_items() {  # items on stdin → "kind source id  title — artist"
+  jq -r '.[] | "\(.kind) \(.source) \(.id)\t\(.title // .name)\(if .artist then " — " + .artist else "" end)\(if .year then " (\(.year))" else "" end)"'
+}
+
+cmd=${1:-status}
+shift || true
+case $cmd in
+  status) status_of GET /v1/status ;;
+  health) call GET /v1/health | jq . ;;
+  authorize) call POST /v1/authorize '{}' | jq . ;;
+  pause) status_of POST /v1/pause '{}' ;;
+  resume|next) status_of POST "/v1/$cmd" '{}'; rejoin ;;
+  toggle)
+    data=$(call POST /v1/toggle '{}')
+    show_status "$data"
+    if [[ $(jq -r .state <<<"$data") == playing ]]; then rejoin; fi
+    ;;
+  prev|previous) status_of POST /v1/previous '{}'; rejoin ;;
+  seek) status_of POST /v1/seek "$(jq -cn --argjson p "${1:?seconds}" '{position: $p}')"; rejoin ;;
+  search)
+    [[ $# -gt 0 ]] || die "search what?"
+    q=$(jq -rn --arg q "$*" '$q | @uri')
+    call GET "/v1/search?scope=all&limit=10&q=$q" | jq -r '
+      to_entries[] | .key as $where | .value | to_entries[] | select(.value | length > 0) |
+      "== \($where) \(.key)", (.value[] | "  \(.kind) \(.source) \(.id)\t\(.title // .name)\(if .artist then " — " + .artist else "" end)\(if .year then " (\(.year))" else "" end)")'
+    ;;
+  album|artist|playlist)
+    [[ $# -eq 2 ]] || die "$cmd SOURCE ID"
+    data=$(call GET "/v1/${cmd}s/$1/$2")
+    case $cmd in
+      album) jq -r '.album | "\(.title) — \(.artist) (\(.year // "?"))\(if .recordLabel then ", " + .recordLabel else "" end)"' <<<"$data"
+             jq '.tracks' <<<"$data" | list_items ;;
+      artist) jq -r '.artist.name' <<<"$data"; echo "-- top songs"; jq '.topSongs // []' <<<"$data" | list_items
+              echo "-- albums"; jq '.albums // []' <<<"$data" | list_items ;;
+      playlist) jq -r '.playlist | "\(.name)\(if .curator then " — " + .curator else "" end)"' <<<"$data"
+                jq '.tracks' <<<"$data" | list_items ;;
+    esac
+    ;;
+  playlists) call GET /v1/library/playlists | list_items ;;
+  genres) call GET /v1/genres | jq -r '.[] | "\(.id)\t\(.name)"' ;;
+  play|add|next-up)
+    [[ $# -ge 3 ]] || die "$cmd KIND SOURCE ID"
+    mode=$([[ $cmd == play ]] && echo play || ([[ $cmd == add ]] && echo add || echo next))
+    body=$(jq -cn --argjson item "$(item "$1" "$2" "$3")" --arg mode "$mode" --argjson start "${4:-0}" \
+      '{items: [$item], mode: $mode, start: $start}')
+    status_of POST /v1/play "$body"
+    if [[ $mode == play ]]; then rejoin; fi
+    ;;
+  jump) status_of POST /v1/queue/jump "$(jq -cn --argjson i "${1:?index}" '{index: $i}')"; rejoin ;;
+  remove) status_of POST /v1/queue/remove "$(jq -cn --argjson i "${1:?index}" '{index: $i}')" ;;
+  shuffle) on=false; [[ ${1:-} == on ]] && on=true; status_of POST /v1/shuffle "{\"on\": $on}" ;;
+  repeat) status_of POST /v1/repeat "$(jq -cn --arg m "${1:?off|one|all}" '{mode: $m}')" ;;
+  playlist-add)
+    [[ $# -ge 4 ]] || die "playlist-add PLAYLIST_ID KIND SOURCE ID"
+    call POST "/v1/library/playlists/$1/tracks" "$(jq -cn --argjson item "$(item "$2" "$3" "$4")" '{items: [$item]}')" \
+      | jq -r '"\(.name): \(.trackCount) songs"'
+    ;;
+  playlist-new)
+    [[ $# -ge 1 ]] || die "playlist-new NAME [KIND SOURCE ID]"
+    items='[]'
+    [[ $# -ge 4 ]] && items="[$(item "$2" "$3" "$4")]"
+    call POST /v1/library/playlists "$(jq -cn --arg n "$1" --argjson items "$items" '{name: $n, items: $items}')" \
+      | jq -r '"\(.name) (\(.id)): \(.trackCount // 0) songs"'
+    ;;
+  on)
+    # Like omarock's m: the stream after the current song in mpd, playing.
+    call GET /v1/health >/dev/null
+    pos=$(mpc -f '%position%~%file%' playlist | awk -F'~' -v s="$STREAM" '$2 == s {print $1; exit}')
+    if [[ -z $pos ]]; then
+      mpc -q insert "$STREAM"
+      cur=$(mpc -f '%position%' current)
+      pos=$(( ${cur:-0} + 1 ))
+      [[ -z $cur ]] && pos=$(mpc -f '%position%' playlist | tail -1)
+    fi
+    # Live: repeat-one, so a dropped stream reconnects rather than falling
+    # through to the next song (as omarock does).
+    mpc -q repeat on
+    mpc -q single on
+    mpc -q play "$pos"
+    call POST /v1/resume '{}' >/dev/null
+    # The stream was quiet until the Mac resumed: rejoin it at live.
+    rejoin
+    echo "Apple Music: mpd is playing the stream (queue position $pos)"
+    ;;
+  off)
+    call POST /v1/pause '{}' >/dev/null || true
+    for pos in $(mpc -f '%position%~%file%' playlist | awk -F'~' -v s="$STREAM" '$2 == s {print $1}' | sort -rn); do
+      mpc -q del "$pos"
+    done
+    mpc -q single off
+    mpc -q repeat off
+    echo "Local music: the stream is out of mpd's queue"
+    ;;
+  raw) call "${1:?METHOD}" "${2:?PATH}" "${@:3}" | jq . ;;
+  -h|--help|help) sed -n '2,/^set -e/p' "$0" | sed '$d; s/^# \{0,1\}//' ;;
+  *) die "unknown command $cmd (try --help)" ;;
+esac

@@ -1,0 +1,132 @@
+From a1c0ea2b27bb5aee0d724d22b989da10ddc244a3 Mon Sep 17 00:00:00 2001
+From: Marc Ewing <marc@riotracing.com>
+Date: Tue, 20 Oct 2026 17:56:01 -0400
+Subject: [PATCH 1/2] Keep a stream's album art instead of loading it on every
+ event
+
+A stream has no duration, so CurrentSong builds the song again on every
+player event, as its title can change while its path stays the same. Each
+time, it loaded the album art again: readpicture, then albumart. For a
+stream, readpicture makes MPD open the stream and probe it, and MPD
+answers no other client meanwhile. For an Ogg FLAC stream from Icecast,
+MPD's ffmpeg plugin probed it for 6 to 7 seconds. So every play, pause,
+stop and restart of a stream held MPD for that long.
+
+Read a stream's tags again, as before, but keep the album art loaded for
+it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016rSr6RyB719BULhakT1QHf
+---
+ mpd/client.go | 15 +++++++++++----
+ mpd/song.go   | 11 +++++++++++
+ 2 files changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/mpd/client.go b/mpd/client.go
+index 2b42960..88fcc4f 100644
+--- a/mpd/client.go
++++ b/mpd/client.go
+@@ -73,11 +73,18 @@ func (c *Client) CurrentSong() (Song, error) {
+ 
+ 	// Nasty hack: if duration is 0: we have an audio stream. The song can change,
+ 	// but its path won't. So we update anyways because we cannot be sure of the change!
+-	if c.lastSong != nil && c.lastSong.Path() == a["file"] && c.lastSong.Duration > 0 {
+-		// Heuristically, we have... the same song...
+-		return *c.lastSong, nil
++	var prev *Song
++	if c.lastSong != nil && c.lastSong.Path() == a["file"] {
++		if c.lastSong.Duration > 0 {
++			// Heuristically, we have... the same song...
++			return *c.lastSong, nil
++		}
++		// The same stream: read its tags again, but keep its album art. Loading
++		// it makes MPD open the stream and probe it, which can hold every MPD
++		// client for seconds, and this runs on every play, pause and stop.
++		prev = c.lastSong
+ 	}
+-	song, err := c.SongFromAttrs(a)
++	song, err := c.songFromAttrs(a, prev)
+ 	if err != nil {
+ 		return Song{}, err
+ 	}
+diff --git a/mpd/song.go b/mpd/song.go
+index ed04313..185ee71 100644
+--- a/mpd/song.go
++++ b/mpd/song.go
+@@ -53,6 +53,12 @@ func (s *Song) SameAs(other *Song) bool {
+ 
+ // SongFromAttrs returns a song from the attributes map.
+ func (c *Client) SongFromAttrs(attr mpd.Attrs) (s Song, err error) {
++	return c.songFromAttrs(attr, nil)
++}
++
++// songFromAttrs is SongFromAttrs. With prev, the song it replaces when that
++// was the same stream, the album art isn't loaded again: it is kept.
++func (c *Client) songFromAttrs(attr mpd.Attrs, prev *Song) (s Song, err error) {
+ 	if s.ID, err = strconv.Atoi(attr["Id"]); err != nil {
+ 		s.ID = -1
+ 		return s, nil
+@@ -65,6 +71,11 @@ func (c *Client) SongFromAttrs(attr mpd.Attrs) (s Song, err error) {
+ 	albumArtLock.Lock()
+ 	defer albumArtLock.Unlock()
+ 
++	if prev != nil {
++		s.albumArt = prev.albumArt
++		return
++	}
++
+ 	if albumArtURI != "" {
+ 		// delete the old album art file
+ 		os.Remove(albumArtURI)
+-- 
+2.55.0
+
+
+From b4918026007d820a048e7ca306e0e9f3849dff5d Mon Sep 17 00:00:00 2001
+From: Marc Ewing <marc@riotracing.com>
+Date: Tue, 20 Oct 2026 17:56:17 -0400
+Subject: [PATCH 2/2] Don't ask MPD for a remote stream's album art
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+For a URI such as http://…, readpicture and albumart make MPD open the
+stream and probe it, while it answers no other client. For an Ogg FLAC
+stream from Icecast, MPD's ffmpeg plugin probed it for 6 to 7 seconds,
+and found nothing: MPD has no art for streams. Skip the lookup for
+remote URIs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016rSr6RyB719BULhakT1QHf
+---
+ mpd/song.go | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/mpd/song.go b/mpd/song.go
+index 185ee71..ce6e214 100644
+--- a/mpd/song.go
++++ b/mpd/song.go
+@@ -6,6 +6,7 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"strconv"
++	"strings"
+ 	"sync"
+ 
+ 	"github.com/fhs/gompd/v2/mpd"
+@@ -79,6 +80,12 @@ func (c *Client) songFromAttrs(attr mpd.Attrs, prev *Song) (s Song, err error) {
+ 	if albumArtURI != "" {
+ 		// delete the old album art file
+ 		os.Remove(albumArtURI)
++		albumArtURI = ""
++	}
++	// A remote stream (http://…): MPD has no art for it, and to look, it opens
++	// the stream and probes it while every other client waits.
++	if strings.Contains(s.Path(), "://") {
++		return
+ 	}
+ 	albumArtURI = newTempFile()
+ 	if albumArtURI != "" {
+-- 
+2.55.0
+

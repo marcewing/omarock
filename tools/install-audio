@@ -1,0 +1,71 @@
+#!/bin/bash
+# install-audio: install omarock's audio bus from a commit (default HEAD) as
+# copies, never running from the working tree: the bus's pin is the
+# radio-safety guard, and a checkout or a half-done edit mustn't change it on
+# the next restart. See audio/README.md.
+#
+#   tools/install-audio [--output NAME] [COMMIT]          install, and reload systemd
+#   tools/install-audio --start [--output NAME] [COMMIT]  ... then enable and (re)start the bus and guard
+#
+# NAME is the output the bus plays into, and only into: a PipeWire sink's
+# node name (`pactl list sinks short`, second column). It's kept in
+# ~/.config/omarock/audio-output, so later installs need no --output.
+#
+# Into ~/.local/share/omarock/audio/: omarock-bus.conf, omarock-guard.py and
+# INSTALLED (the commit). ~/.config/pipewire/client.conf.d/50-omarock-players.conf
+# and the two units in ~/.config/systemd/user/.
+set -euo pipefail
+start=false
+output=""
+while [[ ${1:-} == --* ]]; do
+  case $1 in
+    --start) start=true; shift ;;
+    --output) output=${2:?--output needs a sink name}; shift 2 ;;
+    *) echo "install-audio: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+saved=$HOME/.config/omarock/audio-output
+if [[ -z $output && -s $saved ]]; then output=$(<"$saved"); fi
+if [[ -z $output ]]; then
+  echo "install-audio: which output should omarock play into? Run again with --output NAME, one of:" >&2
+  pactl list sinks short 2>/dev/null | awk '{print "  " $2}' >&2
+  exit 2
+fi
+if [[ ! $output =~ ^[A-Za-z0-9._:-]+$ ]]; then
+  echo "install-audio: \"$output\" doesn't look like a sink's node name" >&2
+  exit 2
+fi
+if ! pactl list sinks short 2>/dev/null | awk '{print $2}' | grep -qx -- "$output"; then
+  echo "note: $output isn't connected now; the bus will wait for it, silent" >&2
+fi
+install -d "$(dirname "$saved")"
+echo "$output" > "$saved"
+repo=$(cd "$(dirname "$0")/.." && pwd)
+commit=$(git -C "$repo" rev-parse --verify "${1:-HEAD}^{commit}")
+if ! git -C "$repo" diff --quiet "$commit" -- audio/; then
+  echo "note: audio/ in the working tree differs from ${commit:0:7}; installing the commit's version" >&2
+fi
+dest=$HOME/.local/share/omarock/audio
+units=$HOME/.config/systemd/user
+client=$HOME/.config/pipewire/client.conf.d
+install -d "$dest" "$units" "$client"
+show() { git -C "$repo" show "$commit:audio/$1"; }
+show omarock-bus.conf | sed "s|@OUTPUT@|$output|" > "$dest/omarock-bus.conf.new"
+if grep -q "@OUTPUT@" "$dest/omarock-bus.conf.new" || ! grep -q "target.object = \"$output\"" "$dest/omarock-bus.conf.new"; then
+  echo "install-audio: couldn't pin the bus to $output; nothing installed" >&2
+  rm -f "$dest/omarock-bus.conf.new"
+  exit 1
+fi
+mv "$dest/omarock-bus.conf.new" "$dest/omarock-bus.conf"
+show omarock-guard.py > "$dest/omarock-guard.py.new" && chmod 755 "$dest/omarock-guard.py.new" && mv "$dest/omarock-guard.py.new" "$dest/omarock-guard.py"
+show omarock-players.conf > "$client/50-omarock-players.conf.new" && mv "$client/50-omarock-players.conf.new" "$client/50-omarock-players.conf"
+show omarock-bus.service > "$units/omarock-bus.service"
+show omarock-guard.service > "$units/omarock-guard.service"
+echo "$commit" > "$dest/INSTALLED"
+systemctl --user daemon-reload
+echo "omarock audio bus installed from ${commit:0:7}, pinned to $output"
+if $start; then
+  systemctl --user enable omarock-bus omarock-guard
+  systemctl --user restart omarock-bus omarock-guard
+  systemctl --user --no-pager --lines=0 status omarock-bus omarock-guard | grep -E "^●|Active:"
+fi

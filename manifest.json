@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "id": "marc.omarock",
+  "name": "omarock: mpd music player",
+  "version": "0.5.1",
+  "author": "Marc Ewing",
+  "description": "A music player for mpd in the Omarchy bar. The bar shows the song's cover, artist and title; a click opens the panel and a middle click plays or pauses (with nothing queued, a song at random). Its panel has transport, volume, the queue, an accent-insensitive search of artists, albums, songs, genres and playlists, mpd stored playlists you build as you browse, and an info card (i) with everything known about a song, album, station or channel; Expand gives a bigger view, and TUI opens a terminal player. With the omarock bridge on a Mac it can switch to Apple Music (your library and the full catalog), with the omarock-sxm service to SiriusXM's live channels, to internet radio (FM and other stations, from Radio Browser), all heard through mpd, and with omarock-spotify to Spotify (Spotify's Soloist, playing into omarock's PipeWire bus). All state stays in mpd or the services, so mpc, omarock-am, omarock-sp and other clients stay in sync.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "omarock",
+    "description": "Cover, artist and song, and a panel with the queue, search, playlists and sources for mpd.",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "left",
+    "defaults": {
+      "radio": true,
+      "spotify": false,
+      "appleMusic": false,
+      "siriusXM": false,
+      "socket": "",
+      "tuiCommand": "ncmpcpp",
+      "closeOnLeave": true,
+      "maxLabelWidth": 300,
+      "appleBridge": "",
+      "appleStream": "",
+      "appleTokenFile": "",
+      "appleIdleStop": 60,
+      "sxmService": "",
+      "radioBrowser": "",
+      "spotifyService": "",
+      "appleRejoin": true
+    },
+    "schema": [
+      {
+        "key": "radio",
+        "type": "boolean",
+        "label": "Internet radio",
+        "defaultValue": true,
+        "description": "Stations from Radio Browser, played by mpd. Nothing to set up."
+      },
+      {
+        "key": "spotify",
+        "type": "boolean",
+        "label": "Spotify",
+        "defaultValue": false,
+        "description": "Needs Spotify Premium and the omarock-spotify service (see spotify/README.md)."
+      },
+      {
+        "key": "appleMusic",
+        "type": "boolean",
+        "label": "Apple Music",
+        "defaultValue": false,
+        "description": "Needs a Mac running the omarock bridge, and its addresses below or in ~/.config/omarock/apple.json (see bridge/README.md)."
+      },
+      {
+        "key": "siriusXM",
+        "type": "boolean",
+        "label": "SiriusXM",
+        "defaultValue": false,
+        "description": "Needs a SiriusXM subscription and the omarock-sxm service (see sxm/README.md). Unofficial."
+      },
+      {
+        "key": "socket",
+        "type": "string",
+        "label": "mpd socket (empty: $XDG_RUNTIME_DIR/mpd/socket)"
+      },
+      {
+        "key": "tuiCommand",
+        "type": "string",
+        "label": "Terminal player"
+      },
+      {
+        "key": "closeOnLeave",
+        "type": "boolean",
+        "label": "Close the panel when the pointer leaves it",
+        "defaultValue": true
+      },
+      {
+        "key": "maxLabelWidth",
+        "type": "integer",
+        "label": "Widest the song text gets on the bar (px)",
+        "min": 80,
+        "max": 600,
+        "step": 10,
+        "defaultValue": 300
+      },
+      {
+        "key": "appleBridge",
+        "type": "string",
+        "label": "Apple Music bridge URL (empty: no Apple Music)"
+      },
+      {
+        "key": "appleStream",
+        "type": "string",
+        "label": "Apple Music stream URL, played by mpd"
+      },
+      {
+        "key": "appleTokenFile",
+        "type": "string",
+        "label": "Bridge token file (empty: ~/.config/omarock/bridge-token)"
+      },
+      {
+        "key": "appleIdleStop",
+        "type": "integer",
+        "label": "Apple Music: stop mpd once the Mac has been paused this long (s; 0: never)",
+        "min": 0,
+        "max": 3600,
+        "step": 10,
+        "defaultValue": 60
+      },
+      {
+        "key": "sxmService",
+        "type": "string",
+        "label": "SiriusXM service (empty: http://127.0.0.1:8720)"
+      },
+      {
+        "key": "radioBrowser",
+        "type": "string",
+        "label": "Radio Browser server (empty: pick one)"
+      },
+      {
+        "key": "spotifyService",
+        "type": "string",
+        "label": "omarock-spotify URL (empty: http://127.0.0.1:8730)"
+      },
+      {
+        "key": "appleRejoin",
+        "type": "boolean",
+        "label": "Apple Music: reconnect mpd to the stream after each change",
+        "defaultValue": true,
+        "description": "Needed with a stock libFLAC, which falls behind on the Mac's quiet stream; it costs a short stutter 2 s into each song. Turn it off once mpd uses the patched libFLAC (patches/README.md)."
+      }
+    ]
+  }
+}

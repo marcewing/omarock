@@ -1,0 +1,47 @@
+#!/bin/bash
+# install-sxm: install omarock-sxm, omarock's SiriusXM service, from a commit
+# (default HEAD) as copies, never from the working tree, as install-spotify
+# does. See sxm/README.md.
+#
+#   tools/install-sxm [COMMIT]          install, and reload systemd
+#   tools/install-sxm --start [COMMIT]  ... then enable and (re)start it
+#
+# It makes a Python venv with aiosxm in ~/.local/share/omarock/sxm-venv (once),
+# puts the service in ~/.local/share/omarock/sxm/ and its unit in
+# ~/.config/systemd/user/, and creates ~/.config/omarock/siriusxm.json (mode
+# 600) for the account if it isn't there. It never prints the account.
+set -euo pipefail
+start=false
+[[ ${1:-} == --start ]] && { start=true; shift; }
+repo=$(cd "$(dirname "$0")/.." && pwd)
+commit=$(git -C "$repo" rev-parse --verify "${1:-HEAD}^{commit}")
+if ! git -C "$repo" diff --quiet "$commit" -- sxm/; then
+  echo "note: sxm/ in the working tree differs from ${commit:0:7}; installing the commit's version" >&2
+fi
+share=$HOME/.local/share/omarock
+venv=$share/sxm-venv
+dest=$share/sxm
+units=$HOME/.config/systemd/user
+config=$HOME/.config/omarock/siriusxm.json
+if [[ ! -x $venv/bin/python ]]; then
+  echo "making the venv in $venv"
+  python3 -m venv "$venv"
+fi
+"$venv/bin/pip" install --quiet --disable-pip-version-check --upgrade "aiosxm==0.3.1" cryptography
+install -d "$dest" "$units" "$(dirname "$config")"
+git -C "$repo" show "$commit:sxm/omarock-sxm.py" > "$dest/omarock-sxm.py.new" && mv "$dest/omarock-sxm.py.new" "$dest/omarock-sxm.py"
+git -C "$repo" show "$commit:sxm/omarock-sxm.service" > "$units/omarock-sxm.service"
+echo "$commit" > "$dest/INSTALLED"
+if [[ ! -e $config ]]; then
+  install -m 600 /dev/null "$config"
+  printf '{ "username": "you@example.com", "password": "" }\n' > "$config"
+  echo "made $config: put your SiriusXM login in it (it stays readable only by you)"
+fi
+chmod 600 "$config"
+systemctl --user daemon-reload
+echo "omarock-sxm installed from ${commit:0:7}"
+if $start; then
+  systemctl --user enable omarock-sxm
+  systemctl --user restart omarock-sxm
+  systemctl --user --no-pager --lines=0 status omarock-sxm | grep -E "^●|Active:"
+fi

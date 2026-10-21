@@ -1,0 +1,16 @@
+# omarock-guard (audio/omarock-guard.py): cuts any link that would carry
+# omarock's sound off its bus, such as into a radio. Installed by
+# tools/install-audio, from a commit, into ~/.local/share/omarock/audio/
+# (never the working tree).
+[Unit]
+Description=omarock-guard: omarock's sound stays on its bus
+After=pipewire.service pipewire-session-manager.service
+BindsTo=pipewire.service
+
+[Service]
+ExecStart=/usr/bin/python3 -I %h/.local/share/omarock/audio/omarock-guard.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=pipewire.service

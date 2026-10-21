@@ -1,0 +1,17 @@
+# omarock-sxm: SiriusXM's live channels as streams for mpd (sxm/README.md).
+# Installed by tools/install-sxm from a commit, into ~/.local/share/omarock/sxm/.
+[Unit]
+Description=omarock SiriusXM: live channels as streams for mpd (127.0.0.1:8720)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/share/omarock/sxm-venv/bin/python %h/.local/share/omarock/sxm/omarock-sxm.py
+Restart=on-failure
+RestartSec=5
+# It only serves streams; mpd plays them. Keep it to itself.
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

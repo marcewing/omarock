@@ -1,0 +1,7 @@
+// The bridge's build settings. Your own values go in Local.xcconfig next to this file
+// (not in git), which build.sh writes the first time it runs:
+//   DEVELOPMENT_TEAM = ABCDE12345        // your Apple Developer Team ID
+//   OMAROCK_BUNDLE_ID = com.example.omarock.bridge   // your App ID, with MusicKit
+OMAROCK_BUNDLE_ID = org.omarock.bridge
+DEVELOPMENT_TEAM =
+#include? "Local.xcconfig"

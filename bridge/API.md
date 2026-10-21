@@ -1,0 +1,217 @@
+# omarock bridge API (v1)
+
+The bridge is a small macOS app on a Mac with Apple Music. It uses MusicKit to
+search, browse and play Apple Music, and answers omarock (and its command-line
+tool, `tools/omarock-am`) over Tailscale. Its sound reaches the Linux machine
+only as an Ogg FLAC stream that **mpd** plays, through mpd's own output. Nothing
+here sends audio to the Linux machine any other way. Setting it up:
+[README.md](README.md).
+
+The examples use `100.64.0.10` for the Mac's Tailscale address.
+
+## Transport
+
+- HTTP/1.1, JSON bodies, UTF-8. Port **8710**. The bridge listens on the
+  Mac's Tailscale address only (`100.64.0.10` here), never on the LAN.
+- Every request carries `Authorization: Bearer <token>`. The token is a random
+  string kept in `~/Library/Application Support/omarock-bridge/token` on the Mac
+  and in `~/.config/omarock/bridge-token` on the Linux machine. A wrong or missing
+  token gets 401.
+- Errors: a non-2xx status and `{"error": "what went wrong, in a sentence"}`.
+  Use 400 for bad input, 404 for an unknown id, 409 if MusicKit isn't
+  authorized or there's no subscription, and 502 if Apple's API failed.
+- The stream is separate: Icecast on the Mac at
+  `http://100.64.0.10:8000/omarock.ogg`, Ogg FLAC, 16-bit stereo at the
+  Mac's mixing rate (48 kHz). The audio is captured with a Core Audio process
+  tap on the bridge's own playback, muted on the Mac. The Mac can be someone's
+  everyday machine, so its default output and other apps' sound are never touched.
+
+## Objects
+
+The bridge normalizes Apple's JSON, so omarock never parses Apple's responses.
+Fields Apple doesn't give are omitted, not null. `source` is `"catalog"` or
+`"library"`; an id is only meaningful together with its source.
+
+```jsonc
+// Artwork: url is Apple's template; omarock fills in {w} and {h}.
+{ "url": "https://is1-ssl.mzstatic.com/.../{w}x{h}bb.jpg", "width": 3000, "height": 3000,
+  "bgColor": "1a1a1a", "textColor": "f2f2f2" }
+
+// Song
+{ "kind": "song", "id": "1440000001", "source": "catalog", "catalogId": "1440000001",
+  "title": "Diane", "artist": "Hüsker Dü", "album": "Metal Circus", "albumId": "1440000000",
+  "artistId": "14000000", "genres": ["Punk", "Music"], "year": 1983, "releaseDate": "1983-10-01",
+  "duration": 248.5, "trackNumber": 5, "discNumber": 1, "composer": "Grant Hart",
+  "explicit": false, "audioTraits": ["lossless", "lossy-stereo"], "isrc": "USXX18300001",
+  "artwork": { … }, "playable": true }
+
+// Album
+{ "kind": "album", "id": "…", "source": "catalog", "catalogId": "…", "title": "Zen Arcade",
+  "artist": "Hüsker Dü", "artistId": "…", "genres": ["Punk"], "year": 1984,
+  "releaseDate": "1984-07-01", "trackCount": 23, "recordLabel": "SST Records",
+  "copyright": "℗ 1984 SST Records", "editorialNotes": "short blurb, plain text",
+  "isCompilation": false, "isSingle": false, "explicit": false, "audioTraits": ["lossless"],
+  "artwork": { … } }
+
+// Artist
+{ "kind": "artist", "id": "…", "source": "catalog", "name": "Hüsker Dü", "genres": ["Punk"],
+  "editorialNotes": "…", "artwork": { … } }
+
+// Playlist
+{ "kind": "playlist", "id": "p.…", "source": "library", "name": "PunkRock", "curator": "You",
+  "description": "…", "trackCount": 42, "lastModified": "2026-10-19T15:02:11Z",
+  "canEdit": true, "artwork": { … } }
+```
+
+`catalogId` is set on library items that are also in the catalog, so omarock
+can open the catalog album or artist from a library song. On macOS, library ids
+are iTunes Library persistent ids, signed 64-bit decimals such as
+"1234567890123456789" or "-1234567890123456789"; treat every id as an opaque
+string, valid only together with its source.
+
+Artwork that only MusicKit can open (library-only items, such as songs
+uploaded from iTunes rips, have `musicKit://` artwork) is served by the
+bridge itself. Its `url` is then a bridge URL such as
+`http://100.64.0.10:8710/v1/artwork/library/song/i.AbC?w={w}&h={h}&k=3f9a…`,
+where `k` is the first 16 hex digits of HMAC-SHA256(token, "library/song/i.AbC").
+The key makes the URL its own authorization, since an image can't send the
+bearer header. omarock treats it like any other artwork template.
+
+## Endpoints
+
+All paths start with `/v1`.
+
+| Method and path | What it does |
+| --- | --- |
+| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`). No auth needed, and it reveals nothing private. |
+| `POST /authorize` | Asks for MusicKit access (`MusicAuthorization.request()`), which puts a dialog on the Mac's screen; returns health. For someone at the Mac (the bridge also asks at its first launch). |
+| `GET /status?since=SEQ` | Now playing. Returns at once if the state's `seq` differs from `SEQ` (or there is no `since`); otherwise waits up to 25 s for a change, then returns the same state (long poll). |
+| `POST /play` | `{ "items": [ {kind, id, source}, … ], "start": 0, "mode": "play" }`. `mode` is `play` (replace the queue and start at song `start`), `next` (insert after the current song) or `add` (append). Items are expanded to songs, in order (see **Items** below). `start` is the index into the tracks as the detail route lists them (`/albums|/playlists/{source}/{id}`), counted before unplayable songs are skipped; if that song is unplayable, play starts at the next playable one. A single song that can't be played answers 409 with the reason. Returns the new status. |
+| `POST /pause`, `/resume`, `/toggle`, `/next`, `/previous` | Transport; each returns the new status. With nothing loaded, `resume` and `toggle` do nothing and still return 200. |
+| `POST /seek` | `{ "position": 73.5 }` (seconds). |
+| `POST /queue/jump` | `{ "index": 4 }`: play that queue entry. |
+| `POST /queue/remove` | `{ "index": 4 }`. |
+| `POST /shuffle`, `/repeat` | `{ "on": true }`; `{ "mode": "off" \| "one" \| "all" }`. |
+| `GET /search?q=husker&scope=all&limit=8` | `{ "library": { "songs": […], "albums": […], "artists": […], "playlists": […] }, "catalog": { …same… } }`. `scope` is `all`, `library` or `catalog`. Case- and accent-insensitive as far as Apple allows. If the catalog half fails, the library half still comes back, with `"catalogError": "…"`. |
+| `GET /albums/{source}/{id}` | `{ "album": Album, "tracks": [Song] }`, in disc and track order. |
+| `GET /artists/{source}/{id}` | `{ "artist": Artist, "albums": [Album], "topSongs": [Song] }`. Albums by year; for the catalog, also `"appearsOn": [Album]` where Apple gives it. |
+| `GET /playlists/{source}/{id}` | `{ "playlist": Playlist, "tracks": [Song] }`. |
+| `GET /library/playlists` | `[Playlist]`, by name. |
+| `GET /library/albums?offset=0&limit=100` | `{ "items": [Album], "total": 812 }`, by artist then year. |
+| `GET /library/artists?offset=0&limit=100` | `{ "items": [Artist], "total": 403 }`, by name. |
+| `GET /library/recent?limit=25` | Recently added albums and playlists. |
+| `GET /genres` | The catalog's top-level genres: `[{ "id": "20", "name": "Alternative" }]`. |
+| `GET /genres/{id}?limit=25` | `{ "genre": …, "albums": [Album], "songs": [Song] }` (Apple's charts for the genre). |
+| `GET /artwork/{source}/{kind}/{id}?w=&h=&k=` | `image/jpeg` for artwork only MusicKit can open (see Objects). Authorized by `k`, not the bearer token. |
+| `POST /library/playlists` | `{ "name": "…", "items": [ {kind, id, source} ] }` → the new Playlist. (MusicKit can't create or edit playlists on macOS, so the bridge uses Apple Music's REST API through MusicDataRequest.) |
+| `POST /library/playlists/{id}/tracks` | `{ "items": [ … ] }`: append, the items expanded to songs. Returns the Playlist. Apple's API can't remove tracks or delete playlists; those come later through AppleScript on the Mac. |
+| `GET /info/{source}/{kind}/{id}` | Everything known about one song or album (`kind` is `song` or `album`), for omarock's info card (`i`). See **Info** below. |
+
+### Info
+
+What omarock shows when you press `i` on a song or album. At the top, it shows
+whether the item is in your library. Fields that aren't known are omitted, as elsewhere.
+
+```jsonc
+{ "item": Song,                     // or Album: the object the detail routes give
+  "inLibrary": true,                // false: not in the library; omitted: couldn't tell
+  "library": {                      // the library copy (ITLib), when inLibrary
+    "id": "1234567890123456789",
+    "added": "2019-04-02T17:03:11Z", "modified": "2024-01-09T08:12:40Z",
+    "playCount": 12, "skipCount": 1, "lastPlayed": "2026-10-18T21:40:02Z",
+    "rating": 80,                   // 0-100, only when you set it (not computed)
+    "loved": true,                  // omitted when unknown
+    "fileKind": "Apple Music AAC audio file",  // ITLib's kind: Matched, Purchased, MPEG, …
+    "bitrate": 256, "sampleRate": 44100, "fileSize": 7340032,
+    "cloud": true, "purchased": false, "drm": true,
+    "comments": "…", "grouping": "…", "bpm": 120 },
+  "catalog": { "id": "1440000001", "url": "https://music.apple.com/us/album/…?i=1440000001" }
+}                                   // catalog: when the item is also in the catalog
+```
+
+For an album, `library` has `id`, `added` (the newest song added), `trackCount`
+(the songs in the library), `playCount` (summed over them) and `lastPlayed` (the latest).
+The catalog album's own `trackCount` stays in `item`.
+
+How the bridge fills it in:
+- **`inLibrary`** for a catalog item is true if either check finds it:
+  - Apple's `relate=library`.
+  - The ITLib index: the same title and artist, ignoring case, accents, guest credits
+    and a trailing "(Remastered)", "[Deluxe Edition]" or "- 2009 Remaster", and within
+    3 s of the length (6 s when only the bare titles match). Only songs on the
+    library's albums count.
+  Apple's relation alone misses songs ripped from CD and uploaded. Where only
+  Apple relates it, the bridge follows Apple's library song to the ITLib copy. A
+  catalog album Apple relates but the index can't match gives `inLibrary` true and no
+  `library` object.
+- **`loved`**: ITLib has no flag, so it's membership of the Music app's Favorite Songs
+  playlist (once Loved Songs): true or false whenever that playlist exists.
+- **`purchased`**: ITLib's isPurchased can read false for "Purchased AAC audio file"
+  songs, so a kind starting "Purchased" counts too.
+- `rating` only when you set it; `bpm`, `comments`, `grouping`, `bitrate`, `sampleRate`
+  and `fileSize` only when non-empty or non-zero.
+- **`catalog.id`** is Apple's current canonical id, from the link (old playParams ids are
+  redirected). For a library song it comes through the catalog song MusicKit plays it
+  as, else a catalog search. For a library album it comes through its first tracks, so it
+  can be another edition.
+- Catalog items carry `albumId` and `artistId` too.
+- Errors: 400 "kind is song or album.", 404 "No library song with id …" (or catalog).
+  Answers take 0.1 to 0.7 s.
+
+omarock asks this route first. If the route answers "No such endpoint." (an older
+bridge), omarock searches the library by title and matches on artist itself.
+
+### Items
+
+Wherever a request takes `items`, each is `{ kind, id, source }` and the
+bridge expands it to songs: a song is itself; an album or playlist is its
+tracks in order; an artist is their top songs; `{ "kind": "queue" }` is the
+whole current queue (for "Save the queue as a playlist"). Unplayable songs are
+skipped, and later detail responses mark them `"playable": false`.
+
+### Status
+
+```jsonc
+{ "seq": 118, "state": "playing",          // playing | paused | stopped
+  "song": Song,                            // absent when nothing is loaded
+  "position": 73.2, "positionAt": 1792419810.25,  // seconds; Unix time it was read
+  "queue": [Song, …], "queueIndex": 3,     // at most 200 entries around the current one
+  "queueOffset": 0,                        // index of queue[0] in the whole queue;
+                                           // queueIndex is in the whole queue too, so the
+                                           // current song is queue[queueIndex - queueOffset]
+  "queueLength": 23, "shuffle": false, "repeat": "off" }
+```
+
+`seq` goes up on every change omarock would show: the song, the state, the
+queue, shuffle or repeat. It does not change for position alone; omarock works
+the position out from `position`, `positionAt` and `state`.
+
+## Behaviour
+
+- **Nobody listening, nothing playing.** When the Icecast mount has had no
+  listener for 30 seconds while the bridge is playing, the bridge pauses. So
+  if mpd stops, or omarock isn't running, the Mac doesn't stream Apple Music
+  for nobody. (The mount is hidden, so `/status-json.xsl` leaves it out; the
+  bridge reads its `<listeners>` from `/admin/stats` with the admin password.)
+- The Mac stays awake while playing (an IOPMAssertion), and only then.
+- Only the bridge's own playback is captured and muted on the Mac; the Mac's other
+  apps and the Mac's default output are never touched.
+
+## How omarock uses it
+
+- **The mode lives in mpd.** Apple Music mode means mpd is playing the bridge
+  stream (a queue entry whose file is the stream URL), so `mpc` shows the mode
+  too. Switching to Apple Music adds the stream after the current song and
+  plays it. Switching back deletes that entry, which leaves the local queue as
+  it was.
+- In Apple Music mode, omarock's transport, search, browse, queue and bar go
+  to the bridge. Volume stays mpd's.
+- mpd paused on the stream (the media keys, `mpc pause`) pauses the bridge and
+  stops mpd, so playing again reconnects to the live stream instead of resuming
+  behind it; mpd playing again resumes the bridge.
+- The bridge paused or stopped for a minute (omarock's `appleIdleStop`) stops mpd
+  too, so the mount has no listener. That frees the bridge for updates, and nothing
+  trickles over Tailscale. Playing again reconnects.
+- The command-line tool on the Linux machine, `tools/omarock-am`, wraps these
+  endpoints (curl and jq), so Apple Music can be driven from a terminal the way mpd
+  is with mpc.

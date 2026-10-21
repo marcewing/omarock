@@ -1,0 +1,51 @@
+# omarock, for Claude Code
+
+omarock is a music player for the Omarchy bar: a Quickshell plugin (the QML and
+JS at the top level) that is a client for mpd. mpd holds all the state (the
+queue, playlists, playback), so `mpc`, the media keys and omarock always agree.
+Optional services add more sources: `spotify/` (Spotify through Spotify's
+Soloist player), `sxm/` (SiriusXM), and `bridge/` (Apple Music, through an app
+on a Mac). `audio/` is an optional PipeWire bus that gives omarock one volume
+and pins its sound to one output.
+
+## Helping someone set it up
+
+Use the `omarock-setup` skill (`.claude/skills/omarock-setup/`). It checks what's
+there, then walks through mpd, the plugin, and each optional source, one at a
+time. Each source has its own guide: `spotify/README.md`, `sxm/README.md`,
+`bridge/README.md`, `audio/README.md`.
+
+Rules while setting up or fixing someone's system:
+- **Never print secrets:** anything in `~/.config/omarock/` that holds a key, a
+  token or a password (`soloist-key`, `spotify-token.json`, `siriusxm.json`,
+  `bridge-token`). Check that they exist and their permissions, not their contents.
+- **Ask before changing system config:** mpd.conf, `~/.config/omarchy/shell.json`,
+  PipeWire or WirePlumber config, systemd units. Back a file up before editing it,
+  and say what changed.
+- **The audio bus's output is a safety choice.** Some machines have outputs that
+  must never carry music, a radio transmitter's audio interface, say. The bus
+  plays only into the output `tools/install-audio --output` pinned. Never pick it,
+  or change it, without the user.
+- **Starting music is the user's call.** Don't play, skip or switch sources on
+  someone's system just to test; ask first.
+- **Services are installed from a commit** (`tools/install-audio`,
+  `tools/install-spotify`), never run from the working tree.
+
+## Working on omarock
+
+`DEVELOPING.md` has the layout, the tests and how omarock works inside. In short:
+- `node --test tests/*.test.js`: the pure helpers (Mpd.js, Apple.js, Info.js and others).
+- `tools/capture/capture.py [out-dir]`: the real panel, offscreen, against fake
+  mpd, fake services and a fake Radio Browser; it saves screenshots and fails on any
+  QML warning. `--only NAME,…` runs some scenarios.
+- `audio/test-bus.py`: the audio bus on a throwaway PipeWire.
+- `spotify/test_service.py`, and `dbus-run-session -- python3 -I spotify/test_mpris.py`.
+
+Tests never touch the user's real mpd, PipeWire or services. Keep it that way:
+fakes, a scratch mpd with mpd's `null` output, or a private PipeWire.
+
+Before installing a change to the live bar, run `omarchy plugin validate .`. Then
+`omarchy plugin update marc.omarock`, and `omarchy restart shell` to load it: the
+shell's own plugin reload keeps running the old code from Qt's cache. Watch
+`journalctl --user | grep omarchy-shell` afterwards; the panel logs
+`omarock <version> loaded`.

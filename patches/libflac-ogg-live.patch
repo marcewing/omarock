@@ -1,0 +1,68 @@
+From b9a68305499a8a54508842b7fe5b4286a43a893c Mon Sep 17 00:00:00 2001
+From: Marc Ewing <marc@riotracing.com>
+Date: Tue, 20 Oct 2026 08:42:20 -0400
+Subject: [PATCH] libFLAC: Ogg decoder, return what we have instead of waiting
+ for more
+
+The Ogg read callback wrapper fills the whole request before returning:
+when no complete page is buffered it asks the client for more data, even
+when it already has bytes to hand back. libFLAC's bitreader requests up to
+its capacity (8 KiB) and takes partial reads, so the wait gains nothing,
+but on a live stream it can last a long time. Near-silence encodes to a
+few hundred bytes a second, so a player that tunes in while a stream is
+quiet gets no samples until 8 KiB has arrived, then plays from the start
+of what it buffered and stays that far behind for as long as it listens.
+
+Measured with MPD 0.24.15 (which decodes Ogg FLAC through libFLAC) on a
+stream paced page by page in real time, 48 kHz near-silence: it started
+playing after 12 s and stayed 12 s behind; with this change it plays
+about two pages behind (2 s with 1 s pages, 1 s with 0.25 s pages).
+
+On a live Icecast stream (ffmpeg, 0.256 s pages, about 300 bytes a second
+while near-silent), MPD that connected while the stream was quiet played
+nothing for the 40 s it stayed quiet, then 40 s behind once audio came.
+With this change it played 0.3 s behind throughout.
+
+Return once there is something to return and no complete page is
+buffered; read from the client only when there is nothing to return yet.
+Decoding files is unchanged except that some reads return less.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016rSr6RyB719BULhakT1QHf
+---
+ src/libFLAC/ogg_decoder_aspect.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/libFLAC/ogg_decoder_aspect.c b/src/libFLAC/ogg_decoder_aspect.c
+index ae9649a..296186e 100644
+--- a/src/libFLAC/ogg_decoder_aspect.c
++++ b/src/libFLAC/ogg_decoder_aspect.c
+@@ -333,7 +333,11 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
+ 	 * pages down to libFLAC in such a way that we obey its size
+ 	 * requirement.  To limit the amount of callbacks, we will always try
+ 	 * to read in enough pages to return the full number of bytes
+-	 * requested.
++	 * requested, except that once we have something to return, we return
++	 * it rather than ask the client for more.  On a live stream that next
++	 * read can wait a long time (near-silence encodes to a few hundred
++	 * bytes a second, so filling an 8 KiB request can take tens of
++	 * seconds), and libFLAC takes partial reads.
+ 	 */
+ 	*bytes = 0;
+ 	while (*bytes < bytes_requested && !aspect->end_of_stream) {
+@@ -430,7 +434,11 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
+ 			}
+ 			else if (ret == 0) {
+ 				/* need more data */
+-				FLAC__OggDecoderAspectReadStatus status = read_more_data_(aspect, read_callback, bytes_requested - *bytes, decoder, client_data);
++				FLAC__OggDecoderAspectReadStatus status;
++				/* but first return what we have, see above */
++				if(*bytes > 0)
++					return FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK;
++				status = read_more_data_(aspect, read_callback, bytes_requested - *bytes, decoder, client_data);
+ 				if(status != FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK)
+ 					return status;
+ 			}
+-- 
+2.55.0
+

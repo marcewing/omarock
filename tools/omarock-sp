@@ -1,0 +1,76 @@
+#!/bin/bash
+# omarock-sp: Spotify from the command line, for Claude and the terminal,
+# through omarock-spotify (127.0.0.1:8730, the Apple Music bridge's API), as
+# omarock-am does for Apple Music.
+#
+#   omarock-sp [status]                      what's playing, and the queue
+#   omarock-sp on | off                      make Spotify omarock's source (mpd
+#                                            pauses, Spotify plays on), or not
+#   omarock-sp search QUERY                  your library, then Spotify's catalog
+#   omarock-sp play song|album|playlist|artist ID [START]
+#   omarock-sp next-up|add song|album|playlist ID   after the current song
+#   omarock-sp pause | resume | toggle | next | prev
+#   omarock-sp seek SECONDS
+#   omarock-sp album|artist|playlist ID      its details
+#   omarock-sp playlists                     your playlists
+#   omarock-sp info song|album ID            everything known, and whether it's yours
+#   omarock-sp login                         Spotify's sign-in, again (every 6 months)
+#   omarock-sp health
+#   omarock-sp raw METHOD PATH [JSON]
+#
+# Spotify plays on this machine through omarock's PipeWire bus (Soloist). One
+# player at a time: Spotify starting pauses mpd, and mpd starting pauses it.
+set -euo pipefail
+BASE=${OMAROCK_SPOTIFY:-http://127.0.0.1:8730}
+die() { echo "omarock-sp: $*" >&2; exit 1; }
+call() {  # METHOD PATH [JSON]
+  local out code
+  out=$(curl -sS -w '\n%{http_code}' -X "$1" -H 'Content-Type: application/json' ${3:+-d "$3"} "$BASE$2") \
+    || die "can't reach omarock-spotify ($BASE): systemctl --user status omarock-spotify"
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  if [[ $code != 2* ]]; then die "$(jq -r '.error // .' <<<"$out" 2>/dev/null || echo "$out")"; fi
+  printf '%s' "$out"
+}
+show_status() {
+  jq -r '
+    (if .song then "\(.state): \(.song.title) — \(.song.artist // "?") (\(.song.album // "?"), \(.song.year // "?")) \(.position | floor)s/\(.song.duration // 0 | floor)s"
+     else "\(.state): nothing loaded" end),
+    "shuffle \(.shuffle) · repeat \(.repeat) · \(.queueLength) in the queue · \(if .current then "omarock'"'"'s source" else "not omarock'"'"'s source" end)",
+    (.queueIndex as $i | .queue | to_entries[] | "\(if .key == $i then ">" else " " end) \(.key): \(.value.title) — \(.value.artist // "")")' <<<"$1"
+}
+item() { jq -cn --arg k "$1" --arg i "$2" '{kind: $k, id: $i, source: "catalog"}'; }
+cmd=${1:-status}
+shift || true
+case "$cmd" in
+  status) show_status "$(call GET /v1/status)" ;;
+  health) call GET /v1/health | jq . ;;
+  search)
+    q=$(jq -rn --arg q "$*" '$q | @uri')
+    call GET "/v1/search?scope=all&limit=8&q=$q" | jq -r '
+      def rows($label): .[] | "\($label) \(.kind) \(.id)\t\(.title // .name)\(if .artist then " — " + .artist else "" end)\(if .year then " (\(.year))" else "" end)";
+      (.library // {} | (.playlists, .artists, .albums, .songs) | rows("yours")),
+      (.catalog // {} | (.artists, .albums, .songs, .playlists) | rows("spotify")),
+      (if .catalogError then "catalog: " + .catalogError else empty end)' ;;
+  play)
+    [[ $# -ge 2 ]] || die "play song|album|playlist|artist ID [START]"
+    show_status "$(call POST /v1/play "$(jq -cn --argjson it "$(item "$1" "$2")" --argjson s "${3:-0}" '{items: [$it], mode: "play", start: $s}')")" ;;
+  next-up|add)
+    [[ $# -ge 2 ]] || die "$cmd song|album|playlist ID"
+    show_status "$(call POST /v1/play "$(jq -cn --argjson it "$(item "$1" "$2")" --arg m "$([[ $cmd == add ]] && echo add || echo next)" '{items: [$it], mode: $m}')")" ;;
+  pause|resume|toggle|next) show_status "$(call POST "/v1/$cmd" '{}')" ;;
+  on) show_status "$(call POST /v1/activate '{}')" ;;
+  off) show_status "$(call POST /v1/release '{}')" ;;
+  prev|previous) show_status "$(call POST /v1/previous '{}')" ;;
+  seek) show_status "$(call POST /v1/seek "$(jq -cn --argjson p "${1:?SECONDS}" '{position: $p}')")" ;;
+  album|artist|playlist) call GET "/v1/${cmd}s/catalog/${1:?ID}" | jq . ;;
+  playlists) call GET /v1/library/playlists | jq -r '.[] | "\(.id)\t\(.name) (\(.trackCount // 0) songs)"' ;;
+  info) call GET "/v1/info/catalog/${1:?song|album}/${2:?ID}" | jq . ;;
+  login)
+    url=$(call GET /v1/login | jq -r .url)
+    echo "Opening Spotify's sign-in. If no browser opens, visit:"; echo "$url"
+    xdg-open "$url" >/dev/null 2>&1 || true ;;
+  raw) call "${1:?METHOD}" "${2:?PATH}" "${@:3}" | jq . ;;
+  -h|--help|help) sed -n '2,/^set -e/p' "$0" | sed '$d; s/^# \{0,1\}//' ;;
+  *) die "unknown command $cmd (try --help)" ;;
+esac

@@ -1,0 +1,63 @@
+# XcodeGen spec for the omarock bridge: `xcodegen generate` makes OmarockBridge.xcodeproj
+# (not committed). Build with ./build.sh. The Team ID and bundle id come from
+# Bridge.xcconfig and your Local.xcconfig.
+name: OmarockBridge
+options:
+  deploymentTarget:
+    macOS: "14.2"   # Core Audio process taps (CATapDescription)
+  createIntermediateGroups: true
+packages:
+  OmarockTap:
+    path: ../tap
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: 0.3.0
+    CURRENT_PROJECT_VERSION: 1
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: Apple Development
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    ENABLE_APP_SANDBOX: NO   # runs ffmpeg and icecast from Homebrew
+    ENABLE_USER_SCRIPT_SANDBOXING: NO   # the launch agent script writes into the app
+targets:
+  OmarockBridge:
+    type: application
+    platform: macOS
+    configFiles:
+      Debug: Bridge.xcconfig
+      Release: Bridge.xcconfig
+    sources:
+      - path: Sources
+    postBuildScripts:
+      - name: Launch agent
+        script: |
+          dest="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library/LaunchAgents"
+          rm -rf "$dest" && mkdir -p "$dest"
+          sed "s/__LABEL__/$PRODUCT_BUNDLE_IDENTIFIER/g" "$SRCROOT/Support/LaunchAgent.plist" > "$dest/$PRODUCT_BUNDLE_IDENTIFIER.plist"
+        inputFiles:
+          - $(SRCROOT)/Support/LaunchAgent.plist
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/$(PRODUCT_BUNDLE_IDENTIFIER).plist
+    dependencies:
+      - package: OmarockTap
+        product: ProcessTap
+      - sdk: MusicKit.framework
+      - sdk: iTunesLibrary.framework
+      - sdk: ServiceManagement.framework
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleName: OmarockBridge
+        CFBundleDisplayName: omarock bridge
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSUIElement: true
+        NSAppleMusicUsageDescription: The omarock bridge plays and browses your Apple Music library for omarock on your Linux desktop.
+        NSAudioCaptureUsageDescription: The omarock bridge streams its own Apple Music playback to omarock over your tailnet.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(OMAROCK_BUNDLE_ID)
+        PRODUCT_NAME: OmarockBridge
+    scheme: {}
