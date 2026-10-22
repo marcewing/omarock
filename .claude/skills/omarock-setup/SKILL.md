@@ -127,6 +127,9 @@ The switches are omarock's settings: `radio` (on by default), `spotify`,
 `appleMusic` and `siriusXM` (off). Set one with Omarchy's bar command, with the
 user's OK: `omarchy bar set marc.omarock spotify true --json`. `--json` matters:
 without it, the value is the text "true". The bar picks the change up at once.
+The exception is a setting made the moment the plugin is added, which can be
+lost: give the bar a few seconds first. If a setting doesn't show, `omarchy
+restart shell` (ask first).
 The other settings (README.md, Settings) are set the same way.
 
 Commands that need the desktop session (`omarchy`, `omarchy-shell`, `qs ipc`)
