@@ -13,8 +13,8 @@
 #
 #   tools/build-mpd-mpris [DEST]     default DEST: ~/.local/lib/omarock-mpris
 #
-# It builds the release of the mpd-mpris version pacman has installed,
-# patched, into DEST/mpd-mpris. The user unit runs it through a drop-in,
+# It builds mpd-mpris 0.4.4 (Arch's version), patched, into DEST/mpd-mpris.
+# The user unit runs it through a drop-in,
 # ~/.config/systemd/user/mpd-mpris.service.d/omarock-mpris.conf:
 #   [Service]
 #   ExecStart=
@@ -28,10 +28,17 @@ version=$(pacman -Q mpd-mpris | awk '{print $2}' | cut -d- -f1)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# The source is mpd-mpris 0.4.4's release commit, pinned: the patch was made
+# and tested against it, and a tag could move. A newer one needs a new pin here.
+if [[ $version != 0.4.4 ]]; then
+  echo "The patch is pinned to mpd-mpris 0.4.4, and pacman has $version: not building." >&2
+  exit 1
+fi
 echo "mpd-mpris $version, patched, into $dest"
-git -c advice.detachedHead=false clone -q --depth 1 --branch "v$version" https://github.com/natsukagami/mpd-mpris.git "$work/mpd-mpris"
-git -C "$work/mpd-mpris" apply "$repo/patches/mpd-mpris-stream-art.patch"
-(cd "$work/mpd-mpris" && GOFLAGS=-mod=mod go build -trimpath -buildvcs=false -o "$work/mpd-mpris.bin" ./cmd/mpd-mpris)
+git -c advice.detachedHead=false clone -q --depth 1 --branch v0.4.4 https://github.com/natsukagami/mpd-mpris.git "$work/mpd-mpris" &&
+  git -C "$work/mpd-mpris" checkout -q --detach 69158f2765362ad9e1a658fa2b793a6f4c40f2f7 &&
+  git -C "$work/mpd-mpris" apply "$repo/patches/mpd-mpris-stream-art.patch" &&
+  (cd "$work/mpd-mpris" && GOFLAGS=-mod=mod go build -trimpath -buildvcs=false -o "$work/mpd-mpris.bin" ./cmd/mpd-mpris)
 install -d "$dest"
 install -m 755 "$work/mpd-mpris.bin" "$dest/mpd-mpris"
 ls -l "$dest"

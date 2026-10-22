@@ -19,7 +19,7 @@ queue such files.
 ## libFLAC, for mpd only
 
 ```bash
-tools/build-libflac          # builds your distribution's flac version, patched, into ~/.local/lib/omarock-flac
+tools/build-libflac          # builds flac 1.5.0 (Arch's version), patched, into ~/.local/lib/omarock-flac
 mkdir -p ~/.config/systemd/user/mpd.service.d
 printf '[Service]\nEnvironment=LD_LIBRARY_PATH=%%h/.local/lib/omarock-flac\n' \
   > ~/.config/systemd/user/mpd.service.d/omarock-flac.conf
@@ -38,7 +38,7 @@ restart mpd`, and switch `appleRejoin` back on.
 ## mpd-mpris
 
 ```bash
-tools/build-mpd-mpris        # builds your distribution's version, patched, into ~/.local/lib/omarock-mpris
+tools/build-mpd-mpris        # builds mpd-mpris 0.4.4 (Arch's version), patched, into ~/.local/lib/omarock-mpris
 mkdir -p ~/.config/systemd/user/mpd-mpris.service.d
 printf '[Service]\nExecStart=\nExecStart=%%h/.local/lib/omarock-mpris/mpd-mpris -no-instance\n' \
   > ~/.config/systemd/user/mpd-mpris.service.d/omarock-mpris.conf
