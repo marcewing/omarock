@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "mre.omarock",
-  "name": "omarock: mpd music player",
+  "name": "omarock: multi-source mpd music player",
   "version": "0.5.6",
   "author": "Marc Ewing",
   "license": "MIT",
