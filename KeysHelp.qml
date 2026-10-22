@@ -46,6 +46,7 @@ Rectangle {
       ["m", "Next source: local music, Apple Music, Spotify, SiriusXM, the radio (the ones set up)"],
       ["e", "Expand or compact"],
       ["t", "Open the terminal player (" + root.tuiName + ")"],
+      [",", "Settings: the sources, and how the panel behaves"],
       ["?", "Show or hide these keys"],
       ["Tab", "Next panel on the bar"]
     ] }

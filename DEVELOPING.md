@@ -12,6 +12,7 @@
 | `PlayerCard.qml` | Now playing, seek, transport, volume |
 | `TrackRow.qml`, `CoverArt.qml` | A row of any list, and a cover with a placeholder |
 | `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`), the info card (`i`), the playlist picker (`A`) |
+| `SettingsView.qml` | The settings (`,` or the gear): the manifest's schema as a form, each source with its service's state; changes go through `omarchy bar set` |
 | `Info.js` | Pure helpers: the info card's contents for each source |
 | `AppleClient.qml`, `Apple.js` | A client for the bridge API (bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
 | `SxmClient.qml`, `Sxm.js` | SiriusXM, through omarock-sxm |

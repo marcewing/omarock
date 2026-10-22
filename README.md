@@ -184,7 +184,7 @@ says how to remove it.
   tags, format, average bitrate, size and path.
 - **Keys** do what you'd guess, and the hint line says what Enter will do: Space
   play/pause, `/` search, arrows to move, open and go back, Shift+←/→ to seek,
-  `n`/`p`, `+`/`-`, `m` the next source, `t` a terminal player (ncmpcpp), `?` for
+  `n`/`p`, `+`/`-`, `m` the next source, `,` settings, `t` a terminal player (ncmpcpp), `?` for
   the full list.
 - **From a key binding:** `qs ipc -p /usr/share/omarchy/shell call marc.omarock toggle`
   opens the panel.
@@ -218,7 +218,11 @@ says how to remove it.
 
 ## Settings
 
-Set them with Omarchy's bar command, for example:
+Press `,` in the panel, or the gear in the expanded view, for the settings
+screen. Each source's switch there also says how its service is doing. A change
+saves at once.
+
+Or set them with Omarchy's bar command, which is what the screen does:
 
 ```bash
 omarchy bar set marc.omarock spotify true --json

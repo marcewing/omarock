@@ -124,7 +124,9 @@ There are two halves, and the Mac's is the user's to build. Follow
 ## Switching a source on
 
 The switches are omarock's settings: `radio` (on by default), `spotify`,
-`appleMusic` and `siriusXM` (off). Set one with Omarchy's bar command, with the
+`appleMusic` and `siriusXM` (off). The user can flip them on omarock's settings
+screen (`,` in the panel, or the gear in the expanded view), which also says how
+each source's service is doing. Or set one with Omarchy's bar command, with the
 user's OK: `omarchy bar set marc.omarock spotify true --json`. `--json` matters:
 without it, the value is the text "true". The bar picks the change up at once.
 The exception is a setting made the moment the plugin is added, which can be

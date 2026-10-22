@@ -47,6 +47,12 @@ ShellRoot {
     return null
   }
 
+  // The settings view, while it's open.
+  function settingsView() {
+    var p = popup()
+    return p ? host.findNamed(p.contentItem[0].parent.parent, "settingsView") : null
+  }
+
   function popup() {
     var data = host.panel ? host.panel.data : []
     for (var i = 0; i < data.length; i++)
@@ -179,6 +185,10 @@ ShellRoot {
         pointerArmed: p.pointerArmed, listY: p.listView ? Math.round(p.listView.contentY) : -1, listIndex: p.listView ? p.listView.currentIndex : -2, appleMode: p.appleMode, appleConfigured: p.appleConfigured,
         sxmMode: p.sxmMode, radioMode: p.radioMode, source: p.source, sources: p.sources,
         spotifyMode: p.spotifyMode, spotifyError: p.spotifyMode ? p.player.lastError : "",
+        settingsOpen: p.settingsOpen, settingsEditing: p.settingsOpen ? host.settingsView().editing : "",
+        settingsCursor: p.settingsOpen ? host.settingsView().cursor : -1,
+        settingsRows: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key }) : [],
+        settingValues: p.settingValues, settingNotes: p.settingNotes, widgetSettings: host.widget.settings,
         appleReady: p.player.ready === true && p.appleMode, appleSeq: p.appleMode ? (p.player.bridgeStatus.seq || 0) : -1,
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
         info: p.infoCard ? { service: p.infoCard.card.serviceName, kind: p.infoCard.card.kindName,
@@ -255,6 +265,14 @@ ShellRoot {
         : keyboard.mouseClick(card, at.x, at.y, Qt.LeftButton, Qt.NoModifier, -1)
       return done ? "ok" : "no window"
     }
+    // A real click on a named item in the panel (the gear, say).
+    function clickPanel(name: string): string {
+      var p = popup()
+      if (!p) return "No popup"
+      var item = host.findNamed(p.contentItem[0].parent.parent, name)
+      if (!item || !item.visible) return "not shown"
+      return keyboard.mouseClick(item, item.width / 2, item.height / 2, Qt.LeftButton, Qt.NoModifier, -1) ? "ok" : "no window"
+    }
     // A real click on a bar item (note, cover, song); middle: a middle click.
     function clickBar(name: string, middle: bool): string {
       var item = host.findNamed(host.widget, name)
@@ -263,6 +281,12 @@ ShellRoot {
         Qt.NoModifier, -1) ? "ok" : "no window"
     }
     function settings(json: string): void { host.widget.settings = host.baseSettings(JSON.parse(json)) }
+    // One setting, as Omarchy's bar hands it back after `omarchy bar set`.
+    function setSetting(key: string, value: string, isJson: bool): void {
+      var next = Object.assign({}, host.widget.settings)
+      next[key] = isJson ? JSON.parse(value) : value
+      host.widget.settings = next
+    }
     // Destroy the widget, panel and all.
     function unload(): void { widgetLoader.source = "" }
     // As a plugin reload does (the shell's reload of any plugin): the widget,

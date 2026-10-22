@@ -37,7 +37,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS = Path(__file__).resolve().parent
-PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml",
+PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Info.js", "InfoCard.qml"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
@@ -263,6 +263,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     # mpd goes away: the panel says so instead of failing silently.
     host.call("close")
     # Last, as it unloads the widget.
+    settings_scenario(host, output, failures)
     sources_switch_scenario(host, socket_path, failures)
     fresh_start_scenario(host, socket_path, failures)
     teardown_scenario(host, socket_path, failures)
@@ -2404,6 +2405,89 @@ def favourite_follow_scenario(host, output, failures):
     host.call("close")
 
 
+def settings_log():
+    """The stand-in `omarchy bar set`'s calls so far: [(key, value, json)]."""
+    path = BRIDGE["settings_log"]
+    lines = path.read_text().splitlines() if path.exists() else []
+    return [(r["key"], r["value"], r["json"]) for r in map(json.loads, lines)]
+
+
+def settings_scenario(host, output, failures):
+    """Marc, 10-21: "where are the settings? ... a setting screen, accessible
+    from a gear icon in the expanded pane". , (or the gear) opens the settings:
+    the manifest's schema in groups, each source with how its service is
+    doing. A change goes to `omarchy bar set` (a stand-in here), and comes back
+    from the bar, as Omarchy does it."""
+    host.call("settings", "{}")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "settings open")
+    s = host.state()
+    check(s["settingsRows"][:5] == ["radio", "radioState", "spotify", "appleMusic", "siriusXM"],
+          ", opens the settings, the sources first: " + ", ".join(s["settingsRows"][:6]), failures)
+    notes = s["settingNotes"]
+    check(notes["spotify"]["kind"] == "ok" and notes["siriusXM"]["kind"] == "ok" and notes["radio"]["text"].endswith("Washington")
+          and (notes["appleMusic"]["kind"] == "ok" or "apple.json" in notes["appleMusic"]["text"]),
+          "each source says how it's doing: " + " | ".join(n["text"] for n in notes.values()), failures)
+    host.grab(output / "compact-settings.png")
+
+    # Space on Spotify's switch: off, through `omarchy bar set`, and back.
+    before = len(settings_log())
+    host.call("press", "Down")
+    host.call("press", "Down")
+    host.call("press", "Space")
+    wait_for(lambda: len(settings_log()) > before and host.state()["settingValues"]["spotify"] is False, "Spotify off")
+    check(settings_log()[-1] == ("spotify", "false", True) and "spotify" not in host.state()["sources"],
+          "Space switches Spotify off: omarchy bar set marc.omarock spotify false --json", failures)
+    host.call("press", "Space")
+    wait_for(lambda: host.state()["settingValues"]["spotify"] is True, "Spotify on")
+    check("spotify" in host.state()["sources"], "and on again", failures)
+
+    # Enter on the radio's state: type it, Enter saves it as text.
+    host.call("press", "Up")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingsEditing"] == "radioState", "editing")
+    host.call("typeKeys", "Oregon")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingValues"]["radioState"] == "Oregon", "radioState saved")
+    check(settings_log()[-1] == ("radioState", "Oregon", False) and host.state()["settingsEditing"] == ""
+          and host.state()["settingNotes"]["radio"]["text"] == "Local stations from Oregon",
+          "Enter edits the radio's state, and Enter saves it: " + host.state()["settingNotes"]["radio"]["text"], failures)
+    # Esc drops an edit.
+    host.call("press", "Return")
+    host.call("typeKeys", "Texas")
+    host.call("press", "Escape")
+    wait_for(lambda: host.state()["settingsEditing"] == "", "edit dropped")
+    check(host.state()["settingValues"]["radioState"] == "Oregon" and host.state()["settingsOpen"],
+          "Esc drops an edit, and the settings stay open", failures)
+
+    # ← → on a number: one step each way.
+    rows = host.state()["settingsRows"]
+    for _ in range(rows.index("maxLabelWidth") - host.state()["settingsCursor"]): host.call("press", "Down")
+    host.call("press", "Right")
+    wait_for(lambda: host.state()["settingValues"]["maxLabelWidth"] == 310, "width up")
+    check(settings_log()[-1] == ("maxLabelWidth", "310", True), "→ on a number steps it up: maxLabelWidth 310 --json", failures)
+    host.call("press", "Left")
+    wait_for(lambda: host.state()["settingValues"]["maxLabelWidth"] == 300, "width back")
+
+    # Esc closes; the gear in the expanded panel opens it again.
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["settingsOpen"], "closed")
+    check(host.state()["opened"], "Esc closes the settings, not the panel", failures)
+    host.call("expand", "true")
+    host.settle(1)
+    check(host.call("clickPanel", "settingsButton") == "ok", "the expanded panel has a gear", failures)
+    wait_for(lambda: host.state()["settingsOpen"], "gear opens settings")
+    check(host.state()["settingsCursor"] == 0, "and they open at the top, whatever was chosen last time", failures)
+    host.grab(output / "expanded-settings.png")
+    host.call("press", ",")
+    wait_for(lambda: not host.state()["settingsOpen"], ", closes them")
+    host.call("expand", "false")
+    host.call("settings", "{}")
+    host.call("close")
+
+
 def sources_switch_scenario(host, socket_path, failures):
     """The sources beyond local music are opt-in settings, which enable them
     and their buttons. Off: no button, and its service isn't
@@ -2842,6 +2926,10 @@ def main():
         (work / "screen.json").write_text(json.dumps({"screens": [dict(
             name="CAPTURE", x=0, y=0, width=2560, height=1600,
             logicalDpi=96, logicalBaseDpi=96, dpr=1)]}))
+        # Settings are saved through a stand-in for `omarchy bar set`.
+        BRIDGE["settings_log"] = work / "settings.log"
+        env.update(OMAROCK_SET_SETTING=str(TOOLS / "fake-bar-set"), OMAROCK_SET_SETTING_LOG=str(BRIDGE["settings_log"]),
+                   OMAROCK_CAPTURE_SHELL=str(shell))
         env.update(QT_QPA_PLATFORM=f"offscreen:configfile={work / 'screen.json'}",
                    QT_QUICK_BACKEND="software",
                    QT_SCALE_FACTOR="2", OMAROCK_PLUGIN=str(plugin))
@@ -2928,6 +3016,7 @@ def main():
                             elif name == "teardown": teardown_scenario(host, socket_path, failures)
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
                             elif name == "sources-switch": sources_switch_scenario(host, socket_path, failures)
+                            elif name == "settings": settings_scenario(host, output, failures)
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)

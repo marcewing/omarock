@@ -116,7 +116,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.5.3"
+  readonly property string version: "0.5.4"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -168,6 +168,50 @@ Panel {
   // The info card (i) while it's open: { card (Info.js), coverFile, logo,
   // coverUrl, loading }.
   property var infoCard: null
+  // The settings view (the gear, or ,), and the schema and defaults it shows,
+  // read from this plugin's own manifest.json.
+  property bool settingsOpen: false
+  property var manifestSchema: []
+  property var manifestDefaults: ({})
+  readonly property var settingValues: {
+    var out = {}
+    root.manifestSchema.forEach(function(f) {
+      out[f.key] = root.setting(f.key, root.manifestDefaults[f.key] !== undefined ? root.manifestDefaults[f.key] : f.defaultValue)
+    })
+    return out
+  }
+  // What an empty text setting means.
+  readonly property var settingPlaceholders: ({
+    socket: Quickshell.env("XDG_RUNTIME_DIR") + "/mpd/socket",
+    radioState: "none: no local stations",
+    appleBridge: root.appleConfig.bridge ? "from apple.json: " + root.appleConfig.bridge : "http://your-mac:8710",
+    appleStream: root.appleConfig.stream ? "from apple.json: " + root.appleConfig.stream : "http://your-mac:8000/omarock.ogg",
+    appleTokenFile: "~/.config/omarock/bridge-token",
+    spotifyService: "http://127.0.0.1:8730",
+    sxmService: "http://127.0.0.1:8720",
+    radioBrowser: "one of Radio Browser's servers"
+  })
+  // Under each source's switch: how it's doing, or what it needs.
+  readonly property var settingNotes: {
+    function note(text, kind) { return { text: text, kind: kind || "" } }
+    return {
+      radio: !root.radioEnabled ? note("Off")
+        : radio.place !== "" ? note("Local stations from " + radio.place, "ok")
+        : note("No state set (below): no local stations"),
+      spotify: !root.spotifyEnabled ? note("Off. It needs Spotify Premium and the omarock-spotify service: spotify/README.md")
+        : !spotify.reachable ? note("Can't reach omarock-spotify: systemctl --user status omarock-spotify", "bad")
+        : !spotify.authorized ? note("omarock-spotify runs, but isn't signed in: tools/omarock-sp health", "bad")
+        : note("omarock-spotify runs, and is signed in", "ok"),
+      appleMusic: !root.appleEnabled ? note("Off. It needs the omarock bridge on a Mac: bridge/README.md")
+        : !root.appleConfigured ? note("Set the bridge and stream below, or in ~/.config/omarock/apple.json", "bad")
+        : !apple.reachable ? note("Can't reach the bridge at " + root.appleBridge, "bad")
+        : !apple.authorized ? note("The bridge answers, but Apple Music access isn't allowed on the Mac yet", "bad")
+        : note("The bridge at " + root.appleBridge + " answers", "ok"),
+      siriusXM: !root.sxmEnabled ? note("Off. It needs a SiriusXM subscription and the omarock-sxm service: sxm/README.md")
+        : sxm.available ? note("omarock-sxm runs, and is signed in", "ok")
+        : note(sxm.lastError !== "" ? sxm.lastError : "Can't reach omarock-sxm: systemctl --user status omarock-sxm", "bad")
+    }
+  }
   property int infoSequence: 0
 
   readonly property bool connected: client.ready && (!bridgeMode || bridge.ready) && (!sxmMode || sxm.available)
@@ -627,6 +671,7 @@ Panel {
     if (root.opened) {
       root.cursorActive = false
       root.keysOpen = false
+      root.settingsOpen = false
       root.closeInfo()
       client.forgetMissingCovers()
       root.coverDirectory = ""
@@ -1508,11 +1553,51 @@ Panel {
     }
   }
 
+  function openSettings() {
+    root.keysOpen = false
+    root.closeInfo()
+    settingsView.reset()
+    root.settingsOpen = true
+    // How each switched-on source is doing, now.
+    if (root.spotifyEnabled) spotify.checkHealth()
+    if (root.sxmEnabled) sxm.checkHealth()
+    if (root.appleConfigured) apple.checkHealth()
+  }
+
+  function closeSettings() {
+    root.settingsOpen = false
+    keyCatcher.forceActiveFocus()
+  }
+
+  // Saving a setting runs Omarchy's own command, so the settings stay in the
+  // bar's config, and the bar hands the change back at once. One at a time.
+  // Tests point OMAROCK_SET_SETTING at a stand-in.
+  property var settingSaves: []
+  readonly property var settingsCommand: {
+    var custom = Quickshell.env("OMAROCK_SET_SETTING")
+    return custom ? [custom] : ["omarchy", "bar", "set"]
+  }
+  function saveSetting(key, value) {
+    var asJson = typeof value === "boolean" || typeof value === "number"
+    var command = root.settingsCommand.concat([root.moduleName, key, String(value)]).concat(asJson ? ["--json"] : [])
+    root.settingSaves = root.settingSaves.concat([{ key: key, command: command }])
+    if (!settingSaver.running) root.nextSettingSave()
+  }
+  function nextSettingSave() {
+    if (root.settingSaves.length === 0 || settingSaver.running) return
+    var next = root.settingSaves[0]
+    root.settingSaves = root.settingSaves.slice(1)
+    settingSaver.key = next.key
+    settingSaver.command = next.command
+    settingSaver.running = true
+  }
+
   // Esc: close the key list, else back out of an artist or album, else clear
   // the search, else close the panel.
   function stepBack() {
     if (root.pickerOpen) root.closePicker()
     else if (root.confirmOpen) root.cancelDelete()
+    else if (root.settingsOpen) root.closeSettings()
     else if (root.infoOpen) root.closeInfo()
     else if (root.keysOpen) root.keysOpen = false
     else if (root.browsing) root.goBack()
@@ -1801,6 +1886,7 @@ Panel {
     else if (t === "e") root.expanded = !root.expanded
     else if (t === "t") root.launchTui()
     else if (t === "?") root.keysOpen = !root.keysOpen
+    else if (t === ",") root.openSettings()
     else if (t === "i") root.showInfo()
     else if (t === "P") root.openPlaylists()
     else if (t === "a") {
@@ -1838,6 +1924,32 @@ Panel {
     // The radio's favourites are the "Radio" playlist: follow the list.
     onPlaylistsChanged: radio.refreshFavorites()
     onStatusChanged: root.followMpd()
+  }
+
+  // The settings' schema and defaults, from this plugin's manifest.json.
+  FileView {
+    path: decodeURIComponent(String(Qt.resolvedUrl("manifest.json")).replace(/^file:\/\//, ""))
+    printErrors: false
+    onLoaded: {
+      try {
+        var widget = (JSON.parse(text()) || {}).barWidget || {}
+        root.manifestSchema = widget.schema || []
+        root.manifestDefaults = widget.defaults || {}
+      } catch (e) {}
+    }
+  }
+
+  // Saves one setting (saveSetting), and says why if it couldn't.
+  Process {
+    id: settingSaver
+    property string key: ""
+    stderr: StdioCollector { id: settingSaverErrors; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0)
+        root.say("Couldn't save " + settingSaver.key + ": "
+          + (String(settingSaverErrors.text || "").trim().split("\n")[0] || "omarchy bar set failed"))
+      Qt.callLater(root.nextSettingSave)
+    }
   }
 
   FileView {
@@ -1954,10 +2066,16 @@ Panel {
       // The search box, the playlist picker and the delete dialog take
       // their own keys.
       blocked: (!!root.searchField && root.searchField.activeFocus) || root.pickerOpen || root.confirmOpen
+        || (root.settingsOpen && settingsView.editing !== "")
 
       // ↑↓ move, → opens an artist or album, ← goes back. Shift+←→ seek
       // (the Shortcuts below take those before this sees them).
       onMoveRequested: function(dx, dy) {
+        if (root.settingsOpen) {
+          if (dy !== 0) settingsView.move(dy)
+          else settingsView.adjust(dx)
+          return
+        }
         if (root.infoOpen) {
           if (dy !== 0) infoView.scroll(dy)
           else if (dx < 0) root.closeInfo()
@@ -1972,16 +2090,23 @@ Panel {
       onActivateRequested: {
         var enter = root.returnPressed
         root.returnPressed = false
+        if (root.settingsOpen) { settingsView.activate(); return }
         if (root.infoOpen) { root.closeInfo(); return }
         if (root.keysOpen) { root.keysOpen = false; return }
         if (enter && root.cursorActive) root.activateRow(root.cursorIndex, "open")
         else if (enter && root.searchMode && !root.browsing) root.activateRow(0, "open")
         else root.playPause()
       }
-      onDeleteRequested: if (root.cursorActive && !root.keysOpen && !root.infoOpen) root.removeRow(root.cursorIndex)
+      onDeleteRequested: if (root.cursorActive && !root.keysOpen && !root.infoOpen && !root.settingsOpen) root.removeRow(root.cursorIndex)
       onCloseRequested: root.stepBack()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
+        if (root.settingsOpen) {
+          if (text === ",") root.closeSettings()
+          else if (text === "+" || text === "=") settingsView.adjust(1)
+          else if (text === "-" || text === "_") settingsView.adjust(-1)
+          return
+        }
         if (root.infoOpen) {
           if (text === "i") root.closeInfo()
           return
@@ -2011,7 +2136,7 @@ Panel {
         anchors.top: parent.top
         height: root.expanded ? parent.height : (item ? item.implicitHeight : 0)
         sourceComponent: root.expanded ? expandedLayout : compactLayout
-        visible: !root.keysOpen && !root.infoOpen
+        visible: !root.keysOpen && !root.infoOpen && !root.settingsOpen
         onLoaded: Qt.callLater(root.showCurrentSong)
       }
 
@@ -2037,6 +2162,24 @@ Panel {
         foreground: root.foreground
         fontFamily: root.fontFamily
         onCloseRequested: root.closeInfo()
+      }
+
+      SettingsView {
+        id: settingsView
+        objectName: "settingsView"
+        anchors.fill: parent
+        visible: root.settingsOpen
+        schema: root.manifestSchema
+        values: root.settingValues
+        notes: root.settingNotes
+        placeholders: root.settingPlaceholders
+        notice: root.notice
+        wide: root.expanded
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onChangeRequested: function(key, value) { root.saveSetting(key, value) }
+        onCloseRequested: root.closeSettings()
+        onEditFinished: keyCatcher.forceActiveFocus()
       }
 
       PlaylistPicker {
@@ -2658,6 +2801,20 @@ Panel {
           spacing: Style.space(10)
 
           SourceSwitch { anchors.verticalCenter: parent.verticalCenter }
+
+          Button {
+            objectName: "settingsButton"
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰒓"
+            iconSize: fontSize
+            implicitHeight: keysButton.implicitHeight
+            bordered: true
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            tooltipText: "Settings (,)"
+            onClicked: root.openSettings()
+          }
 
           Button {
             id: keysButton
