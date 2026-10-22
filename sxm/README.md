@@ -27,7 +27,7 @@ while mpd plays it. Whether that's acceptable is your call.
 ## Set it up
 
 1. Install the service, from your omarock clone (the plugin's folder,
-   `~/.config/omarchy/plugins/marc.omarock`, or a clone of your own):
+   `~/.config/omarchy/plugins/mre.omarock`, or a clone of your own):
    ```bash
    tools/install-sxm --start
    ```
@@ -44,7 +44,7 @@ while mpd plays it. Whether that's acceptable is your call.
    curl -s 127.0.0.1:8720/v1/health
    ```
    It should say `"account": true` and `"loggedIn": true`.
-4. **Switch SiriusXM on:** `omarchy bar set marc.omarock siriusXM true --json`. A
+4. **Switch SiriusXM on:** `omarchy bar set mre.omarock siriusXM true --json`. A
    SiriusXM button appears in the panel, and `m` goes round to it.
 
 In SiriusXM, the list is your favourite channels, then all of them, each with
@@ -65,7 +65,7 @@ sees the change too.
 `./install --uninstall` does this, asking first. By hand:
 
 ```bash
-omarchy bar set marc.omarock siriusXM false --json
+omarchy bar set mre.omarock siriusXM false --json
 systemctl --user disable --now omarock-sxm
 rm -f ~/.config/systemd/user/omarock-sxm.service
 systemctl --user daemon-reload

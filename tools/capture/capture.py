@@ -2440,7 +2440,7 @@ def settings_scenario(host, output, failures):
     host.call("press", "Space")
     wait_for(lambda: len(settings_log()) > before and host.state()["settingValues"]["spotify"] is False, "Spotify off")
     check(settings_log()[-1] == ("spotify", "false", True) and "spotify" not in host.state()["sources"],
-          "Space switches Spotify off: omarchy bar set marc.omarock spotify false --json", failures)
+          "Space switches Spotify off: omarchy bar set mre.omarock spotify false --json", failures)
     host.call("press", "Space")
     wait_for(lambda: host.state()["settingValues"]["spotify"] is True, "Spotify on")
     check("spotify" in host.state()["sources"], "and on again", failures)

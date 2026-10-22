@@ -15,8 +15,8 @@ import "Info.js" as Info
 // Compact. mpd is the backend; the panel keeps no music state of its own.
 Panel {
   id: root
-  moduleName: "marc.omarock"
-  ipcTarget: "marc.omarock"
+  moduleName: "mre.omarock"
+  ipcTarget: "mre.omarock"
 
   property var anchorItem: null
   property var hostWidget: null
@@ -120,7 +120,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.5.5"
+  readonly property string version: "0.5.6"
 
   property bool expanded: false
   property bool keysOpen: false

@@ -109,7 +109,7 @@ the card still reach it.
 ```bash
 omarchy plugin validate .
 omarchy plugin add file://$PWD --enable     # once: the bar loads from this clone
-omarchy plugin update marc.omarock          # after each commit
+omarchy plugin update mre.omarock          # after each commit
 omarchy restart shell
 journalctl --user -b | grep omarock         # "omarock <version> loaded"
 ```

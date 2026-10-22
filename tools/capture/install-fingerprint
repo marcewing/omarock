@@ -19,7 +19,7 @@ import json
 d = json.load(open(".config/omarchy/shell.json"))
 for side, items in d["bar"]["layout"].items():
     for it in items:
-        if isinstance(it, dict) and it.get("id") == "marc.omarock": print(side, json.dumps(it, sort_keys=True))'
+        if isinstance(it, dict) and it.get("id") == "mre.omarock": print(side, json.dumps(it, sort_keys=True))'
   sudo ufw status | sed 1,4d
-  git -C .config/omarchy/plugins/marc.omarock rev-parse HEAD
+  git -C .config/omarchy/plugins/mre.omarock rev-parse HEAD
 } 2>&1

@@ -27,7 +27,7 @@ media keys (MPRIS) ──┘          │                                   │
 ## Set it up
 
 Run the tools from your omarock clone: the plugin's folder,
-`~/.config/omarchy/plugins/marc.omarock`, or a clone of your own.
+`~/.config/omarchy/plugins/mre.omarock`, or a clone of your own.
 
 1. **The audio bus,** if you haven't yet: `tools/install-audio --start --output NAME`
    ([audio/README.md](../audio/README.md)).
@@ -59,7 +59,7 @@ Run the tools from your omarock clone: the plugin's folder,
    - Remove the rules once it's paired.
 6. **Sign in to the Web API:** `tools/omarock-sp login`. It opens Spotify's
    sign-in page; afterwards `tools/omarock-sp health` says `"authorized": true`.
-7. **Switch Spotify on:** `omarchy bar set marc.omarock spotify true --json`. A
+7. **Switch Spotify on:** `omarchy bar set mre.omarock spotify true --json`. A
    Spotify button appears in the panel, and `m` goes round to it.
 
 ## How it behaves
@@ -102,7 +102,7 @@ Run the tools from your omarock clone: the plugin's folder,
 `./install --uninstall` does this, asking first. By hand:
 
 ```bash
-omarchy bar set marc.omarock spotify false --json
+omarchy bar set mre.omarock spotify false --json
 systemctl --user disable --now omarock-spotify omarock-soloist
 rm -f ~/.config/systemd/user/omarock-spotify.service ~/.config/systemd/user/omarock-soloist.service
 systemctl --user daemon-reload

@@ -26,7 +26,7 @@ Soloist ─────┘
    pactl list sinks short
    ```
 2. **Install the bus,** from your omarock clone (the plugin's folder,
-   `~/.config/omarchy/plugins/marc.omarock`, or a clone of your own):
+   `~/.config/omarchy/plugins/mre.omarock`, or a clone of your own):
    ```bash
    tools/install-audio --start --output alsa_output.usb-Your_Card-00.analog-stereo
    ```

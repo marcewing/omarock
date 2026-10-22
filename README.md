@@ -153,7 +153,7 @@ Then `systemctl --user daemon-reload && systemctl --user enable --now mpd-mpris`
 omarchy plugin add https://github.com/marcewing/omarock --enable
 ```
 
-`--enable` puts it on the left of the bar (`omarchy plugin enable marc.omarock
+`--enable` puts it on the left of the bar (`omarchy plugin enable mre.omarock
 --section center`, or `right`, for elsewhere). Click it, and press `?` for the keys.
 
 ### 3. More sources (optional)
@@ -170,7 +170,7 @@ omarock's settings:
 ### Updating, and removing
 
 ```bash
-omarchy plugin update marc.omarock
+omarchy plugin update mre.omarock
 omarchy restart shell        # the shell's own reload keeps running the old code
 ```
 
@@ -180,7 +180,7 @@ The services (Spotify's, SiriusXM's, the audio bus) update from your clone:
 `./install --uninstall` takes omarock off again: the plugin, each service, the
 patches and the audio bus (mpd gets its old output back). It shows what each
 step removes and asks first, and leaves mpd, your music and playlists alone.
-`omarchy plugin remove marc.omarock` alone removes only the plugin; the services
+`omarchy plugin remove mre.omarock` alone removes only the plugin; the services
 stay until you remove them too (each guide says how, by hand).
 
 ## Using omarock
@@ -216,13 +216,13 @@ stay until you remove them too (each guide says how, by hand).
   play/pause, `/` search, arrows to move, open and go back, Shift+←/→ to seek,
   `n`/`p`, `+`/`-`, `m` the next source, `,` settings, `t` a terminal player (ncmpcpp), `?` for
   the full list.
-- **From a key binding:** `qs ipc -p /usr/share/omarchy/shell call marc.omarock toggle`
+- **From a key binding:** `qs ipc -p /usr/share/omarchy/shell call mre.omarock toggle`
   opens the panel.
 
 ### The other sources
 
 - **Internet radio:** the station playing, your favourites, then the most
-  listened stations in your US state (set it with `omarchy bar set marc.omarock
+  listened stations in your US state (set it with `omarchy bar set mre.omarock
   radioState Maine`). `/` finds stations by name, call sign, frequency
   or genre; Enter tunes; `A` keeps a favourite (in the mpd playlist "Radio", so
   `mpc load Radio` plays them); `n`/`p` step through the favourites. Stations that
@@ -255,8 +255,8 @@ saves at once.
 Or set them with Omarchy's bar command, which is what the screen does:
 
 ```bash
-omarchy bar set marc.omarock spotify true --json
-omarchy bar set marc.omarock tuiCommand rmpc
+omarchy bar set mre.omarock spotify true --json
+omarchy bar set mre.omarock tuiCommand rmpc
 ```
 
 (`--json` makes `true` a yes/no rather than text.) The bar picks a change up at

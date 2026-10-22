@@ -18,7 +18,7 @@ private_file() {  # FILE WHAT [WHERE IT COMES FROM]: present and mode 600?
 }
 health() { curl -s -m 5 "$1/v1/health" 2>/dev/null; }
 
-plugin=$HOME/.config/omarchy/plugins/marc.omarock
+plugin=$HOME/.config/omarchy/plugins/mre.omarock
 shelljson=$HOME/.config/omarchy/shell.json
 setting() {  # KEY DEFAULT: omarock's setting, from its entry in shell.json
   python3 -I - "$shelljson" "$1" "$2" <<'EOF'
@@ -28,7 +28,7 @@ try:
     d = json.load(open(path))
     for items in (d.get("bar", {}).get("layout", {}) or {}).values():
         for it in items:
-            if isinstance(it, dict) and it.get("id") == "marc.omarock" and key in it:
+            if isinstance(it, dict) and it.get("id") == "mre.omarock" and key in it:
                 v = it[key]
                 print(str(v).lower() if isinstance(v, bool) else v)
                 sys.exit(0)
@@ -65,7 +65,7 @@ if [[ -f $plugin/manifest.json ]]; then
 else
   bad "omarock isn't installed: omarchy plugin add https://github.com/marcewing/omarock --enable"
 fi
-if grep -q '"marc.omarock"' "$shelljson" 2>/dev/null; then ok "on the bar"; else note "not on the bar: omarchy plugin enable marc.omarock"; fi
+if grep -q '"mre.omarock"' "$shelljson" 2>/dev/null; then ok "on the bar"; else note "not on the bar: omarchy plugin enable mre.omarock"; fi
 loaded=$(journalctl --user -b --no-pager 2>/dev/null | grep -o "omarock [0-9.]* loaded" | tail -1)
 [[ -n $loaded ]] && ok "the shell says: $loaded" || note "the shell hasn't logged omarock loading this boot"
 printf '  sources: radio %s, spotify %s, appleMusic %s, siriusXM %s\n' \
