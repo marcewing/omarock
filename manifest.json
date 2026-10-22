@@ -5,7 +5,7 @@
   "version": "0.5.5",
   "author": "Marc Ewing",
   "license": "MIT",
-  "description": "A music player for mpd in the Omarchy bar. The bar shows the song's cover, artist and title; a click opens the panel and a middle click plays or pauses (with nothing queued, a song at random). Its panel has transport, volume, the queue, an accent-insensitive search of artists, albums, songs, genres and playlists, mpd stored playlists you build as you browse, and an info card (i) with everything known about a song, album, station or channel; Expand gives a bigger view, and TUI opens a terminal player. With the omarock bridge on a Mac it can switch to Apple Music (your library and the full catalog), with the omarock-sxm service to SiriusXM's live channels, to internet radio (FM and other stations, from Radio Browser), all heard through mpd, and with omarock-spotify to Spotify (Spotify's Soloist, playing into omarock's PipeWire bus). All state stays in mpd or the services, so mpc, omarock-am, omarock-sp and other clients stay in sync.",
+  "description": "A multi-source mpd-based music player. Supports your local music files, internet radio, Spotify, SiriusXM, and Apple Music (through a live bridge running on your Mac). The last three are optional, and require accounts. Drive with keyboard or mouse. Bar shows cover and song, click for compact and expanded panes.",
   "kinds": [
     "bar-widget"
   ],
