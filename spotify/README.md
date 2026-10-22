@@ -59,8 +59,8 @@ Run the tools from your omarock clone: the plugin's folder,
    - Remove the rules once it's paired.
 6. **Sign in to the Web API:** `tools/omarock-sp login`. It opens Spotify's
    sign-in page; afterwards `tools/omarock-sp health` says `"authorized": true`.
-7. **Switch Spotify on** in omarock's settings. A Spotify button appears in the
-   panel, and `m` goes round to it.
+7. **Switch Spotify on:** `omarchy bar set marc.omarock spotify true --json`. A
+   Spotify button appears in the panel, and `m` goes round to it.
 
 ## How it behaves
 
@@ -100,10 +100,12 @@ Run the tools from your omarock clone: the plugin's folder,
 ## Remove it
 
 ```bash
+omarchy bar set marc.omarock spotify false --json
 systemctl --user disable --now omarock-spotify omarock-soloist
-rm ~/.config/systemd/user/omarock-spotify.service ~/.config/systemd/user/omarock-soloist.service
-rm -r ~/.local/share/omarock/spotify ~/.local/lib/omarock-soloist ~/.local/share/omarock-soloist ~/.cache/omarock-soloist
-rm ~/.config/omarock/spotify.json ~/.config/omarock/soloist-key ~/.config/omarock/spotify-token.json
+rm -f ~/.config/systemd/user/omarock-spotify.service ~/.config/systemd/user/omarock-soloist.service
+systemctl --user daemon-reload
+rm -rf ~/.local/share/omarock/spotify ~/.local/lib/omarock-soloist ~/.local/share/omarock-soloist ~/.cache/omarock-soloist
+rm -f ~/.config/omarock/spotify.json ~/.config/omarock/soloist-key ~/.config/omarock/spotify-token.json
 ```
 
 Then delete the app in Spotify's developer dashboard.

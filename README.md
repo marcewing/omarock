@@ -67,9 +67,26 @@ optional sources is still hands-on (see each folder's README).
 
 ### 1. mpd
 
-Install mpd and point it at your music (`music_directory` in
-`~/.config/mpd/mpd.conf`). omarock talks to mpd over a unix socket, so mpd must
-listen on one. Either:
+```bash
+sudo pacman -S mpd mpd-mpris mpc
+```
+
+Give mpd a config, `~/.config/mpd/mpd.conf`, with your music folder and places
+for its database, playlists and state:
+
+```
+music_directory     "~/Music"
+playlist_directory  "~/.local/share/mpd/playlists"
+db_file             "~/.local/share/mpd/database"
+state_file          "~/.local/state/mpd/state"
+sticker_file        "~/.local/share/mpd/sticker.sql"
+```
+
+and make the folders: `mkdir -p ~/.local/share/mpd/playlists ~/.local/state/mpd`.
+Without `playlist_directory`, mpd turns stored playlists off, and omarock's
+playlists and radio favourites with them.
+
+omarock talks to mpd over a unix socket, so mpd must listen on one. Either:
 - **The easy way:** `systemctl --user enable --now mpd.socket`. The unit that comes
   with mpd opens `$XDG_RUNTIME_DIR/mpd/socket`, and TCP port 6600 too.
 - **Socket only:** add `bind_to_address "/run/user/1000/mpd/socket"` to mpd.conf
@@ -79,11 +96,28 @@ listen on one. Either:
   [Service]
   RuntimeDirectory=mpd
   ```
-  Then `systemctl --user daemon-reload && systemctl --user restart mpd`.
+  Then `systemctl --user daemon-reload && systemctl --user enable --now mpd`.
 
-For the media keys, `systemctl --user enable --now mpd-mpris`. Album covers come
-from an image in each album's folder, named `cover`, `folder`, `front` or `album`
-(`cover.jpg`, say).
+mpd scans your music the first time it starts. After you add music later, run
+`mpc update`.
+
+**The media keys** go through mpd-mpris. It exits whenever mpd restarts, and its
+unit doesn't bring it back, so give it a drop-in that does:
+
+```ini
+# ~/.config/systemd/user/mpd-mpris.service.d/follow-mpd.conf
+[Unit]
+PartOf=mpd.service
+
+[Service]
+Restart=always
+RestartSec=3
+```
+
+Then `systemctl --user daemon-reload && systemctl --user enable --now mpd-mpris`.
+
+**Album covers** come from an image in each album's folder, named `cover`,
+`folder`, `front` or `album` (`cover.jpg`, say).
 
 ### 2. omarock
 
@@ -158,8 +192,8 @@ says how to remove it.
 ### The other sources
 
 - **Internet radio:** the station playing, your favourites, then the most
-  listened stations in your state (set it in `~/.config/omarock/radio.json`:
-  `{ "state": "Washington" }`). `/` finds stations by name, call sign, frequency
+  listened stations in your US state (set it with `omarchy bar set marc.omarock
+  radioState Maine`). `/` finds stations by name, call sign, frequency
   or genre; Enter tunes; `A` keeps a favourite (in the mpd playlist "Radio", so
   `mpc load Radio` plays them); `n`/`p` step through the favourites. Stations that
   send their song show it. HLS-only stations are dimmed: mpd can't play them.
@@ -184,12 +218,20 @@ says how to remove it.
 
 ## Settings
 
-In omarock's settings in Omarchy, or as keys on its entry in
-`~/.config/omarchy/shell.json`.
+Set them with Omarchy's bar command, for example:
+
+```bash
+omarchy bar set marc.omarock spotify true --json
+omarchy bar set marc.omarock tuiCommand rmpc
+```
+
+(`--json` makes `true` a yes/no rather than text.) The bar picks a change up at
+once. They're kept as keys on omarock's entry in `~/.config/omarchy/shell.json`.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `radio` | on | Internet radio |
+| `radioState` | none | Your US state, for the radio's local stations |
 | `spotify` | off | Spotify ([spotify/README.md](spotify/README.md)) |
 | `appleMusic` | off | Apple Music ([bridge/README.md](bridge/README.md)) |
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |

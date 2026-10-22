@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "marc.omarock",
   "name": "omarock: mpd music player",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "author": "Marc Ewing",
   "description": "A music player for mpd in the Omarchy bar. The bar shows the song's cover, artist and title; a click opens the panel and a middle click plays or pauses (with nothing queued, a song at random). Its panel has transport, volume, the queue, an accent-insensitive search of artists, albums, songs, genres and playlists, mpd stored playlists you build as you browse, and an info card (i) with everything known about a song, album, station or channel; Expand gives a bigger view, and TUI opens a terminal player. With the omarock bridge on a Mac it can switch to Apple Music (your library and the full catalog), with the omarock-sxm service to SiriusXM's live channels, to internet radio (FM and other stations, from Radio Browser), all heard through mpd, and with omarock-spotify to Spotify (Spotify's Soloist, playing into omarock's PipeWire bus). All state stays in mpd or the services, so mpc, omarock-am, omarock-sp and other clients stay in sync.",
   "kinds": [
@@ -33,7 +33,8 @@
       "sxmService": "",
       "radioBrowser": "",
       "spotifyService": "",
-      "appleRejoin": true
+      "appleRejoin": true,
+      "radioState": ""
     },
     "schema": [
       {
@@ -42,6 +43,12 @@
         "label": "Internet radio",
         "defaultValue": true,
         "description": "Stations from Radio Browser, played by mpd. Nothing to set up."
+      },
+      {
+        "key": "radioState",
+        "type": "string",
+        "label": "Internet radio: your US state, for its local stations",
+        "description": "A state's name, such as Maine. Empty: no local stations (or the state in ~/.config/omarock/radio.json)."
       },
       {
         "key": "spotify",

@@ -33,8 +33,9 @@ Soloist ─────┘
    It remembers the output in `~/.config/omarock/audio-output`, so later installs
    need no `--output`. Check: `wpctl status` lists an output called "omarock", and
    `pw-link -l` shows `omarock.output` going to your output, and only there.
-3. **Point mpd at the bus,** with its own volume at full. In `~/.config/mpd/mpd.conf`,
-   replace your `audio_output` block with:
+3. **Point mpd at the bus,** with its own volume at full. Add this to
+   `~/.config/mpd/mpd.conf`, in place of any `audio_output` block it has (keep a
+   copy of that, to go back):
    ```
    audio_output {
        type        "pipewire"
@@ -70,8 +71,13 @@ half-done edit can't change where the sound goes on the next restart.
 
 ## Remove it, in reverse
 
-1. Put mpd.conf's old `audio_output` block back, and restart mpd.
-2. `systemctl --user disable --now omarock-bus omarock-guard`.
-3. Delete the two units from `~/.config/systemd/user/`, the folder
-   `~/.local/share/omarock/audio/`, `~/.config/pipewire/client.conf.d/50-omarock-players.conf`
-   and `~/.config/omarock/audio-output`.
+1. Take omarock's `audio_output` block out of mpd.conf (put your old one back, if
+   you had one), and `systemctl --user restart mpd`.
+2. Then:
+   ```bash
+   systemctl --user disable --now omarock-bus omarock-guard
+   rm -f ~/.config/systemd/user/omarock-bus.service ~/.config/systemd/user/omarock-guard.service
+   systemctl --user daemon-reload
+   rm -rf ~/.local/share/omarock/audio
+   rm -f ~/.config/pipewire/client.conf.d/50-omarock-players.conf ~/.config/omarock/audio-output
+   ```

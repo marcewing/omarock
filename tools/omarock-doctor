@@ -10,8 +10,8 @@ bad() { printf '  \e[31m✗\e[0m %s\n' "$*"; }
 note() { printf '  \e[33m–\e[0m %s\n' "$*"; }
 head2() { printf '\n\e[1m%s\e[0m\n' "$*"; }
 active() { systemctl --user is-active --quiet "$1"; }
-private_file() {  # FILE WHAT: present and mode 600?
-  if [[ ! -e $1 ]]; then bad "$2: $1 is missing"; return 1; fi
+private_file() {  # FILE WHAT [WHERE IT COMES FROM]: present and mode 600?
+  if [[ ! -e $1 ]]; then bad "$2: $1 is missing${3:+ ($3)}"; return 1; fi
   local mode; mode=$(stat -c %a "$1")
   if [[ $mode != 600 ]]; then bad "$2: $1 is mode $mode (chmod 600 it)"; return 1; fi
   ok "$2: $1 (mode 600)"
@@ -88,7 +88,7 @@ if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/om
   head2 "Spotify"
   [[ -x $HOME/.local/lib/omarock-soloist/soloist ]] && ok "Soloist: $("$HOME/.local/lib/omarock-soloist/soloist" --version 2>/dev/null | head -1)" || bad "Soloist isn't installed: tools/update-soloist"
   [[ -f $HOME/.config/omarock/spotify.json ]] && ok "the developer app: ~/.config/omarock/spotify.json" || bad "no ~/.config/omarock/spotify.json: spotify/README.md, step 2"
-  private_file "$HOME/.config/omarock/soloist-key" "the Soloist key"
+  private_file "$HOME/.config/omarock/soloist-key" "the Soloist key" "spotify/README.md, step 3"
   for u in omarock-soloist omarock-spotify; do active $u && ok "$u is running" || bad "$u isn't running: journalctl --user -u $u"; done
   h=$(health "$(setting spotifyService http://127.0.0.1:8730)")
   if [[ -n $h ]]; then
@@ -105,7 +105,7 @@ fi
 
 if [[ $(setting siriusXM false) == true ]] || [[ -e $HOME/.config/systemd/user/omarock-sxm.service ]]; then
   head2 "SiriusXM"
-  private_file "$HOME/.config/omarock/siriusxm.json" "the account"
+  private_file "$HOME/.config/omarock/siriusxm.json" "the account" "tools/install-sxm makes it: sxm/README.md"
   active omarock-sxm && ok "omarock-sxm is running" || bad "omarock-sxm isn't running: journalctl --user -u omarock-sxm"
   h=$(health "$(setting sxmService http://127.0.0.1:8720)")
   if [[ -n $h ]]; then
@@ -127,7 +127,7 @@ if [[ $(setting appleMusic false) == true ]] || [[ -e $HOME/.config/omarock/appl
     bridge=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("bridge",""))' "$HOME/.config/omarock/apple.json" 2>/dev/null)
   fi
   [[ -n $bridge ]] && ok "the bridge: $bridge" || bad "no bridge address: ~/.config/omarock/apple.json (bridge/README.md)"
-  private_file "$(setting appleTokenFile "$HOME/.config/omarock/bridge-token")" "the bridge's token"
+  private_file "$(setting appleTokenFile "$HOME/.config/omarock/bridge-token")" "the bridge's token" "bridge/README.md, the Linux side"
   if [[ -n $bridge ]]; then
     h=$(health "$bridge")
     if [[ -n $h ]]; then
@@ -144,7 +144,7 @@ print("  " + ("\033[32m✓\033[0m the bridge answers, and may use Apple Music" i
   if [[ -n $pid && $pid != 0 ]] && grep -q omarock-flac "/proc/$pid/maps" 2>/dev/null; then
     ok "mpd uses the patched libFLAC$([[ $(setting appleRejoin true) == true ]] && echo '; appleRejoin can be switched off')"
   else
-    note "mpd uses the stock libFLAC: keep appleRejoin on (it is $(setting appleRejoin true)), or see bridge/README.md for the patch"
+    note "mpd uses the stock libFLAC: keep appleRejoin on (it is $(setting appleRejoin true)), or see patches/README.md for the patch"
   fi
 fi
 echo

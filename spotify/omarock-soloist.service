@@ -4,17 +4,18 @@
 # Its WebSocket API (no authentication) listens on this machine only.
 # Installed by tools/install-spotify from a commit; the binary by
 # tools/update-soloist (Spotify's builds expire after 90 days: an expired one
-# exits with 10, which isn't restarted).
+# exits with 10, which isn't restarted). Without its key it says so and stops
+# (78), rather than printing its usage every 5 s.
 [Unit]
 Description=Spotify's Soloist for omarock (a Connect speaker playing into the omarock bus)
 After=pipewire.service omarock-bus.service network-online.target
 Wants=omarock-bus.service
 
 [Service]
-ExecStart=/bin/sh -c 'exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key "$$(cat %h/.config/omarock/soloist-key)" --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 --pipewire-device omarock --initial-volume 100 --ws 127.0.0.1:8731'
+ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key "$$(cat "$$key")" --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 --pipewire-device omarock --initial-volume 100 --ws 127.0.0.1:8731'
 Restart=on-failure
 RestartSec=5
-RestartPreventExitStatus=10
+RestartPreventExitStatus=10 78
 
 [Install]
 WantedBy=default.target

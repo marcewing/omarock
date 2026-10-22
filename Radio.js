@@ -60,6 +60,10 @@ function listRows(favorites, local, playingUuid, place, playing) {
   local.filter(function(s) { return ids.indexOf(s.stationuuid) < 0 }).forEach(function(s, i) {
     rows.push(stationRow(s, i === 0 ? "LOCAL · " + place.toUpperCase() : "", playingUuid, ids))
   })
+  // No state set: say how, as the local stations are otherwise just missing.
+  if (!place)
+    rows.push({ kind: "note", section: "LOCAL", lead: "󰋼", title: "Set your US state for its local stations",
+      subtitle: "omarchy bar set marc.omarock radioState Maine" })
   return rows
 }
 

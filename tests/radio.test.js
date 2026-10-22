@@ -32,7 +32,7 @@ test("listRows puts a station found by search at the top, so A can keep it", () 
   const rows = Radio.listRows([kexp], [kexp], "u1", "Washington", wjrr)
   assert.deepEqual(rows.map(r => [r.section, r.title, r.playing]), [
     ["NOW PLAYING", "101.1 WJRR Orlando's Rock Station", true], ["FAVORITES", "KEXP 90.3", false]])
-  assert.equal(Radio.listRows([kexp], [], "u2", "", kexp).length, 1)
+  assert.equal(Radio.listRows([kexp], [], "u2", "", kexp).filter(r => r.kind === "station").length, 1)
 })
 
 test("parseTitle reads iHeart's tagged titles and plain Artist - Title", () => {
@@ -55,4 +55,13 @@ test("stepStation goes round the playable favourites", () => {
   assert.equal(Radio.stepStation([kexp, wjrr], "u1", 1).stationuuid, "u2")
   assert.equal(Radio.stepStation([kexp, wjrr], "nope", -1).stationuuid, "u2")
   assert.equal(Radio.stepStation([], "u1", 1), null)
+})
+
+test("listRows without a state ends with how to set one", () => {
+  const rows = Radio.listRows([kexp], [], "u2", "")
+  assert.deepEqual(rows.map(r => r.kind), ["station", "note"])
+  assert.equal(rows[1].section, "LOCAL")
+  assert.match(rows[1].subtitle, /omarchy bar set marc\.omarock radioState/)
+  // With a state, no note.
+  assert.ok(Radio.listRows([kexp], [wjrr], "u2", "Florida").every(r => r.kind === "station"))
 })

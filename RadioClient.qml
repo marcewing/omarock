@@ -7,7 +7,7 @@ import "Radio.js" as Radio
 // Internet radio: stations from Radio Browser (radio-browser.info, free and
 // keyless), played by mpd straight from the station's stream. Favourites are
 // the mpd stored playlist "Radio", so mpc sees them too; local stations come
-// from the state in ~/.config/omarock/radio.json ({ "state": "Washington" }).
+// from a US state: the radioState setting, else ~/.config/omarock/radio.json.
 // Where the player card and the bar read the player it has MpdClient's shape;
 // changing station is asked of the panel (tuneRequested), which retunes mpd.
 Item {
@@ -27,7 +27,12 @@ Item {
   property var stations: ({})
   property var favorites: []
   property var local: []
-  property string place: ""
+  // Where "local" is: a US state, from the radioState setting, else from
+  // ~/.config/omarock/radio.json ({ "state": "Washington" }).
+  property string setPlace: ""
+  property string filePlace: ""
+  readonly property string place: root.setPlace !== "" ? root.setPlace : root.filePlace
+  onPlaceChanged: root.refreshLocal()
   readonly property string playlist: "Radio"
   // Logo and artwork URLs checked before an Image loads them: url -> "ok",
   // "bad" or "pending". Radio Browser's logos are often dead links, and a
@@ -57,10 +62,9 @@ Item {
     onLoaded: {
       var config = {}
       try { config = JSON.parse(text()) || {} } catch (e) {}
-      root.place = config.state || ""
-      root.refreshLocal()
+      root.filePlace = config.state || ""
     }
-    onLoadFailed: root.place = ""
+    onLoadFailed: root.filePlace = ""
     onFileChanged: reload()
   }
 

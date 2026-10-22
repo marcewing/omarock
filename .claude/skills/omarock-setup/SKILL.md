@@ -39,7 +39,11 @@ skill is the order to go in, and what to watch out for.
 
 ## 1. mpd
 
-- Version 0.24 or later, running, with a library (`music_directory`, then `mpc update`).
+- `sudo pacman -S mpd mpd-mpris mpc` (all in Arch's `extra`), version 0.24 or later.
+- **The config** needs more than `music_directory`: without `playlist_directory`, mpd
+  turns stored playlists off, and omarock's playlists and radio favourites with
+  them. Use README.md's five-line mpd.conf, and make its folders. mpd scans on its
+  first start; after that, new music needs `mpc update`.
 - **The socket.** omarock reaches mpd only through a unix socket, by default
   `$XDG_RUNTIME_DIR/mpd/socket`. There are two ways (README.md, Install), so let
   the user choose:
@@ -49,7 +53,8 @@ skill is the order to go in, and what to watch out for.
 
   If their mpd already listens elsewhere, setting omarock's `socket` setting may be
   simpler than changing mpd.
-- **The media keys** need `mpd-mpris` running.
+- **The media keys** need `mpd-mpris` running, with README.md's `follow-mpd.conf`
+  drop-in: without it, mpd-mpris dies the first time mpd restarts and stays down.
 - **Covers** are image files in each album's folder (`cover.jpg` and the like).
   Embedded art isn't shown.
 
@@ -119,10 +124,14 @@ There are two halves, and the Mac's is the user's to build. Follow
 ## Switching a source on
 
 The switches are omarock's settings: `radio` (on by default), `spotify`,
-`appleMusic` and `siriusXM` (off). The user can set them in Omarchy's settings
-for the widget. Or, with their OK, add them as keys on omarock's entry in
-`~/.config/omarchy/shell.json` (back it up first), for example
-`{ "id": "marc.omarock", "spotify": true }`. The bar picks the change up at once.
+`appleMusic` and `siriusXM` (off). Set one with Omarchy's bar command, with the
+user's OK: `omarchy bar set marc.omarock spotify true --json`. `--json` matters:
+without it, the value is the text "true". The bar picks the change up at once.
+The other settings (README.md, Settings) are set the same way.
+
+Commands that need the desktop session (`omarchy`, `omarchy-shell`, `qs ipc`)
+fail over a bare ssh login, missing `OMARCHY_PATH` and the like. Run them in a
+terminal in the session.
 
 ## When something's wrong
 

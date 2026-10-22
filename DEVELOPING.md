@@ -151,6 +151,12 @@ opened; `--only fresh-start` checks that.
   handler's name, and silently never works.
 - A reply that lands while a plugin reload tears a client down can find the
   client there but its functions gone; the HTTP clients check for both.
+- **Quickshell 0.3.2's `Socket` crashes the whole shell** if an `onError` handler
+  sets `connected = false`. 0.3.2 hands the error over, then frees the socket if it
+  isn't connected, without checking it's still there. The handler's disconnect
+  has already freed it. MpdClient sets it with `Qt.callLater` instead. Without
+  that, every mpd restart crashed the shell on Omarchy 4.0.6; 0.3.1 doesn't have
+  the bug.
 
 **PipeWire** (audio/)
 - A stream with `node.dont-fallback` whose target is missing needs `node.linger`.
