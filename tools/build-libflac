@@ -27,7 +27,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 echo "libFLAC $version, patched, into $dest"
-git clone -q --depth 1 --branch "$version" https://github.com/xiph/flac.git "$work/flac"
+git -c advice.detachedHead=false clone -q --depth 1 --branch "$version" https://github.com/xiph/flac.git "$work/flac"
 git -C "$work/flac" apply "$repo/patches/libflac-ogg-live.patch"
 cmake -G Ninja -S "$work/flac" -B "$work/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
   -DWITH_OGG=ON -DBUILD_CXXLIBS=OFF -DBUILD_PROGRAMS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF \

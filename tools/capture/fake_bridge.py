@@ -18,6 +18,7 @@ current; /v1/activate and /v1/release are omarock switching to and from it.
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import socket
 import sys
@@ -449,7 +450,8 @@ def main():
     global PORT, SONGS, CATALOG_ALBUMS
     port_file, token, log = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
     mpd_socket = sys.argv[sys.argv.index("--spotify") + 1] if "--spotify" in sys.argv else None
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    # FAKE_BRIDGE_PORT: a fixed port (the installer's test expects the real one, 8710).
+    server = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("FAKE_BRIDGE_PORT", "0"))), Handler)
     server.daemon_threads = True
     PORT = server.server_address[1]
     SONGS, CATALOG_ALBUMS = make_catalog()

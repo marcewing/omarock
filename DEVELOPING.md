@@ -4,6 +4,7 @@
 
 | File | What it is |
 | --- | --- |
+| `install` | The guided installer (bash and gum): mpd, the plugin, then each source, using the `tools/install-*` scripts |
 | `manifest.json` | The plugin's manifest, with its settings schema (Omarchy shows it as the widget's settings) |
 | `BarWidget.qml` | The bar: cover and song; loads the panel once |
 | `Panel.qml` | The popup: compact and expanded layouts, keys, search, browsing, the sources |
@@ -81,6 +82,11 @@ sends mpd an output command.
   `OMAROCK_REAL_STREAM`.
 
 Nothing touches your mpd's queue or playlists, your PipeWire, or the live bar.
+
+**The installer** changes the system it runs on, so test it in a throwaway Omarchy
+VM, never on your own desktop. `OMAROCK_INSTALL_ANSWERS=FILE ./install` runs it
+without gum, answering each prompt from FILE: a line per prompt, `TEXT=ANSWER`,
+where TEXT is part of the prompt. Waits are cut to 20 s.
 
 Offscreen Quickshell has no layer shell, so the harness swaps in
 `tools/capture/KeyboardPanel.qml`. It draws the same card in an ordinary window,

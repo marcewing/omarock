@@ -10,7 +10,12 @@ and pins its sound to one output.
 
 ## Helping someone set it up
 
-Use the `omarock-setup` skill (`.claude/skills/omarock-setup/`). It checks what's
+The quickest route is `./install`, which the user runs in a terminal of their
+own: it asks questions with gum, so it can't run from Claude's shell. Then
+`tools/omarock-doctor` shows anything left to do.
+
+Use the `omarock-setup` skill (`.claude/skills/omarock-setup/`) to help with what
+the installer didn't finish, or to set up step by step instead. It checks what's
 there, then walks through mpd, the plugin, and each optional source, one at a
 time. Each source has its own guide: `spotify/README.md`, `sxm/README.md`,
 `bridge/README.md`, `audio/README.md`.

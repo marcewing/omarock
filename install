@@ -1,0 +1,870 @@
+#!/bin/bash
+# install: set omarock up, or add to what's set up. It asks which sources you
+# want, then walks through each in turn: mpd, the bar plugin, the radio's local
+# stations, the audio bus, Spotify, SiriusXM and Apple Music. Each step checks
+# what's there first, says what it will change, and asks before changing it;
+# every command it runs is shown. Run it again whenever you like: what's done
+# is skipped, and a source can be added later.
+#
+#   ./install            from a clone of omarock, in a terminal on the desktop
+#   ./install --help
+#
+# Secrets (the Soloist key, the SiriusXM login, the bridge's token) are typed
+# into hidden prompts and go straight into files only you can read
+# (~/.config/omarock, mode 600). Nothing is printed or passed on a command line.
+#
+# For tests, OMAROCK_INSTALL_ANSWERS=FILE answers the prompts from FILE, without
+# gum: a line per prompt, `TEXT=ANSWER`, where TEXT is part of the prompt and
+# ANSWER is y or n, a choice's key, comma-separated keys, or text. Waits are
+# cut to 20 s.
+set -uo pipefail
+
+repo=$(cd "$(dirname "$0")" && pwd)
+plugin_dir=$HOME/.config/omarchy/plugins/marc.omarock
+shelljson=$HOME/.config/omarchy/shell.json
+config=$HOME/.config/omarock
+units=$HOME/.config/systemd/user
+share=$HOME/.local/share/omarock
+answers=${OMAROCK_INSTALL_ANSWERS:-}
+
+bold=$'\e[1m' dim=$'\e[2m' reset=$'\e[0m' green=$'\e[32m' red=$'\e[31m' yellow=$'\e[33m'
+ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; }
+bad() { printf '  %s✗%s %s\n' "$red" "$reset" "$*"; }
+note() { printf '  %s–%s %s\n' "$yellow" "$reset" "$*"; }
+explain() { printf '%s\n' "$*" | fold -s -w 76 | sed 's/^/  /'; }
+step_no=0
+step() { step_no=$((step_no + 1)); printf '\n%s%d. %s%s\n' "$bold" "$step_no" "$*" "$reset"; }
+
+# A command, shown as it would be typed (on stderr, so its output can be
+# silenced alone), then run.
+run() {
+  local shown="" a
+  for a in "$@"; do
+    if [[ $a =~ ^[A-Za-z0-9_./:=@%+,~-]+$ ]]; then shown+=" $a"; else shown+=" '${a//\'/\'\\\'\'}'"; fi
+  done
+  printf '  %s$%s%s\n' "$dim" "$shown" "$reset" >&2
+  "$@"
+}
+
+# Ctrl-C or Esc at a prompt. The prompts run in $(…), so this goes to stderr,
+# and the caller exits (`|| exit 1`).
+stopped() {
+  printf '\n%sStopped.%s Run ./install again to carry on from here.\n' "$bold" "$reset" >&2
+  exit 1
+}
+
+# ---- Prompts: gum in a terminal, or the answers file in tests ----
+
+# The answers file has a line per prompt, `TEXT=ANSWER`: the first line whose
+# TEXT is in the prompt answers it. By text, not order, since some prompts
+# come only sometimes (mpd still reading the music, say).
+answer() {  # PROMPT [SHOWN]: the prompt's answer from the file, logged
+  local key value
+  while IFS='=' read -r key value; do
+    [[ -n $key && $1 == *"$key"* ]] || continue
+    printf '  ? %s %s%s%s\n' "$1" "$dim" "${2:-$value}" "$reset" >&2
+    printf '%s' "$value"
+    return 0
+  done <"$answers"
+  echo "install: no answer for: $1" >&2
+  kill -TERM $$
+  exit 3
+}
+
+# confirm PROMPT [yes|no]: the default is yes.
+confirm() {
+  if [[ -n $answers ]]; then [[ $(answer "$1") == y* ]]; return; fi
+  local rc
+  gum confirm --default="$([[ ${2:-yes} == yes ]] && echo true || echo false)" "$1"
+  rc=$?
+  ((rc == 130)) && stopped
+  return $rc
+}
+
+# ask PROMPT [VALUE] [PLACEHOLDER]: a line of text.
+ask() {
+  if [[ -n $answers ]]; then answer "$1"; return; fi
+  gum input --header "$1" --value "${2:-}" --placeholder "${3:-}" --width 72 || stopped
+}
+
+# secret PROMPT: a line of text that isn't shown.
+secret() {
+  if [[ -n $answers ]]; then answer "$1" "••••"; return; fi
+  gum input --password --header "$1" --width 72 || stopped
+}
+
+# choose HEADER DEFAULT KEY LABEL [KEY LABEL ...]: one key. Labels show; keys come back.
+choose() {
+  local header=$1 default=$2 labels=() keys=() selected="" i picked
+  shift 2
+  while (($#)); do keys+=("$1"); labels+=("$2"); shift 2; done
+  if [[ -n $answers ]]; then answer "$header"; return; fi
+  for i in "${!keys[@]}"; do [[ ${keys[i]} == "$default" ]] && selected=${labels[i]}; done
+  picked=$(gum choose --header "$header" ${selected:+--selected "$selected"} "${labels[@]}") || stopped
+  for i in "${!labels[@]}"; do [[ ${labels[i]} == "$picked" ]] && printf '%s' "${keys[i]}"; done
+  return 0
+}
+
+# choose_many HEADER DEFAULTS KEY LABEL [...]: keys, comma-separated. Labels can't hold commas.
+choose_many() {
+  local header=$1 defaults=",$2," labels=() keys=() selected=() i picked out=() line
+  shift 2
+  while (($#)); do keys+=("$1"); labels+=("$2"); shift 2; done
+  if [[ -n $answers ]]; then answer "$header"; return; fi
+  for i in "${!keys[@]}"; do [[ $defaults == *",${keys[i]},"* ]] && selected+=(--selected "${labels[i]}"); done
+  picked=$(gum choose --no-limit --header "$header" "${selected[@]}" "${labels[@]}") || stopped
+  while IFS= read -r line; do
+    for i in "${!labels[@]}"; do [[ ${labels[i]} == "$line" ]] && out+=("${keys[i]}"); done
+  done <<<"$picked"
+  local IFS=,
+  printf '%s' "${out[*]}"
+  return 0
+}
+
+# wait_until TITLE SECONDS COMMAND...: COMMAND again every 2 s until it
+# succeeds, with a spinner. Ctrl-C gives up waiting, not the installer.
+wait_until() {
+  local title=$1 secs=$2 end frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 given_up=false met=false tty=""
+  shift 2
+  [[ -n $answers ]] && ((secs > 20)) && secs=20
+  end=$((SECONDS + secs))
+  # Keys typed meanwhile (Ctrl-C's ^C too) aren't echoed over the spinner.
+  [[ -z $answers ]] && tty=$(stty -g 2>/dev/null) && stty -echo -echoctl 2>/dev/null
+  trap 'given_up=true' INT
+  while :; do
+    if "$@" >/dev/null 2>&1; then met=true; break; fi
+    if $given_up || ((SECONDS >= end)); then break; fi
+    if [[ -n $answers ]]; then sleep 2; continue; fi
+    local _
+    for _ in 1 2 3 4 5 6 7 8; do
+      printf '\r  %s %s' "${frames:i++ % 10:1}" "$title"
+      sleep 0.25
+      $given_up && break
+    done
+  done
+  trap - INT
+  [[ -n $tty ]] && stty "$tty" 2>/dev/null
+  [[ -z $answers ]] && printf '\r\e[K'
+  $met
+}
+
+# ---- What's there ----
+
+# setting KEY DEFAULT: omarock's setting, from its entry in Omarchy's shell.json.
+setting() {
+  python3 -I - "$shelljson" "$1" "$2" <<'PY'
+import json, sys
+path, key, default = sys.argv[1:]
+try:
+    d = json.load(open(path))
+    for items in (d.get("bar", {}).get("layout", {}) or {}).values():
+        for it in items:
+            if isinstance(it, dict) and it.get("id") == "marc.omarock" and key in it:
+                v = it[key]
+                print(str(v).lower() if isinstance(v, bool) else v)
+                sys.exit(0)
+except Exception:
+    pass
+print(default)
+PY
+}
+# The settings to make once the plugin is on the bar: key -> JSON value.
+declare -A pending=()
+
+manifest_version() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$1" 2>/dev/null; }
+newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1) == "$1" ]]; }
+active() { systemctl --user is-active --quiet "$1"; }
+health() { curl -s -m 5 "$1/v1/health" 2>/dev/null; }
+
+mpd_socket=""
+mpd_answers() { [[ -S $mpd_socket ]] && MPD_HOST=$mpd_socket mpc status >/dev/null 2>&1; }
+
+# The config mpd reads, first found (as mpd looks), or where a new one goes.
+mpd_conf() {
+  local f
+  for f in "${XDG_CONFIG_HOME:-$HOME/.config}/mpd/mpd.conf" "$HOME/.mpdconf" "$HOME/.mpd/mpd.conf"; do
+    [[ -f $f ]] && { echo "$f"; return; }
+  done
+  echo "${XDG_CONFIG_HOME:-$HOME/.config}/mpd/mpd.conf"
+}
+conf_value() { grep -E "^[[:space:]]*$2[[:space:]]" "$1" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*[a-z_]+[[:space:]]+"?([^"]*)"?.*/\1/'; }
+backed_up=""
+backup() {  # FILE: a copy beside it, once a run
+  [[ -f $1 && $backed_up != *"|$1|"* ]] || return 0
+  local copy
+  copy="$1.before-omarock-$(date +%Y%m%d-%H%M%S)"
+  cp -p "$1" "$copy" && note "kept a copy: $copy"
+  backed_up+="|$1|"
+}
+
+# Into a file only you can read, from stdin.
+write_private() {
+  install -d "$(dirname "$1")"
+  (umask 077 && cat >"$1.new") && chmod 600 "$1.new" && mv "$1.new" "$1"
+}
+private_ok() { [[ -s $1 && $(stat -c %a "$1") == 600 ]]; }
+
+# A service from this clone is installed, and as this clone has it?
+installed_commit() { cat "$share/$1/INSTALLED" 2>/dev/null; }
+up_to_date() {  # DIR (audio, spotify, sxm): the installed copy matches HEAD's files
+  local c
+  c=$(installed_commit "$1") && [[ -n $c ]] && git -C "$repo" diff --quiet "$c" HEAD -- "$1/" 2>/dev/null
+}
+
+# ---- 0. Before anything ----
+
+preflight() {
+  if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'
+    exit 0
+  fi
+  [[ $EUID != 0 ]] || { echo "Run ./install as yourself, not root: it asks for sudo when it needs it."; exit 1; }
+  command -v omarchy >/dev/null || { echo "omarock is a plugin for Omarchy's bar, and Omarchy isn't here."; exit 1; }
+  command -v pacman >/dev/null || { echo "This installer uses pacman (Arch)."; exit 1; }
+  git -C "$repo" rev-parse --verify -q HEAD >/dev/null || {
+    echo "Run ./install from a git clone of omarock (git clone https://github.com/marcewing/omarock)."; exit 1; }
+  if [[ -z $answers ]]; then
+    [[ -t 0 && -t 1 ]] || { echo "Run ./install in a terminal: it asks questions."; exit 1; }
+    command -v gum >/dev/null || { echo "The installer needs gum (Omarchy's prompts): sudo pacman -S gum"; exit 1; }
+  fi
+  # Omarchy's commands need the desktop session's environment, which a bare
+  # ssh login lacks.
+  local k v
+  while IFS='=' read -r k v; do
+    case $k in LANG|OMARCHY_PATH|WAYLAND_DISPLAY|HYPRLAND_INSTANCE_SIGNATURE|XDG_CURRENT_DESKTOP|DISPLAY)
+      [[ -z ${!k:-} ]] && export "$k=$v" ;;
+    esac
+  done < <(systemctl --user show-environment 2>/dev/null)
+}
+
+welcome() {
+  local v
+  v=$(manifest_version "$repo/manifest.json")
+  printf '\n%somarock %s%s: a music player for the Omarchy bar\n\n' "$bold" "$v" "$reset"
+  explain "This sets omarock up one step at a time: mpd (which plays the music), the bar plugin, then the sources you pick. It shows each command before running it, and asks before it changes anything. Run it again whenever you like: what's done is checked and skipped, and you can add a source later."
+  echo
+  explain "Local music is always there. Which sources do you want too? Press x to pick or unpick one, then Enter."
+}
+
+choose_sources() {
+  local now=() picked
+  [[ $(setting radio true) == true ]] && now+=(radio)
+  [[ $(setting spotify false) == true ]] && now+=(spotify)
+  [[ $(setting appleMusic false) == true ]] && now+=(apple)
+  [[ $(setting siriusXM false) == true ]] && now+=(sxm)
+  [[ -f $share/audio/omarock-bus.conf ]] && now+=(bus)
+  picked=$(IFS=,; choose_many "Sources (and the optional audio bus)" "${now[*]}" \
+    radio "Internet radio: thousands of stations with nothing to set up" \
+    spotify "Spotify: needs Premium and a free Spotify developer app" \
+    apple "Apple Music: needs a Mac running omarock's bridge (advanced)" \
+    sxm "SiriusXM: needs a subscription with streaming (unofficial)" \
+    bus "One volume and one pinned output for all of omarock (the audio bus)") || exit 1
+  want=",$picked,"
+  if [[ $want == *,spotify,* && $want != *,bus,* ]]; then
+    note "Spotify plays through the audio bus, so that's included."
+    want+="bus,"
+  fi
+}
+wants() { [[ $want == *",$1,"* ]]; }
+declare -A done_=()
+
+# ---- 1. mpd ----
+
+step_mpd() {
+  step "mpd"
+  local need=() p conf music v
+  for p in mpd mpd-mpris mpc; do pacman -Q "$p" >/dev/null 2>&1 || need+=("$p"); done
+  if ((${#need[@]})); then
+    explain "omarock is a client for mpd, which plays the music and keeps the queue and playlists. mpc is its command line, and mpd-mpris passes the media keys to it. All three come from Arch's own repositories."
+    if ! pacman -Q ncmpcpp >/dev/null 2>&1 && confirm "Install ncmpcpp too? The panel's TUI button opens it." no; then need+=(ncmpcpp); fi
+    confirm "Install ${need[*]} with pacman?" || { bad "omarock can't play anything without mpd."; stopped; }
+    run sudo pacman -S --needed --noconfirm "${need[@]}" || stopped
+  fi
+  v=$(mpd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+  if [[ $(printf '%s\n0.24\n' "$v" | sort -V | head -1) != 0.24 ]]; then bad "mpd $v is too old: omarock needs 0.24 or later."; stopped; fi
+  ok "mpd $v, mpc and mpd-mpris are installed"
+  if systemctl is-active --quiet mpd 2>/dev/null; then
+    note "mpd also runs as a system service. This sets up mpd as your own (user) service, which is what Omarchy's media keys expect."
+  fi
+
+  # The config: the music, and places for the database, playlists and state.
+  # Without playlist_directory mpd turns stored playlists off, and with them
+  # omarock's playlists and radio favourites.
+  conf=$(mpd_conf)
+  local changed=false lines=()
+  if [[ ! -f $conf ]]; then
+    explain "mpd needs a config: where your music is, and where to keep its database, playlists and state."
+    music=$(ask "Where's your music?" "$(xdg-user-dir MUSIC 2>/dev/null || echo "$HOME/Music")") || exit 1
+    music=${music/#\~/$HOME}
+    [[ -d $music ]] || note "$music isn't there now; mpd will find the music once it is."
+    [[ $music == "$HOME"/* ]] && music="~/${music#"$HOME"/}"
+    lines=("music_directory     \"$music\"")
+  else
+    ok "mpd's config: $conf"
+    [[ -n $(conf_value "$conf" music_directory) ]] || note "it names no music_directory, so mpd uses your Music folder ($(xdg-user-dir MUSIC 2>/dev/null || echo ~/Music))"
+  fi
+  local key path
+  for key in playlist_directory db_file state_file sticker_file; do
+    [[ -n $(conf_value "$conf" "$key") ]] && continue
+    case $key in
+      playlist_directory) path="~/.local/share/mpd/playlists" ;;
+      db_file) path="~/.local/share/mpd/database" ;;
+      state_file) path="~/.local/state/mpd/state" ;;
+      sticker_file) path="~/.local/share/mpd/sticker.sql" ;;
+    esac
+    lines+=("$(printf '%-19s "%s"' "$key" "$path")")
+  done
+
+  # The socket. Omarchy's bar (Quickshell) can only open unix sockets, not
+  # mpd's TCP port, so mpd listens on one, and on TCP for this machine only
+  # (as before, for mpc and ncmpcpp) if it had no other address.
+  mpd_socket=$(setting socket "")
+  [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
+  local other dropin_dir=$units/mpd.service.d need_dropin=false
+  other=$(grep -E '^[[:space:]]*bind_to_address[[:space:]]+"/' "$conf" 2>/dev/null | head -1 | cut -d'"' -f2)
+  if [[ -n $other && $other != "$mpd_socket" ]]; then
+    ok "mpd listens on $other; omarock will use it (its socket setting)"
+    mpd_socket=$other
+    pending[socket]=$(jq -cn --arg s "$other" '$s')
+  elif [[ -z $other ]] && ! mpd_answers; then
+    lines+=("" "# omarock: a unix socket (Omarchy's bar can't use TCP)")
+    lines+=("bind_to_address     \"$mpd_socket\"")
+    grep -qE '^[[:space:]]*bind_to_address' "$conf" 2>/dev/null || lines+=("bind_to_address     \"localhost\"")
+  fi
+  # mpc, here and in the commands shown, uses omarock's socket.
+  export MPD_HOST=$mpd_socket
+  if [[ $mpd_socket == "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/"* ]] && ! active mpd.socket \
+     && ! grep -qs '^RuntimeDirectory=mpd' "$dropin_dir"/*.conf; then
+    need_dropin=true
+  fi
+
+  if ((${#lines[@]})) || $need_dropin; then
+    echo
+    if ((${#lines[@]})); then
+      if [[ -f $conf ]]; then explain "This adds to $conf:"; else explain "This makes $conf:"; fi
+      printf '    %s\n' "${lines[@]}"
+    fi
+    $need_dropin && explain "and a systemd drop-in, $dropin_dir/runtime-dir.conf, that makes the socket's folder."
+    confirm "Make these changes?" || { bad "omarock needs mpd's socket and playlists."; stopped; }
+    if ((${#lines[@]})); then
+      backup "$conf"
+      install -d "$(dirname "$conf")"
+      { [[ -s $conf ]] && echo; printf '%s\n' "${lines[@]}"; } >>"$conf"
+      ok "wrote $conf"
+      changed=true
+    fi
+    if $need_dropin; then
+      install -d "$dropin_dir"
+      printf '# omarock: makes $XDG_RUNTIME_DIR/mpd for mpd'"'"'s socket\n[Service]\nRuntimeDirectory=mpd\n' >"$dropin_dir/runtime-dir.conf"
+      ok "wrote $dropin_dir/runtime-dir.conf"
+      run systemctl --user daemon-reload
+      changed=true
+    fi
+  fi
+  mkdir -p ~/.local/share/mpd/playlists ~/.local/state/mpd
+
+  # Running, and answering on the socket.
+  if active mpd.socket && ! active mpd; then
+    :  # socket activation starts mpd on the first connection
+  elif active mpd; then
+    if $changed; then
+      confirm "Restart mpd to use its new config? Anything playing stops for a moment." && run systemctl --user restart mpd
+    fi
+  else
+    run systemctl --user enable --now mpd || { bad "mpd didn't start: journalctl --user -u mpd"; stopped; }
+  fi
+  systemctl --user is-enabled --quiet mpd 2>/dev/null || active mpd.socket || run systemctl --user enable mpd
+  local i
+  for ((i = 0; i < 40; i++)); do mpd_answers && break; sleep 0.5; done
+  if mpd_answers; then ok "mpd answers on $mpd_socket"; else bad "mpd doesn't answer on $mpd_socket: journalctl --user -u mpd"; stopped; fi
+  local songs
+  songs=$(mpc stats 2>/dev/null | awk '/^Songs:/ {print $2}')
+  if mpc status 2>/dev/null | grep -q '^Updating DB'; then
+    ok "mpd is reading your music now ($songs songs so far); it carries on in the background"
+  elif [[ ${songs:-0} == 0 ]]; then
+    note "mpd's library is empty."
+    confirm "Have mpd read your music folder now (mpc update)?" && run mpc --quiet update
+  else
+    ok "mpd knows $songs songs (after adding music: mpc update)"
+  fi
+
+  # The media keys: mpd-mpris exits whenever mpd restarts, and its unit
+  # doesn't bring it back; a drop-in does.
+  local mpris_dir=$units/mpd-mpris.service.d
+  if [[ ! -f $mpris_dir/follow-mpd.conf ]]; then
+    explain "mpd-mpris passes the media keys to mpd. It exits whenever mpd restarts and stays down; a drop-in ($mpris_dir/follow-mpd.conf) brings it back."
+    if confirm "Add it?"; then
+      install -d "$mpris_dir"
+      printf '# omarock: follow mpd, and come back after it restarts\n[Unit]\nPartOf=mpd.service\n\n[Service]\nRestart=always\nRestartSec=3\n' >"$mpris_dir/follow-mpd.conf"
+      ok "wrote $mpris_dir/follow-mpd.conf"
+      run systemctl --user daemon-reload
+    fi
+  fi
+  if ! active mpd-mpris || ! systemctl --user is-enabled --quiet mpd-mpris 2>/dev/null; then
+    run systemctl --user enable --now mpd-mpris
+  fi
+  active mpd-mpris && ok "mpd-mpris runs (the media keys)" || note "mpd-mpris isn't running: journalctl --user -u mpd-mpris"
+}
+
+# ---- 2. The plugin ----
+
+loaded_since() {  # TIME [VERSION]: the shell has logged omarock (that version) loading since TIME
+  journalctl --user --since "@$1" --no-pager 2>/dev/null | grep -q "omarock ${2:-.*} loaded"
+}
+plugin_known() { omarchy plugin list --json 2>/dev/null | jq -e 'any(.[]; .id == "marc.omarock")' >/dev/null; }
+
+step_plugin() {
+  step "The bar plugin"
+  local here installed src section t0
+  here=$(manifest_version "$repo/manifest.json")
+  if [[ -f $plugin_dir/manifest.json ]]; then
+    installed=$(manifest_version "$plugin_dir/manifest.json")
+    ok "omarock $installed is installed ($plugin_dir)"
+    if newer "$here" "$installed"; then
+      if confirm "This clone has omarock $here. Update the plugin?"; then
+        run omarchy plugin update marc.omarock --yes
+        installed=$(manifest_version "$plugin_dir/manifest.json")
+        if [[ $installed != "$here" ]]; then
+          bad "the plugin is still $installed: its source ($(git -C "$plugin_dir" remote get-url origin 2>/dev/null)) didn't bring $here"
+        else
+          explain "Omarchy's shell has to restart to load it. That restarts every bar plugin, which takes a second."
+          if confirm "Restart the shell now?"; then
+            t0=$(date +%s)
+            run omarchy restart shell >/dev/null 2>&1
+            if wait_until "Waiting for the bar…" 30 loaded_since "$t0" "$here"; then
+              ok "omarock $here loaded"
+            else
+              note "the bar hasn't said it loaded omarock $here yet: journalctl --user -b | grep omarock"
+            fi
+          fi
+        fi
+      fi
+    fi
+    if ! grep -q '"marc.omarock"' "$shelljson" 2>/dev/null; then
+      confirm "omarock isn't on the bar. Put it there?" && run omarchy plugin enable marc.omarock
+    fi
+    return
+  fi
+  # From where this clone came from, so `omarchy plugin update` follows it;
+  # a clone with no remote gives its own folder.
+  src=$(git -C "$repo" remote get-url origin 2>/dev/null)
+  [[ -z $src || $src == /* ]] && src="file://$repo"
+  explain "omarock is added from $src, as Omarchy adds any plugin. Later, omarchy plugin update marc.omarock updates it."
+  section=$(choose "Where on the bar?" left left "On the left" center "In the middle" right "On the right") || exit 1
+  confirm "Add omarock to the bar?" || stopped
+  # omarock's own folder, before omarock loads: it watches the files there,
+  # and can't watch a folder that doesn't exist yet.
+  install -d "$config"
+  t0=$(date +%s)
+  run omarchy plugin add "$src" --yes || stopped
+  wait_until "Waiting for Omarchy to find it…" 15 plugin_known
+  run omarchy plugin enable marc.omarock --section "$section" || stopped
+  if wait_until "Waiting for the bar to load omarock…" 30 loaded_since "$t0" "$here"; then
+    ok "omarock $here is on the bar"
+  else
+    note "the bar hasn't said it loaded omarock yet: journalctl --user -b | grep omarock"
+  fi
+}
+
+# ---- 3. The radio's local stations ----
+
+step_radio() {
+  step "Internet radio"
+  local state
+  state=$(setting radioState "")
+  [[ -z $state && -f $config/radio.json ]] && state=$(jq -r '.state // empty' "$config/radio.json" 2>/dev/null)
+  if [[ -n $state ]]; then ok "local stations from $state"; done_[radio]=1; return; fi
+  explain "Radio comes from Radio Browser, a free directory of stations; mpd plays them. With your US state, the list starts with your local stations."
+  state=$(ask "Your US state (Enter to skip):" "" "Maine") || exit 1
+  [[ -n $state ]] && pending[radioState]=$(jq -cn --arg s "$state" '$s')
+  done_[radio]=1
+}
+
+# ---- 4. The audio bus ----
+
+step_bus() {
+  step "The audio bus"
+  local pin out default conf vol
+  conf=$(mpd_conf)
+  if [[ -f $share/audio/omarock-bus.conf ]]; then
+    pin=$(grep -o 'target.object = "[^"]*"' "$share/audio/omarock-bus.conf" | cut -d'"' -f2)
+    ok "installed, playing only into $pin"
+    if ! up_to_date audio; then
+      confirm "This clone has a newer bus. Update it (same output)?" && run "$repo/tools/install-audio" --start
+    fi
+  else
+    explain "The bus is omarock's own output: everything omarock plays (mpd, Spotify) goes through it, with one volume, into one output you pick. It never falls back to another output: if yours goes away, the bus waits, silent."
+    explain "That matters if some outputs must never carry music: a radio transmitter's audio interface, say, or a TV in another room. Pick the output for your speakers or headphones."
+    default=$(pactl get-default-sink 2>/dev/null)
+    local name desc args=()
+    while IFS=$'\t' read -r name desc; do
+      [[ $name == omarock || -z $name ]] && continue
+      args+=("$name" "$desc ($name)")
+    done < <(pactl -f json list sinks 2>/dev/null | jq -r '.[] | [.name, .description] | @tsv')
+    if ((${#args[@]} == 0)); then bad "PipeWire lists no outputs."; return 1; fi
+    out=$(choose "Which output should omarock play into?" "$default" "${args[@]}") || exit 1
+    [[ -n $out ]] || return 1
+    confirm "omarock will play only into $out. Go on?" || return 1
+    run "$repo/tools/install-audio" --start --output "$out" || return 1
+  fi
+
+  # mpd plays into the bus, with no volume of its own: the bus's is the volume.
+  if grep -qE '^[[:space:]]*target[[:space:]]+"omarock"' "$conf" 2>/dev/null; then
+    ok "mpd plays into the bus"
+  else
+    explain "mpd has to play into the bus. This puts a new audio_output in $conf, and comments out the ones there (to go back: audio/README.md):"
+    printf '    %s\n' 'audio_output {' '    type        "pipewire"' '    name        "omarock"' '    target      "omarock"' '    mixer_type  "none"' '}'
+    confirm "Change mpd's output, and restart mpd?" || return 1
+    # The bus starts at mpd's volume now, since mpd's own goes to full.
+    vol=$(mpc volume 2>/dev/null | grep -oE '[0-9]+' | head -1)
+    wait_until "Waiting for the bus…" 15 "$repo/tools/omarock-volume" \
+      && run "$repo/tools/omarock-volume" "${vol:-40}" >/dev/null
+    backup "$conf"
+    python3 -I - "$conf" <<'PY' || return 1
+import re, sys
+path = sys.argv[1]
+out, inside = [], False
+for line in open(path).read().splitlines():
+    if not inside and re.match(r'\s*audio_output\b', line):
+        out.append("# omarock: mpd plays into the bus now; this was the output before")
+        inside = True
+    if inside:
+        out.append("# " + line)
+        if re.match(r'\s*\}', line):
+            inside = False
+        continue
+    out.append(line)
+block = ['', 'audio_output {', '    type        "pipewire"', '    name        "omarock"',
+         '    target      "omarock"', '    mixer_type  "none"', '}']
+open(path + ".new", "w").write("\n".join(out + block) + "\n")
+PY
+    mv "$conf.new" "$conf"
+    run systemctl --user restart mpd
+    local i
+    for ((i = 0; i < 40; i++)); do mpd_answers && break; sleep 0.5; done
+    if mpc outputs 2>/dev/null | grep -q "(omarock)"; then ok "mpd plays into the bus"; else bad "mpd's output isn't the bus: journalctl --user -u mpd"; return 1; fi
+  fi
+  ok "omarock's volume is the bus's now (mpc volume no longer applies: tools/omarock-volume)"
+  done_[bus]=1
+}
+
+# ---- 5. Spotify ----
+
+sp_health() { health http://127.0.0.1:8730; }
+sp_paired() { sp_health | jq -e '.soloist.loggedIn' >/dev/null; }
+sp_signed_in() { sp_health | jq -e '.web.signedIn' >/dev/null; }
+sp_up() { [[ -n $(sp_health) ]]; }
+added_rules=()
+cleanup_firewall() {
+  local r
+  for r in "${added_rules[@]}"; do run sudo ufw delete allow "$r" >/dev/null; done
+  added_rules=()
+}
+trap cleanup_firewall EXIT
+
+step_spotify() {
+  step "Spotify"
+  if [[ -z ${done_[bus]:-} ]]; then bad "Spotify plays through the audio bus, which isn't set up."; return 1; fi
+  explain "Spotify plays here through Soloist, Spotify's own player (a Spotify Connect speaker named after this machine). omarock-spotify drives it, and searches through Spotify's Web API. You need Spotify Premium."
+  local id
+  if [[ -f $config/spotify.json ]] && jq -e '.clientId | length > 0' "$config/spotify.json" >/dev/null 2>&1; then
+    ok "the developer app: $config/spotify.json"
+  else
+    explain "First, a Spotify developer app of your own (free): at developer.spotify.com/dashboard, create an app with the redirect URI http://127.0.0.1:8730/callback, and tick Web API. Its Client ID goes in omarock's config."
+    if [[ -z $answers ]] && confirm "Open the dashboard in your browser?"; then xdg-open https://developer.spotify.com/dashboard >/dev/null 2>&1 & fi
+    while :; do
+      id=$(ask "The app's Client ID (Enter to stop here):" "" "32 letters and digits") || exit 1
+      [[ -z $id ]] && return 1
+      [[ $id =~ ^[0-9a-fA-F]{32}$ ]] && break
+      bad "A Client ID is 32 letters and digits."
+    done
+    install -d "$config"
+    jq -n --arg id "$id" '{clientId: $id, redirectUri: "http://127.0.0.1:8730/callback"}' >"$config/spotify.json"
+    ok "wrote $config/spotify.json"
+  fi
+  if private_ok "$config/soloist-key"; then
+    ok "the Soloist key: $config/soloist-key"
+  else
+    explain "Then the Soloist key, from the same dashboard. It goes into $config/soloist-key, readable only by you, and isn't shown as you type."
+    local key
+    key=$(secret "The Soloist key (Enter to stop here):") || exit 1
+    [[ -z $key ]] && return 1
+    printf '%s\n' "$key" | write_private "$config/soloist-key"
+    key=""
+    ok "saved the Soloist key"
+  fi
+  run "$repo/tools/update-soloist" || { bad "couldn't fetch Soloist from Spotify"; return 1; }
+  if [[ ! -f $share/spotify/INSTALLED ]]; then
+    run "$repo/tools/install-spotify" --start || return 1
+  elif ! up_to_date spotify && confirm "This clone has a newer omarock-spotify. Update it?"; then
+    run "$repo/tools/install-spotify" --start || return 1
+  elif ! active omarock-spotify; then
+    run systemctl --user start omarock-soloist omarock-spotify
+  fi
+  wait_until "Waiting for omarock-spotify…" 20 sp_up || { bad "omarock-spotify doesn't answer: journalctl --user -u omarock-spotify -u omarock-soloist"; return 1; }
+  ok "omarock-spotify and Soloist run"
+
+  # Pairing: once, from the Spotify app on a phone or computer on this network.
+  if sp_paired; then
+    ok "Soloist is signed in to your account"
+  else
+    explain "Now pair Soloist with your account, once: in Spotify on your phone or computer, on this network, open Connect to a device, pick $(hostname), and play something."
+    if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
+      local port
+      port=$(ss -ltnpH 2>/dev/null | awk '/"soloist"/ && $4 !~ /^127\./ {n = split($4, a, ":"); print a[n]; exit}')
+      if [[ -z $port ]]; then
+        note "Soloist isn't listening for Spotify apps: journalctl --user -u omarock-soloist"
+      else
+        explain "Your firewall (ufw) hides Soloist from the network. This opens its port ($port/tcp) and mDNS (5353/udp) while you pair, and closes them again afterwards."
+      fi
+      if [[ -n $port ]] && confirm "Open them for the pairing (sudo ufw)?"; then
+        local rule
+        for rule in "$port/tcp" 5353/udp; do
+          if ! sudo ufw status | grep -qE "^${rule}[[:space:]]"; then
+            run sudo ufw allow "$rule" >/dev/null && added_rules+=("$rule")
+          fi
+        done
+      fi
+    fi
+    if wait_until "Waiting for the pairing… (Ctrl-C to do it later)" 600 sp_paired; then
+      ok "Soloist is signed in to your account"
+    else
+      note "not paired yet; pair it whenever you like (spotify/README.md, step 5)"
+    fi
+    cleanup_firewall
+  fi
+  if sp_signed_in; then
+    ok "signed in to Spotify's Web API"
+  else
+    explain "Last, sign in to Spotify's Web API (for search and your library). This opens Spotify's sign-in page in your browser."
+    if confirm "Sign in now?"; then
+      run "$repo/tools/omarock-sp" login
+      wait_until "Waiting for the sign-in… (Ctrl-C to do it later)" 300 sp_signed_in \
+        && ok "signed in to Spotify's Web API" || note "not signed in yet: tools/omarock-sp login"
+    fi
+  fi
+  done_[spotify]=1
+}
+
+# ---- 6. SiriusXM ----
+
+sxm_health() { health http://127.0.0.1:8720; }
+sxm_signed_in() { sxm_health | jq -e '.account and .loggedIn' >/dev/null; }
+sxm_account_set() {
+  python3 -I -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+sys.exit(0 if d.get("username") and d.get("password") and d["username"] != "you@example.com" else 1)' "$config/siriusxm.json" 2>/dev/null
+}
+
+step_sxm() {
+  step "SiriusXM"
+  if [[ ! -f $share/sxm/INSTALLED ]]; then
+    explain "omarock-sxm plays SiriusXM's live channels through mpd. It's unofficial: it signs in as SiriusXM's web player does. SiriusXM's terms forbid that, so your account could be limited or closed, and it may stop working whenever SiriusXM changes its player (sxm/README.md, \"Read this first\")."
+    confirm "Set it up anyway?" no || return 1
+  fi
+  if [[ ! -f $share/sxm/INSTALLED ]]; then
+    run "$repo/tools/install-sxm" --start || return 1
+  elif ! up_to_date sxm && confirm "This clone has a newer omarock-sxm. Update it?"; then
+    run "$repo/tools/install-sxm" --start || return 1
+  elif ! active omarock-sxm; then
+    run systemctl --user start omarock-sxm
+  fi
+  if sxm_account_set; then
+    ok "the account: $config/siriusxm.json"
+  else
+    explain "Your SiriusXM login goes into $config/siriusxm.json, readable only by you. The password isn't shown as you type."
+    local user pass
+    user=$(ask "SiriusXM email or username (Enter to stop here):") || exit 1
+    [[ -z $user ]] && return 1
+    pass=$(secret "SiriusXM password:") || exit 1
+    printf '%s\0%s' "$user" "$pass" | python3 -I -c '
+import json, sys
+u, p = sys.stdin.read().split("\0", 1)
+print(json.dumps({"username": u, "password": p}))' | write_private "$config/siriusxm.json"
+    pass=""
+    ok "saved the account"
+    run systemctl --user restart omarock-sxm
+  fi
+  if wait_until "Signing in to SiriusXM…" 45 sxm_signed_in; then
+    ok "omarock-sxm is signed in"
+  else
+    local err
+    err=$(sxm_health | jq -r '.error // empty')
+    bad "omarock-sxm isn't signed in${err:+: $err}"
+    explain "Check the login in $config/siriusxm.json, then systemctl --user restart omarock-sxm, or run ./install again. An entitlement that's \"revoked\" means the subscription has no streaming."
+    return 1
+  fi
+  done_[sxm]=1
+}
+
+# ---- 7. Apple Music ----
+
+bridge_status() {  # BRIDGE TOKENFILE: the HTTP status of an authenticated request
+  printf 'header = "Authorization: Bearer %s"\n' "$(<"$2")" \
+    | curl -s -m 5 -o /dev/null -w '%{http_code}' -K - "$1/v1/status" 2>/dev/null
+}
+
+step_apple() {
+  step "Apple Music"
+  explain "Apple Music plays on a Mac, through omarock's bridge: an app you build there with your own Apple Developer membership (bridge/README.md). Its sound comes here as a stream mpd plays. Both machines need to reach each other, over Tailscale, say."
+  local bridge="" stream="" h
+  if [[ -f $config/apple.json ]]; then
+    bridge=$(jq -r '.bridge // empty' "$config/apple.json")
+    stream=$(jq -r '.stream // empty' "$config/apple.json")
+  fi
+  if [[ -n $bridge ]] && h=$(health "$bridge") && [[ -n $h ]]; then
+    ok "the bridge answers at $bridge"
+  else
+    [[ -n $bridge ]] && note "the bridge at $bridge doesn't answer"
+    confirm "Is the bridge built and running on your Mac?" || {
+      note "Build it on the Mac first (bridge/README.md, steps 1 and 2), then run ./install again."; return 1; }
+    local args=() host ip addr
+    if command -v tailscale >/dev/null; then
+      while read -r host ip; do args+=("$ip" "$host ($ip)"); done < <(tailscale status --json 2>/dev/null \
+        | jq -r '.Peer[]? | select(.OS == "macOS") | "\(.HostName) \(.TailscaleIPs[0])"')
+    fi
+    while :; do
+      addr=other
+      if ((${#args[@]})); then addr=$(choose "Which Mac?" "" "${args[@]}" other "Another address…") || exit 1; fi
+      if [[ $addr == other ]]; then addr=$(ask "The Mac's address (Enter to stop here):" "" "100.64.0.10 or my-mac") || exit 1; fi
+      [[ -z $addr ]] && return 1
+      bridge="http://$addr:8710"
+      h=$(health "$bridge")
+      [[ -n $h ]] && break
+      bad "nothing answers at $bridge. Is the bridge running, and can this machine reach the Mac?"
+    done
+    ok "the bridge answers at $bridge"
+    stream=$(jq -r '.stream // empty' <<<"$h")
+    [[ -n $stream ]] || stream="http://$addr:8000/omarock.ogg"
+    install -d "$config"
+    jq -n --arg b "$bridge" --arg s "$stream" '{bridge: $b, stream: $s}' >"$config/apple.json"
+    ok "wrote $config/apple.json"
+  fi
+  if [[ -n $h ]] && ! jq -e '.authorized' >/dev/null <<<"$h"; then
+    note "the bridge may not use Apple Music yet: allow it on the Mac (System Settings, Privacy & Security, Media & Apple Music)"
+  fi
+
+  local tokenfile
+  tokenfile=$(setting appleTokenFile "$config/bridge-token")
+  tokenfile=${tokenfile/#\~/$HOME}
+  if private_ok "$tokenfile" && [[ $(bridge_status "$bridge" "$tokenfile") == 200 ]]; then
+    ok "the bridge's token: $tokenfile"
+  else
+    explain "omarock needs the bridge's token, which the bridge made on the Mac. It goes into $tokenfile, readable only by you."
+    local how token code user host
+    how=$(choose "How should it come over?" paste \
+      paste "I'll paste it (on the Mac: pbcopy < ~/Library/Application\ Support/omarock-bridge/token)" \
+      ssh "Copy it with scp (the Mac's Remote Login must be on)") || exit 1
+    if [[ $how == ssh ]]; then
+      user=$(ask "Your user name on the Mac:" "$USER") || exit 1
+      host=${bridge#http://}
+      host=${host%:*}
+      (umask 077 && run scp "$user@$host:Library/Application Support/omarock-bridge/token" "$tokenfile.new") || return 1
+      tr -d '\n' <"$tokenfile.new" | write_private "$tokenfile"
+      rm -f "$tokenfile.new"
+    else
+      token=$(secret "The bridge's token:") || exit 1
+      [[ -z $token ]] && return 1
+      printf '%s' "$token" | write_private "$tokenfile"
+      token=""
+    fi
+    code=$(bridge_status "$bridge" "$tokenfile")
+    if [[ $code == 200 ]]; then ok "the bridge accepts the token"; else bad "the bridge refused the token (HTTP $code)"; return 1; fi
+  fi
+  [[ $tokenfile == "$config/bridge-token" ]] || pending[appleTokenFile]=$(jq -cn --arg s "$tokenfile" '$s')
+
+  # Smooth playback: the patches (patches/README.md). Without the libFLAC
+  # one, omarock reconnects mpd after each change (appleRejoin), a short stutter.
+  local pid flac=false
+  pid=$(systemctl --user show -p MainPID --value mpd 2>/dev/null)
+  if [[ -n $pid && $pid != 0 ]] && grep -q omarock-flac "/proc/$pid/maps" 2>/dev/null; then flac=true; fi
+  if $flac; then
+    ok "mpd uses the patched libFLAC"
+    [[ $(setting appleRejoin true) == true ]] && pending[appleRejoin]=false
+  else
+    explain "For smooth playback, mpd needs a fix to libFLAC that isn't in Arch's yet (patches/README.md). Without it, mpd falls behind the Mac, and omarock catches it up after each change, with a short stutter. This builds the fixed library for mpd only (a few minutes; needs cmake and ninja)."
+    if confirm "Build the patched libFLAC?" no; then
+      run sudo pacman -S --needed --noconfirm base-devel cmake ninja git \
+        && run "$repo/tools/build-libflac" \
+        && install -d "$units/mpd.service.d" \
+        && printf '# omarock: the patched libFLAC, for mpd only (patches/README.md)\n[Service]\nEnvironment=LD_LIBRARY_PATH=%%h/.local/lib/omarock-flac\n' >"$units/mpd.service.d/omarock-flac.conf" \
+        && run systemctl --user daemon-reload \
+        && run systemctl --user restart mpd \
+        && ok "mpd uses the patched libFLAC" && pending[appleRejoin]=false
+    fi
+  fi
+  if [[ ! -f $units/mpd-mpris.service.d/omarock-mpris.conf ]]; then
+    explain "mpd-mpris also asks mpd for the stream's cover art at every play and pause, which holds mpd for seconds. A patched mpd-mpris doesn't (a minute to build; needs Go)."
+    if confirm "Build the patched mpd-mpris?" no; then
+      run sudo pacman -S --needed --noconfirm go git \
+        && run "$repo/tools/build-mpd-mpris" \
+        && printf '# omarock: mpd-mpris, patched (patches/README.md)\n[Service]\nExecStart=\nExecStart=%%h/.local/lib/omarock-mpris/mpd-mpris -no-instance\n' >"$units/mpd-mpris.service.d/omarock-mpris.conf" \
+        && run systemctl --user daemon-reload \
+        && run systemctl --user restart mpd-mpris \
+        && ok "mpd-mpris is the patched one"
+    fi
+  fi
+  done_[apple]=1
+}
+
+# ---- Last: the switches ----
+
+set_setting() {  # KEY JSON: omarock's setting, through Omarchy's bar
+  local now
+  now=$(setting "$1" "")
+  [[ $now == "$(jq -r 'if type == "string" then . else tostring end' <<<"$2")" ]] && return 0
+  if jq -e 'type == "string"' >/dev/null <<<"$2"; then
+    run omarchy bar set marc.omarock "$1" "$(jq -r . <<<"$2")" >/dev/null
+  else
+    run omarchy bar set marc.omarock "$1" "$2" --json >/dev/null
+  fi
+}
+
+step_switches() {
+  step "omarock's settings"
+  local src key
+  for src in radio spotify apple sxm; do
+    case $src in radio) key=radio ;; spotify) key=spotify ;; apple) key=appleMusic ;; sxm) key=siriusXM ;; esac
+    if wants "$src" && [[ -n ${done_[$src]:-} ]]; then pending[$key]=true
+    elif ! wants "$src" && [[ $(setting "$key" "$([[ $key == radio ]] && echo true || echo false)") == true ]]; then pending[$key]=false
+    fi
+  done
+  # A setting made the moment the plugin is added can be lost (Omarchy writes
+  # the bar's layout then too), so each is checked, and set again if need be.
+  local k _
+  for k in "${!pending[@]}"; do
+    for _ in 1 2 3; do
+      set_setting "$k" "${pending[$k]}"
+      sleep 1
+      [[ $(setting "$k" "") == "$(jq -r 'if type == "string" then . else tostring end' <<<"${pending[$k]}")" ]] && break
+      sleep 2
+    done
+  done
+  for src in radio spotify apple sxm; do
+    case $src in radio) key=radio ;; spotify) key=spotify ;; apple) key=appleMusic ;; sxm) key=siriusXM ;; esac
+    if [[ $(setting "$key" "$([[ $key == radio ]] && echo true || echo false)") == true ]]; then ok "$key is on"
+    elif wants "$src"; then note "$key is off: its setup didn't finish (run ./install again)"
+    fi
+  done
+  explain "Change these any time in omarock's settings: press , in the panel, or the gear in the expanded view."
+}
+
+main() {
+  preflight "$@"
+  welcome
+  choose_sources
+  step_mpd
+  step_plugin
+  wants radio && step_radio
+  wants bus && step_bus
+  wants spotify && step_spotify
+  wants sxm && step_sxm
+  wants apple && step_apple
+  step_switches
+  printf '\n%sHow it all looks%s (tools/omarock-doctor)\n' "$bold" "$reset"
+  "$repo/tools/omarock-doctor" | sed '1{/^$/d}'
+  explain "Click omarock in the bar (a music note until something plays). Press ? there for the keys, and , for the settings."
+}
+
+main "$@"; exit

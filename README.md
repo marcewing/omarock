@@ -65,6 +65,30 @@ optional sources is still hands-on (see each folder's README).
 
 ## Install
 
+The installer walks you through it:
+
+```bash
+git clone https://github.com/marcewing/omarock
+cd omarock
+./install
+```
+
+It asks which sources you want. Then it sets up mpd, puts omarock on the bar, and
+takes you through each source's service in turn, checking first what's already
+there. It shows each command before running it, and asks before changing
+anything: packages (with sudo), your mpd config, systemd units. Passwords and
+keys go into hidden prompts, and from there into files only you can read.
+
+Run it again any time: what's done is skipped, so it's also how you add a source
+later. Keep the clone: the services install from it, so `git pull && ./install`
+updates them.
+
+**Using Claude Code?** Open the clone in it and ask it to set omarock up. Its
+`omarock-setup` skill knows the steps and the usual snags, and checks before it
+changes anything.
+
+To do it by hand instead, follow the three steps below.
+
 ### 1. mpd
 
 ```bash
@@ -139,16 +163,15 @@ omarock's settings:
 - **One volume, and one pinned output, for everything:** [audio/README.md](audio/README.md).
   Spotify needs it; it's optional for the rest.
 
-**Using Claude Code?** Open this folder in it and ask it to set omarock up. Its
-`omarock-setup` skill knows the steps and the usual snags, and checks before it
-changes anything.
-
 ### Updating, and removing
 
 ```bash
 omarchy plugin update marc.omarock
 omarchy restart shell        # the shell's own reload keeps running the old code
 ```
+
+The services (Spotify's, SiriusXM's, the audio bus) update from your clone:
+`git pull`, then `./install` again, which offers each update it finds.
 
 `omarchy plugin remove marc.omarock` removes it. Each optional service's guide
 says how to remove it.

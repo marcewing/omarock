@@ -12,6 +12,15 @@ have the details: `README.md` (install), `audio/README.md`, `spotify/README.md`,
 `sxm/README.md`, `bridge/README.md`. Read the relevant one before a step; this
 skill is the order to go in, and what to watch out for.
 
+## The installer first
+
+`./install` in the clone does all of this interactively: it asks which sources
+the user wants, then goes through each step below, checking first and asking
+before each change. It needs a real terminal (gum prompts), so suggest the user
+run it in one of their own; it can't run from Claude's shell. It can be run
+again any time. Then run `tools/omarock-doctor` and help with whatever is left,
+using the steps below.
+
 ## Ground rules
 
 - **Look first.** Run `tools/omarock-doctor` before anything else, and again after
