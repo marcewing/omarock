@@ -120,7 +120,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.5.6"
+  readonly property string version: "0.5.7"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -891,6 +891,53 @@ Panel {
     root.loadBrowse(entry)
   }
 
+  // The playing song's album or artist, as a level to open, or null: Apple
+  // Music's and Spotify's songs name theirs by id, local ones by tags. Live
+  // stations have neither.
+  function playingEntry(kind) {
+    if (root.live) return null
+    if (root.bridgeMode) {
+      var item = root.bridge.bridgeStatus.song
+      var id = item ? (kind === "album" ? item.albumId : item.artistId) : ""
+      if (!id) return null
+      return root.makeEntry({ kind: kind, apple: { kind: kind, id: id, source: item.source || "catalog" },
+        title: (kind === "album" ? item.album : item.artist) || "" }, -1)
+    }
+    var song = client.currentSong
+    if (!song || !song.file) return null
+    if (kind === "album")
+      return song.album ? root.makeEntry({ kind: "album", album: song.album, artist: song.albumartist || song.artist || "" }, -1) : null
+    var artist = Mpd.songArtist(song)
+    return artist !== "" ? root.makeEntry({ kind: "artist", artist: artist }, -1) : null
+  }
+
+  // o and O, or a click on the now playing card's album or artist: opened
+  // from the queue, so ← comes back to it. An album opens on the song playing,
+  // an artist on its album.
+  function openPlaying(kind) {
+    var entry = root.playingEntry(kind)
+    if (!entry) {
+      root.say(root.live ? "A live station has no album or artist to open"
+        : !root.player.currentSong.file ? "Nothing is playing"
+        : kind === "album" ? "This song has no album to open" : "This song has no artist to open")
+      return
+    }
+    if (root.browseRoot === "queue" && root.browseStack.length === 1 && root.sameEntry(root.browseTop, entry)) return
+    root.clearSearch()
+    root.leaveSearch()
+    root.browseRoot = "queue"
+    root.browseStack = [entry]
+    root.loadBrowse(entry, function() {
+      var song = root.player.currentSong
+      var item = root.bridgeMode ? root.bridge.bridgeStatus.song || ({}) : ({})
+      var index = root.browseRows.findIndex(function(row) {
+        if (kind === "album") return row.kind === "track" && row.file === song.file
+        return row.kind === "album" && (row.apple ? row.apple.id === item.albumId : row.album === song.album)
+      })
+      if (index >= 0) root.cursorIndex = index
+    })
+  }
+
   function openRow(index) {
     var row = root.rows[index]
     if (!row || !root.opens(row.kind)) return
@@ -937,7 +984,8 @@ Panel {
     root.browseLoading = false
   }
 
-  function loadBrowse(entry) {
+  // then(): after it shows, to move the cursor (optional).
+  function loadBrowse(entry, then) {
     var sequence = ++root.browseSequence
     root.browseRows = []
     root.browseInfo = root.placeholderInfo(entry)
@@ -945,7 +993,9 @@ Panel {
     root.cursorActive = false
     root.cursorIndex = 0
     root.loadEntry(entry, function() {
-      if (sequence === root.browseSequence) root.showEntry(entry)
+      if (sequence !== root.browseSequence) return
+      root.showEntry(entry)
+      if (then) then()
     })
   }
 
@@ -1894,6 +1944,8 @@ Panel {
     else if (t === ",") root.openSettings()
     else if (t === "i") root.showInfo()
     else if (t === "P") root.openPlaylists()
+    else if (t === "o") root.openPlaying("album")
+    else if (t === "O") root.openPlaying("artist")
     else if (t === "a") {
       var row = root.cursorRow()
       if (root.rowQueues(row)) root.activateRow(root.cursorIndex, "add")
@@ -2752,8 +2804,12 @@ Panel {
         checkText: root.spotifyMode ? "Check it with: systemctl --user status omarock-spotify" : ""
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
         live: root.live
+        canOpenAlbum: root.playingEntry("album") !== null
+        canOpenArtist: root.playingEntry("artist") !== null
         foreground: root.foreground
         fontFamily: root.fontFamily
+        onOpenAlbum: root.openPlaying("album")
+        onOpenArtist: root.openPlaying("artist")
       }
 
       PanelSeparator { foreground: root.foreground }
@@ -2894,8 +2950,12 @@ Panel {
         checkText: root.spotifyMode ? "Check it with: systemctl --user status omarock-spotify" : ""
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
         live: root.live
+        canOpenAlbum: root.playingEntry("album") !== null
+        canOpenArtist: root.playingEntry("artist") !== null
         foreground: root.foreground
         fontFamily: root.fontFamily
+        onOpenAlbum: root.openPlaying("album")
+        onOpenArtist: root.openPlaying("artist")
       }
 
       Rectangle {

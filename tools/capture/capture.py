@@ -251,6 +251,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     bar_scenario(host, output, socket_path, failures)
     leave_scenario(host, failures)
     apple_scenario(host, output, socket_path, failures)
+    now_playing_scenario(host, output, socket_path, failures)
     spotify_scenario(host, output, socket_path, failures)
     sxm_scenario(host, output, socket_path, failures)
     radio_scenario(host, output, socket_path, failures)
@@ -1556,6 +1557,83 @@ def leave_scenario(host, failures):
 def browsed(host, top):
     s = host.state()
     return s["browse"] == top and not s["browseLoading"]
+
+
+def now_playing_scenario(host, output, socket_path, failures):
+    """The now playing card's links: a click on the album line, the cover or
+    the artist's name, or o and O, opens it from the queue, an album on the
+    song playing; ← comes back. Then Apple Music's, by the bridge's ids."""
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.settle(.5)
+    song = dict(line.split(": ", 1) for line in mpd_query(socket_path, "currentsong") if ": " in line)
+    title, album, artist = song.get("Title", ""), song.get("Album", ""), song.get("Artist", "")
+
+    def opens(how, top):
+        wait_for(lambda: browsed(host, top), how + " opens " + top)
+        s = host.state()
+        check(s["browseRoot"] == "queue" and s["depth"] == 1, how + " opens " + top + " from the queue", failures)
+        return s
+
+    def back(label):
+        host.call("press", "Left")
+        wait_for(lambda: host.state()["browse"] == "", label)
+        rows = host.state()["rows"]
+        check(rows[:1] != [] and rows[0].startswith("queue:"), label, failures)
+
+    check(host.call("clickPanel", "playingAlbum") == "ok", "the album line can be clicked", failures)
+    s = opens("a click on the album", "album:" + album)
+    check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == "track:" + title,
+          "the album opens on the song playing (" + title + ")", failures)
+    host.grab(output / "now-playing-album.png")
+    back("← from the album comes back to the queue")
+    host.call("clickPanel", "playingCover")
+    opens("a click on the cover", "album:" + album)
+    back("← from the cover's album comes back to the queue")
+    host.call("clickPanel", "playingArtist")
+    s = opens("a click on the artist", "artist:" + artist)
+    check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == "album:" + album,
+          "the artist opens on the album playing (" + album + ")", failures)
+    back("← from the artist comes back to the queue")
+    host.call("press", "o")
+    opens("o", "album:" + album)
+    host.call("press", "O")
+    opens("O, from the album", "artist:" + artist)
+    back("← from O's artist comes back to the queue")
+
+    host.call("expand", "true")
+    host.settle(1)
+    host.call("clickPanel", "playingArtist")
+    opens("a click on the expanded panel's artist", "artist:" + artist)
+    host.grab(output / "now-playing-expanded.png")
+    back("← in the expanded panel comes back to the queue")
+    host.call("expand", "false")
+    host.settle(.5)
+
+    # Apple Music: the song's albumId and artistId.
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    to_source(host, "apple")
+    wait_for(lambda: host.state()["appleReady"] and host.state()["nowPlaying"] != "", "Apple Music playing")
+    host.settle(.5)
+    title, artist = host.state()["nowPlaying"].split(" · ", 1)
+    host.call("clickPanel", "playingAlbum")
+    wait_for(lambda: host.state()["browse"].startswith("album:") and not host.state()["browseLoading"],
+             "Apple Music's album opens")
+    s = host.state()
+    check(s["browseRoot"] == "queue" and s["cursor"] >= 0 and s["rows"][s["cursor"]] == "track:" + title,
+          "Apple Music's album opens on the song playing: " + s["browse"], failures)
+    check(any(path.startswith("/v1/albums/catalog/") for _, path, _ in bridge_requests("/v1/albums/")),
+          "it asks the bridge for the song's album by id", failures)
+    album = s["browse"][len("album:"):]
+    host.call("clickPanel", "playingArtist")
+    s = opens("a click on Apple Music's artist", "artist:" + artist)
+    check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == "album:" + album,
+          "Apple Music's artist opens on the album playing (" + album + ")", failures)
+    back("← from Apple Music's artist comes back to the queue")
+    to_source(host, "local")
+    BRIDGE["config"].unlink()
 
 
 def seeks(command_log):
@@ -3043,6 +3121,7 @@ def main():
                             elif name == "real-radio": real_radio_scenario(host, output, socket_path, failures)
                             elif name == "radio-tuning": radio_tuning_scenario(host, socket_path, failures)
                             elif name == "info": info_scenario(host, output, socket_path, failures)
+                            elif name == "now-playing": now_playing_scenario(host, output, socket_path, failures)
                             elif name == "teardown": teardown_scenario(host, socket_path, failures)
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
                             elif name == "late-config": late_config_scenario(host, failures)

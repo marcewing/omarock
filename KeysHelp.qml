@@ -29,7 +29,8 @@ Rectangle {
       ["Enter", "Play a song: from search it replaces the queue; in an album or playlist it plays from that song"],
       ["a", "Add it to the end of the queue"],
       ["x", "Remove a song from the queue"],
-      ["i", "Everything known about the song, album, station or channel (else what's playing): its service and, for Apple Music and Spotify, whether it's in your library"]
+      ["i", "Everything known about the song, album, station or channel (else what's playing): its service and, for Apple Music and Spotify, whether it's in your library"],
+      ["o  O", "Open the album or the artist of the song playing (or click them, or the cover, above)"]
     ] },
     { title: "PLAYLISTS", keys: [
       ["P", "Your playlists; saving the queue as one is at the top"],

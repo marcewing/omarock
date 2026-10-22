@@ -23,6 +23,12 @@ Item {
   property color foreground: Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
+  // The artist, and the album (its line, or the cover), open as links.
+  property bool canOpenArtist: false
+  property bool canOpenAlbum: false
+
+  signal openArtist()
+  signal openAlbum()
 
   readonly property var song: mpd.currentSong || ({})
   readonly property var status: mpd.status
@@ -66,27 +72,50 @@ Item {
     }
 
     Text {
+      objectName: "playingArtist"
       textFormat: Text.PlainText
-      width: parent.width
+      // As wide as the name, so only the name is the link.
+      width: Math.min(implicitWidth, parent.width)
       visible: text !== ""
       text: root.artistText
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.body
+      font.underline: root.canOpenArtist && artistLink.containsMouse
       elide: Text.ElideRight
+
+      MouseArea {
+        id: artistLink
+        anchors.fill: parent
+        enabled: root.canOpenArtist
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.openArtist()
+      }
     }
 
     Text {
+      objectName: "playingAlbum"
       textFormat: Text.PlainText
-      width: parent.width
+      width: Math.min(implicitWidth, parent.width)
       visible: text !== ""
       text: root.albumText
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
+      font.underline: root.canOpenAlbum && albumLink.containsMouse
       wrapMode: Text.WordWrap
       maximumLineCount: 2
       elide: Text.ElideRight
+
+      MouseArea {
+        id: albumLink
+        anchors.fill: parent
+        enabled: root.canOpenAlbum
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.openAlbum()
+      }
     }
 
     Text {
@@ -99,6 +128,14 @@ Item {
       font.pixelSize: Style.font.caption
       elide: Text.ElideRight
     }
+  }
+
+  // The cover opens the album too.
+  component AlbumLink: MouseArea {
+    anchors.fill: parent
+    enabled: root.canOpenAlbum
+    cursorShape: Qt.PointingHandCursor
+    onClicked: root.openAlbum()
   }
 
   component TransportButton: Button {
@@ -122,11 +159,14 @@ Item {
 
       CoverArt {
         id: smallCover
+        objectName: "playingCover"
         width: Style.space(88)
         height: width
         source: root.coverUrl
         foreground: root.foreground
         fontFamily: root.fontFamily
+
+        AlbumLink {}
       }
 
       SongLabels {
@@ -140,12 +180,15 @@ Item {
 
     // Expanded: big cover, song underneath.
     CoverArt {
+      objectName: "playingCover"
       visible: root.large
       width: parent.width
       height: width
       source: root.coverUrl
       foreground: root.foreground
       fontFamily: root.fontFamily
+
+      AlbumLink {}
     }
 
     SongLabels {

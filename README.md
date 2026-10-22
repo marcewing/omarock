@@ -26,6 +26,8 @@ media keys and any other mpd client always agree with it.
   ignoring case and accents ("husker" finds Hüsker Dü).
 - **Browse like a file manager:** → opens an artist, then one of their albums;
   ← goes back. A genre opens to its artists. Album covers throughout.
+- **From what's playing:** click the artist, or the album or its cover, to open
+  them.
 - **Playlists as you go:** press **A** on any song, album, artist or genre to
   add it to a playlist (mpd's own stored playlists).
 - **Everything about a song or album (`i`):** its tags, format, bitrate and
@@ -203,6 +205,9 @@ stay until you remove them too (each guide says how, by hand).
   anything at once, replacing the queue; `a` or + adds it to the end. Enter on a
   song in an album plays the album from that song. In the expanded panel, the left
   column holds the results, and the right one previews what → would open.
+- **What's playing:** click the artist's name to open the artist, or the album
+  line or the cover to open the album, on the song playing (`O` and `o` do the
+  same). ← goes back to the queue.
 - **Playlists** are mpd's stored playlists, so `mpc` and other clients see them
   too. `A` adds the song, album, artist or genre under the cursor to one: pick a
   playlist, or type a new name. `P` lists them, with **Save the queue as a
