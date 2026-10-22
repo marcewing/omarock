@@ -734,8 +734,13 @@ Item {
       root.idleChanges = []
       reconnectTimer.restart()
     }
+    // Disconnect after Quickshell has handed the error over, not while it
+    // does: Quickshell 0.3.2 frees the socket on disconnect, then touches it
+    // again once the error handlers return, and crashes the whole shell
+    // (every mpd restart, on Omarchy 4.0.6). Stopping its own reconnects
+    // still matters: reconnectTimer tries again in 3 s.
     onError: function(error) {
-      idleSocket.connected = false
+      Qt.callLater(function() { idleSocket.connected = false })
       if (root.lastError === "") root.lastError = "Can't reach mpd at " + root.socketPath
       reconnectTimer.restart()
     }
@@ -760,7 +765,8 @@ Item {
       if (root.pending.length > 0) commandRetryTimer.restart()
     }
     onError: function(error) {
-      commandSocket.connected = false
+      // After the error is handed over, as idleSocket's.
+      Qt.callLater(function() { commandSocket.connected = false })
       if (root.ready) commandRetryTimer.restart()
       else root.dropPending()
     }
