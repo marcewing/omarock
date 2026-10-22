@@ -8,8 +8,8 @@ ships the fix, drop the patch.
 | Patch | Fixes | Upstream |
 | --- | --- | --- |
 | `libflac-ogg-live.patch` | **The lag.** libFLAC's Ogg reader fills each 8 KiB read before returning any audio. On a quiet live stream (a paused Mac sends a few hundred bytes a second), mpd then waits, and plays everything it buffered, staying tens of seconds behind the Mac. Patched, it stays about half a second behind. | [xiph/flac#939](https://github.com/xiph/flac/pull/939) |
-| `mpd-ogg-codec-detect.patch` | A smaller mpd bug: if a stream's first bytes arrive in pieces, mpd hands an Ogg stream to ffmpeg instead of its own decoder. Not needed with Icecast, which sends the headers at once. | [MusicPlayerDaemon/MPD#2606](https://github.com/MusicPlayerDaemon/MPD/pull/2606) |
-| `mpd-mpris-stream-art.patch` | **The freezes.** mpd-mpris asks mpd for a stream's cover art on every play, pause and stop. To answer, mpd probes the stream for several seconds, and answers no other client meanwhile. Patched, it keeps a stream's art across events, and doesn't ask for a remote URI's art at all. | [natsukagami/mpd-mpris#89](https://github.com/natsukagami/mpd-mpris/pull/89) (the first of the two commits) |
+| `mpd-ogg-codec-detect.patch` | A smaller mpd bug: if a stream's first bytes arrive in pieces, mpd hands an Ogg stream to ffmpeg instead of its own decoder. Not needed with Icecast, which sends the headers at once. | [MusicPlayerDaemon/MPD#2606](https://github.com/MusicPlayerDaemon/MPD/pull/2606): merged, in mpd 0.24.17 |
+| `mpd-mpris-stream-art.patch` | **The freezes.** mpd-mpris asks mpd for a stream's cover art on every play, pause and stop. To answer, mpd probes the stream for several seconds, and answers no other client meanwhile. Patched, it keeps a stream's art across events, and doesn't ask for a remote URI's art at all. | [natsukagami/mpd-mpris#89](https://github.com/natsukagami/mpd-mpris/pull/89) (the first of the two commits): merged, after 0.4.4 |
 
 The second mpd-mpris commit, skipping art lookups for every remote URI, isn't in
 the upstream request. mpd can find cover art for music files served over HTTP,
@@ -50,5 +50,5 @@ systemctl --user daemon-reload && systemctl --user restart mpd-mpris
 
 ## The mpd patch
 
-It's a fix inside mpd itself. Apply it to mpd's source if you build mpd yourself;
-otherwise wait for the release that includes it.
+It's a fix inside mpd itself, and mpd 0.24.17 includes it. Apply it to mpd's
+source only if you build an older mpd yourself.
