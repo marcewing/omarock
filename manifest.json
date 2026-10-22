@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mre.omarock",
   "name": "omarock: multi-source mpd music player",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "author": "Marc Ewing",
   "license": "MIT",
   "description": "A multi-source mpd-based music player. Supports your local music files, internet radio, Spotify, SiriusXM, and Apple Music (through a live bridge running on your Mac). The last three are optional, and require accounts. Drive with keyboard or mouse. Bar shows cover and song, click for compact and expanded panes.",

@@ -144,7 +144,7 @@ function searchRows(results, genres, service) {
   var library = results.library || {}
   var catalog = results.catalog || {}
   var owned = {}
-  ;["songs", "albums", "playlists"].forEach(function(type) {
+  ;["songs", "playlists"].forEach(function(type) {
     (library[type] || []).forEach(function(item) {
       if (item.catalogId) owned[item.catalogId] = true
       if (type !== "playlists") owned[type + "\u0000" + itemKey(item)] = true
@@ -155,6 +155,18 @@ function searchRows(results, genres, service) {
       return !owned[item.id] && !(type && owned[type + "\u0000" + itemKey(item)])
     })
   }
+  // An album you have only part of is in both lists.
+  var albumCounts = ownedCounts(library.albums || [], itemKey)
+  function catalogAlbumRow(album, section) {
+    var row = albumRow(album, section)
+    var have = songsOwned(albumCounts, album, itemKey)
+    if (have >= 0) row.subtitle = join([row.subtitle, "you have " + have])
+    return row
+  }
+  var catalogAlbums = (catalog.albums || []).filter(function(album) {
+    var have = songsOwned(albumCounts, album, itemKey)
+    return have < 0 || partly(album, have)
+  })
   var rows = []
   function add(items, section, make) {
     items.forEach(function(item, i) { rows.push(make(item, i === 0 ? section : "")) })
@@ -168,7 +180,7 @@ function searchRows(results, genres, service) {
   ;(library.artists || []).forEach(function(artist) { yourArtists[foldKey(artist.name)] = true })
   add((catalog.artists || []).filter(function(artist) { return !yourArtists[foldKey(artist.name)] }),
     upper + " · ARTISTS", artistRow)
-  add(fresh(catalog.albums, "albums"), upper + " · ALBUMS", function(a, s) { return albumRow(a, s) })
+  add(catalogAlbums, upper + " · ALBUMS", catalogAlbumRow)
   add(fresh(catalog.songs, "songs"), upper + " · SONGS", songRow)
   add(fresh(catalog.playlists), upper + " · PLAYLISTS", playlistRow)
   // Before the bridge can reach the catalog, the library still searches.
@@ -269,6 +281,33 @@ function albumKey(album) {
   return foldKey(album.title || album.name).replace(/ - (single|ep)$/, "")
 }
 
+// The songs you have of each album in your library, under its catalog id
+// and key(album): the most of any copy (you may have two).
+function ownedCounts(albums, key) {
+  var counts = {}
+  albums.forEach(function(album) {
+    var n = album.trackCount || 0
+    ;[album.catalogId, key(album)].forEach(function(k) {
+      if (k) counts[k] = Math.max(counts[k] || 0, n)
+    })
+  })
+  return counts
+}
+
+// How many of a catalog album's songs you have, from ownedCounts: -1 for
+// none, and its whole count when a copy has them all (or doesn't say).
+function songsOwned(counts, album, key) {
+  var n = Math.max(counts[album.id] === undefined ? -1 : counts[album.id],
+    counts[key(album)] === undefined ? -1 : counts[key(album)])
+  if (n < 0) return -1
+  return n > 0 && album.trackCount > n ? n : album.trackCount || n
+}
+
+// You have only some of its songs: listed with the catalog's albums too.
+function partly(album, have) {
+  return have >= 0 && album.trackCount > 0 && have < album.trackCount
+}
+
 // One artist from both sides, each { artist, data } as the bridge's artist
 // route gives it: the catalog's top songs, your albums, then the catalog's
 // albums you don't have, its singles and EPs, and the albums they appear on.
@@ -277,19 +316,34 @@ function mergedArtistView(mine, theirs, service) {
   var top = theirs.data.topSongs || []
   var rows = topSongRows(top.length > 0 ? top : mine.data.topSongs || [])
   var yours = (mine.data.albums || []).slice().sort(byYear)
-  var owned = {}
-  yours.forEach(function(album) {
-    owned[albumKey(album)] = true
-    if (album.catalogId) owned[album.catalogId] = true
+  var catalog = theirs.data.albums || []
+  // An album you have all of is yours only; one you have part of is in both
+  // lists, each saying how much you have.
+  var counts = ownedCounts(yours, albumKey)
+  var whole = {}
+  catalog.forEach(function(album) {
+    ;[album.id, albumKey(album)].forEach(function(k) { whole[k] = Math.max(whole[k] || 0, album.trackCount || 0) })
   })
-  var others = (theirs.data.albums || []).filter(function(album) {
-    return !owned[album.id] && !owned[albumKey(album)]
+  var others = catalog.filter(function(album) {
+    var have = songsOwned(counts, album, albumKey)
+    return have < 0 || partly(album, have)
   }).sort(byYear)
   var full = others.filter(function(album) { return !isShort(album) })
   var singles = others.filter(isShort)
-  yours.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "YOUR ALBUMS" : "", false)) })
-  full.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "ON " + service.toUpperCase() : "", false)) })
-  singles.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "SINGLES & EPS" : "", false)) })
+  function theirRow(album, section) {
+    var row = albumRow(album, section, false)
+    var have = songsOwned(counts, album, albumKey)
+    if (have >= 0) row.subtitle = join([row.subtitle, "you have " + have])
+    return row
+  }
+  yours.forEach(function(album, i) {
+    var row = albumRow(album, i === 0 ? "YOUR ALBUMS" : "", false)
+    var of = Math.max(whole[album.catalogId] || 0, whole[albumKey(album)] || 0)
+    if (album.trackCount > 0 && of > album.trackCount) row.subtitle = join([row.subtitle, album.trackCount + " of " + of + " songs"])
+    rows.push(row)
+  })
+  full.forEach(function(album, i) { rows.push(theirRow(album, i === 0 ? "ON " + service.toUpperCase() : "")) })
+  singles.forEach(function(album, i) { rows.push(theirRow(album, i === 0 ? "SINGLES & EPS" : "")) })
   ;(theirs.data.appearsOn || []).forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "APPEARS ON" : "")) })
   var artist = theirs.artist
   return { rows: rows, info: {

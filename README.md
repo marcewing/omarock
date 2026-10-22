@@ -244,7 +244,8 @@ stay until you remove them too (each guide says how, by hand).
 - **Apple Music:** search your library, then the catalog; browse artists,
   albums and genres; the Mac's queue, **P** for your playlists, **A** to add to
   them. An artist is one page, wherever you open it: their top songs, your
-  albums, then the rest of the catalog's (albums, singles and EPs, appears on). The Mac plays the music, and its sound comes over the network as a
+  albums, then the rest of the catalog's (albums, singles and EPs, appears on).
+  An album you have only some songs of is in both lists, saying how many you have. The Mac plays the music, and its sound comes over the network as a
   stream that mpd plays, so `mpc` and the media keys follow it too. Once the Mac
   has been paused for a minute (`appleIdleStop`), mpd lets go of the stream, and
   Play reconnects.

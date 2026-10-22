@@ -113,6 +113,29 @@ test("mergedArtistView: your albums, then the catalog's others, singles and appe
   assert.equal(Apple.mergedArtistView(mine, theirs, "Spotify").rows[5].section, "ON SPOTIFY")
 })
 
+test("an album you have only part of is in both lists, each saying how much", () => {
+  const album = (id, source, title, year, trackCount, extra) =>
+    Object.assign({ kind: "album", id, source, title, artist: "F", year, trackCount }, extra || {})
+  const mine = { artist: { kind: "artist", id: "l.9", source: "library", name: "F" },
+    data: { albums: [album("l.1", "library", "Whole", 2001, 10), album("l.2", "library", "Part", 2003, 1),
+      // Two copies of one album: the fuller one counts.
+      album("l.3", "library", "Twice", 2005, 2), album("l.4", "library", "TWICE", 2005, 9)] } }
+  const theirs = { artist: { kind: "artist", id: "9", source: "catalog", name: "F" },
+    data: { albums: [album("1", "catalog", "Whole", 2001, 10), album("2", "catalog", "Part", 2003, 12),
+      album("3", "catalog", "Twice", 2005, 9)] } }
+  const view = Apple.mergedArtistView(mine, theirs)
+  assert.deepEqual(view.rows.map(r => (r.section || "") + "|" + r.title + "|" + r.subtitle),
+    ["YOUR ALBUMS|Whole|2001", "|Part|2003 · 1 of 12 songs", "|Twice|2005 · 2 of 9 songs", "|TWICE|2005",
+     "ON APPLE MUSIC|Part|2003 · you have 1"])
+
+  const rows = Apple.searchRows({
+    library: { albums: [album("l.2", "library", "Part", 2003, 1), album("l.1", "library", "Whole", 2001, 10)] },
+    catalog: { albums: [album("2", "catalog", "Part", 2003, 12), album("1", "catalog", "Whole", 2001, 10)] }
+  })
+  assert.deepEqual(rows.map(r => r.section + "|" + r.title + "|" + r.subtitle),
+    ["YOUR ALBUMS|Part|F · 2003", "|Whole|F · 2001", "APPLE MUSIC · ALBUMS|Part|F · 2003 · you have 1"])
+})
+
 test("queueRows marks the playing entry by its index in the whole queue", () => {
   const rows = Apple.queueRows({ state: "playing", queueOffset: 10, queueIndex: 11,
     queue: [song("a", "One"), song("b", "Two")] })
