@@ -749,8 +749,9 @@ step_apple() {
       note "Set it up on the Mac first (clone omarock there and run ./install), then run ./install here again."; return 1; }
     local args=() host ip addr
     if command -v tailscale >/dev/null; then
-      while read -r host ip; do args+=("$ip" "$host ($ip)"); done < <(tailscale status --json 2>/dev/null \
-        | jq -r '.Peer[]? | select(.OS == "macOS") | "\(.HostName) \(.TailscaleIPs[0])"')
+      # The address first: a Mac's name usually has spaces ("Marc's M2 Pro").
+      while read -r ip host; do args+=("$ip" "$host ($ip)"); done < <(tailscale status --json 2>/dev/null \
+        | jq -r '.Peer[]? | select(.OS == "macOS") | "\(.TailscaleIPs[0]) \(.HostName)"')
     fi
     while :; do
       addr=other
