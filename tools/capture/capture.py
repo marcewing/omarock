@@ -518,23 +518,28 @@ def apple_scenario(host, output, socket_path, failures):
     wait_for(lambda: host.state()["query"] == "husker" and not host.state()["searching"], "Apple search")
     host.settle(.3)
     s = host.state()
-    check(s["rows"][:3] == ["album:Zen Arcade", "artist:Hüsker Dü", "album:New Day Rising"]
-          and s["sections"][:3] == ["YOUR ALBUMS", "APPLE MUSIC · ARTISTS", "APPLE MUSIC · ALBUMS"]
-          and "album:Zen Arcade" not in s["rows"][1:],
-          "search lists your library first, then Apple Music: " + ", ".join(s["rows"][:5]), failures)
+    check(s["rows"][:3] == ["artist:Hüsker Dü", "album:Zen Arcade", "album:New Day Rising"]
+          and s["sections"][:3] == ["YOUR ARTISTS", "YOUR ALBUMS", "APPLE MUSIC · ALBUMS"]
+          and "album:Zen Arcade" not in s["rows"][2:] and "artist:Hüsker Dü" not in s["rows"][1:],
+          "search lists your library first, then Apple Music, an artist once: " + ", ".join(s["rows"][:5]), failures)
     host.grab(output / "compact-apple-search.png")
 
-    # → into the artist: top songs, albums by year, singles.
-    host.call("press", "Down")
+    # → into your artist: Apple Music's top songs, your albums, then the
+    # catalog's others (Zen Arcade, which you have, once), singles.
     host.call("press", "Down")
     host.call("press", "Right")
     wait_for(lambda: browsed(host, "artist:Hüsker Dü"), "Apple artist")
     s = host.state()
-    check(s["rows"][0] == "playall:Play top songs" and "SINGLES & EPS" in s["sections"]
-          and s["rows"][s["sections"].index("ALBUMS")] == "album:Zen Arcade",
-          "the artist view: " + ", ".join(s["rows"]), failures)
-    # → into Zen Arcade, then Enter on its third song plays the album from it.
-    for _ in range(s["sections"].index("ALBUMS") - s["cursor"]): host.call("press", "Down")
+    check(s["rows"][0] == "playall:Play top songs" and s["rows"][1] == "song:Something I Learned Today"
+          and s["rows"][s["sections"].index("YOUR ALBUMS")] == "album:Zen Arcade"
+          and s["rows"][s["sections"].index("ON APPLE MUSIC")] == "album:New Day Rising"
+          and "SINGLES & EPS" in s["sections"] and s["rows"].count("album:Zen Arcade") == 1,
+          "your artist's view has the catalog too: " + ", ".join(s["rows"]), failures)
+    check(("GET", "/v1/artists/catalog/c-ar-1") in [(m, p) for m, p, _ in bridge_requests("/v1/artists/")],
+          "it found the catalog's artist by name", failures)
+    host.grab(output / "compact-apple-artist.png")
+    # → into Zen Arcade (yours), then Enter on its third song plays the album from it.
+    for _ in range(s["sections"].index("YOUR ALBUMS") - s["cursor"]): host.call("press", "Down")
     host.call("press", "Right")
     wait_for(lambda: browsed(host, "album:Zen Arcade"), "Apple album")
     s = host.state()
@@ -552,7 +557,7 @@ def apple_scenario(host, output, socket_path, failures):
     host.call("press", "Return")
     wait_for(lambda: host.state()["nowPlaying"].startswith("Chartered Trips"), "Apple play from a song")
     play = bridge_requests("/v1/play")[-1][2]
-    check(play == {"items": [{"kind": "album", "id": "c-al-1", "source": "catalog"}], "mode": "play", "start": 2},
+    check(play == {"items": [{"kind": "album", "id": "l-al-1", "source": "library"}], "mode": "play", "start": 2},
           "Enter on a song plays its album from it: " + json.dumps(play), failures)
     check(host.state()["browse"] == "" and host.state()["notice"] == "Playing Chartered Trips",
           "and returns to the queue", failures)
@@ -896,6 +901,49 @@ def real_apple_catalog_scenario(host, output, socket_path, failures):
         s = host.state()
         check(any(r.startswith("genre:") for r in s["rows"]), "Apple's genres match: " + ", ".join(r for r in s["rows"] if r.startswith("genre:")), failures)
         host.grab(output / "real-apple-catalog-search.png")
+        check(not proxy.posts, "nothing was sent to the Mac but GETs: " + ", ".join(proxy.posts), failures)
+    finally:
+        host.call("close")
+        mpd_client(socket_path, "deleteid " + stream_id)
+        host.call("settings", "{}")
+        proxy.close()
+
+
+def real_apple_search_scenario(host, output, socket_path, failures):
+    """Read-only, real bridge: what a search finds (OMAROCK_REAL_QUERY), and
+    what its first artist opens to, printed for a look."""
+    bridge, stream = real_apple()
+    query = os.environ.get("OMAROCK_REAL_QUERY", "husker")
+    proxy = ReadOnlyProxy(bridge)
+    try:
+        host.call("settings", json.dumps({"appleBridge": proxy.url, "appleStream": stream,
+                                          "appleTokenFile": str(Path.home() / ".config/omarock/bridge-token")}))
+        stream_id = mpd_query(socket_path, f'addid "{stream}"')[0].split(": ")[1]
+        mpd_client(socket_path, "playid " + stream_id)
+        host.call("open")
+        wait_for(lambda: host.state()["appleReady"], "real bridge", timeout=30)
+        host.call("expand", "true")
+        host.settle(1)
+        host.call("press", "/")
+        host.call("typeKeys", query)
+        wait_for(lambda: host.state()["query"] == query and not host.state()["searching"], "search", timeout=40)
+        host.settle(1)
+        s = host.state()
+        for section, row, subtitle in zip(s["sections"], s["rows"], s["subtitles"]):
+            print(f"  {section:28} {row} | {subtitle}", file=sys.stderr)
+        host.grab(output / "real-apple-search.png")
+        artists = [i for i, r in enumerate(s["rows"]) if r.startswith("artist:")]
+        if artists:
+            host.call("press", "Down")
+            for _ in range(artists[0]): host.call("press", "Down")
+            host.call("press", "Right")
+            wait_for(lambda: host.state()["browse"].startswith("artist:") and not host.state()["browseLoading"], "artist", timeout=40)
+            host.settle(2)
+            s = host.state()
+            print("artist:", s["browse"], s["browseInfo"].get("subtitle", ""), file=sys.stderr)
+            for section, row, subtitle in zip(s["sections"], s["rows"], s["subtitles"]):
+                print(f"  {section:28} {row} | {subtitle}", file=sys.stderr)
+            host.grab(output / "real-apple-search-artist.png")
         check(not proxy.posts, "nothing was sent to the Mac but GETs: " + ", ".join(proxy.posts), failures)
     finally:
         host.call("close")
@@ -1568,6 +1616,7 @@ def now_playing_scenario(host, output, socket_path, failures):
     host.settle(.5)
     song = dict(line.split(": ", 1) for line in mpd_query(socket_path, "currentsong") if ": " in line)
     title, album, artist = song.get("Title", ""), song.get("Album", ""), song.get("Artist", "")
+    genre, albumartist = song.get("Genre", ""), song.get("AlbumArtist", song.get("Artist", ""))
 
     def opens(how, top):
         wait_for(lambda: browsed(host, top), how + " opens " + top)
@@ -1600,6 +1649,15 @@ def now_playing_scenario(host, output, socket_path, failures):
     host.call("press", "O")
     opens("O, from the album", "artist:" + artist)
     back("← from O's artist comes back to the queue")
+    host.call("clickPanel", "playingGenre")
+    s = opens("a click on the genre", "genre:" + genre)
+    check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == "artist:" + albumartist,
+          "the genre opens on the artist playing (" + albumartist + ")", failures)
+    host.grab(output / "now-playing-genre.png")
+    back("← from the genre comes back to the queue")
+    host.call("press", "g")
+    opens("g", "genre:" + genre)
+    back("← from g's genre comes back to the queue")
 
     host.call("expand", "true")
     host.settle(1)
@@ -1632,6 +1690,10 @@ def now_playing_scenario(host, output, socket_path, failures):
     check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == "album:" + album,
           "Apple Music's artist opens on the album playing (" + album + ")", failures)
     back("← from Apple Music's artist comes back to the queue")
+    # Punk is one of Apple's top genres: its charts.
+    host.call("clickPanel", "playingGenre")
+    opens("a click on Apple Music's genre", "genre:Punk")
+    back("← from Apple Music's genre comes back to the queue")
     to_source(host, "local")
     BRIDGE["config"].unlink()
 
@@ -3134,6 +3196,7 @@ def main():
                             elif name == "real-apple-info": real_apple_info_scenario(host, output, socket_path, failures)
                             elif name == "real-apple-keys": real_apple_keys_scenario(host, output, socket_path, failures)
                             elif name == "real-apple-catalog": real_apple_catalog_scenario(host, output, socket_path, failures)
+                            elif name == "real-apple-search": real_apple_search_scenario(host, output, socket_path, failures)
                             elif name == "real-apple-watch": real_apple_watch_scenario(host, output, socket_path, failures)
                             else: raise ValueError("no scenario " + name)
                     else: scenarios(host, output, socket_path, command_log, failures)

@@ -109,8 +109,9 @@ Panel {
   readonly property bool live: sxmMode || radioMode
   // Under the album in the player card: the genre, and Explicit, Lossless or
   // Dolby Atmos.
-  readonly property string bridgeExtra: bridge.song
-    ? [(bridge.song.genres || [])[0] || "", Apple.badges(bridge.song)].filter(function(p) { return p !== "" }).join(" · ") : ""
+  // Under the song in the player card: Explicit, Lossless, Dolby Atmos (the
+  // genre has a line of its own).
+  readonly property string bridgeExtra: bridge.song ? Apple.badges(bridge.song) : ""
   // Under the station in the player card: where it is, its genres and sound.
   readonly property string radioExtra: radio.station ? Radio.describe(radio.station) : ""
   // Under the channel in the player card: the show, else the genre.
@@ -120,7 +121,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.5.7"
+  readonly property string version: "0.5.8"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -891,35 +892,44 @@ Panel {
     root.loadBrowse(entry)
   }
 
-  // The playing song's album or artist, as a level to open, or null: Apple
-  // Music's and Spotify's songs name theirs by id, local ones by tags. Live
-  // stations have neither.
+  // The playing song's album, artist or genre, as a level to open, or null:
+  // Apple Music's and Spotify's songs name their album and artist by id, and
+  // a genre opens Apple's charts when it's one of its top genres; local songs
+  // go by their tags. Live stations have none.
   function playingEntry(kind) {
     if (root.live) return null
     if (root.bridgeMode) {
       var item = root.bridge.bridgeStatus.song
-      var id = item ? (kind === "album" ? item.albumId : item.artistId) : ""
+      if (!item) return null
+      if (kind === "genre") {
+        var key = Apple.foldKey((item.genres || [])[0])
+        var genre = key === "" ? null : root.bridge.genres.find(function(g) { return Apple.foldKey(g.name) === key })
+        return genre ? root.makeEntry({ kind: "genre", apple: { kind: "genre", id: genre.id, source: "catalog" },
+          title: genre.name }, -1) : null
+      }
+      var id = kind === "album" ? item.albumId : item.artistId
       if (!id) return null
       return root.makeEntry({ kind: kind, apple: { kind: kind, id: id, source: item.source || "catalog" },
         title: (kind === "album" ? item.album : item.artist) || "" }, -1)
     }
     var song = client.currentSong
     if (!song || !song.file) return null
+    if (kind === "genre") return song.genre ? root.makeEntry({ kind: "genre", genre: song.genre }, -1) : null
     if (kind === "album")
       return song.album ? root.makeEntry({ kind: "album", album: song.album, artist: song.albumartist || song.artist || "" }, -1) : null
     var artist = Mpd.songArtist(song)
     return artist !== "" ? root.makeEntry({ kind: "artist", artist: artist }, -1) : null
   }
 
-  // o and O, or a click on the now playing card's album or artist: opened
-  // from the queue, so ← comes back to it. An album opens on the song playing,
-  // an artist on its album.
+  // o, O and g, or a click on the now playing card's album, artist or genre:
+  // opened from the queue, so ← comes back to it. An album opens on the song
+  // playing, an artist on its album, a genre on its artist.
   function openPlaying(kind) {
     var entry = root.playingEntry(kind)
     if (!entry) {
       root.say(root.live ? "A live station has no album or artist to open"
         : !root.player.currentSong.file ? "Nothing is playing"
-        : kind === "album" ? "This song has no album to open" : "This song has no artist to open")
+        : "This song has no " + kind + " to open")
       return
     }
     if (root.browseRoot === "queue" && root.browseStack.length === 1 && root.sameEntry(root.browseTop, entry)) return
@@ -932,6 +942,7 @@ Panel {
       var item = root.bridgeMode ? root.bridge.bridgeStatus.song || ({}) : ({})
       var index = root.browseRows.findIndex(function(row) {
         if (kind === "album") return row.kind === "track" && row.file === song.file
+        if (kind === "genre") return row.kind === "artist" && !row.apple && row.artist === (song.albumartist || song.artist)
         return row.kind === "album" && (row.apple ? row.apple.id === item.albumId : row.album === song.album)
       })
       if (index >= 0) root.cursorIndex = index
@@ -1079,12 +1090,51 @@ Panel {
     } else if (ref.kind === "album") {
       bridge.album(ref.source, ref.id, shown(function(data) { return Apple.albumView(data.album, data.tracks || [], bridge.service) }))
     } else if (ref.kind === "artist") {
-      bridge.artist(ref.source, ref.id, shown(function(data) { return Apple.artistView(data.artist, data, bridge.service) }))
+      root.loadAppleArtist(entry, show, shown)
     } else if (ref.kind === "playlist") {
       bridge.playlist(ref.source, ref.id, shown(function(data) { return Apple.playlistView(data.playlist, data.tracks || [], data.note) }))
     } else if (ref.kind === "genre") {
       bridge.genre(ref.id, shown(function(data) { return Apple.genreView(data.genre || { name: entry.title }, data) }))
     }
+  }
+
+  // An artist from your library and the catalog together, as one page.
+  // While the bridge fetches the artist, a search of the other side looks
+  // for the same name; when it's there and isn't the same object (Spotify's
+  // followed artists are its catalog's), both are fetched and merged.
+  function loadAppleArtist(entry, show, shown) {
+    var bridge = root.bridge
+    var ref = entry.apple
+    var other = ref.source === "library" ? "catalog" : "library"
+    var main = null
+    var found = undefined
+    var failed = shown(null)
+    function merge(data) {
+      var mine = ref.source === "library" ? main : data
+      var theirs = ref.source === "library" ? data : main
+      show(Apple.mergedArtistView({ artist: mine.artist, data: mine }, { artist: theirs.artist, data: theirs }, bridge.service))
+    }
+    function both() {
+      if (!main || found === undefined) return
+      var match = found ? Apple.findArtist(found, other, main.artist.name || entry.title) : null
+      if (!match || match.id === ref.id) {
+        show(Apple.artistView(main.artist, main, bridge.service))
+        return
+      }
+      bridge.artist(other, match.id, function(data) {
+        if (data) merge(data)
+        else show(Apple.artistView(main.artist, main, bridge.service))
+      })
+    }
+    bridge.artist(ref.source, ref.id, function(data, error) {
+      if (!data) { failed(null, error); return }
+      main = data
+      both()
+    })
+    bridge.search(entry.title, function(results) {
+      found = results || null
+      both()
+    }, other)
   }
 
   // Fills in entry.rows, entry.info and entry.files from mpd, then done().
@@ -1946,6 +1996,7 @@ Panel {
     else if (t === "P") root.openPlaylists()
     else if (t === "o") root.openPlaying("album")
     else if (t === "O") root.openPlaying("artist")
+    else if (t === "g") root.openPlaying("genre")
     else if (t === "a") {
       var row = root.cursorRow()
       if (root.rowQueues(row)) root.activateRow(root.cursorIndex, "add")
@@ -2808,8 +2859,10 @@ Panel {
         canOpenArtist: root.playingEntry("artist") !== null
         foreground: root.foreground
         fontFamily: root.fontFamily
+        canOpenGenre: root.playingEntry("genre") !== null
         onOpenAlbum: root.openPlaying("album")
         onOpenArtist: root.openPlaying("artist")
+        onOpenGenre: root.openPlaying("genre")
       }
 
       PanelSeparator { foreground: root.foreground }
@@ -2954,8 +3007,10 @@ Panel {
         canOpenArtist: root.playingEntry("artist") !== null
         foreground: root.foreground
         fontFamily: root.fontFamily
+        canOpenGenre: root.playingEntry("genre") !== null
         onOpenAlbum: root.openPlaying("album")
         onOpenArtist: root.openPlaying("artist")
+        onOpenGenre: root.openPlaying("genre")
       }
 
       Rectangle {

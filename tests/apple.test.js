@@ -68,6 +68,51 @@ test("artistView: top songs, albums by year, singles, appears on", () => {
   assert.equal(view.info.subtitle, "Artist · Punk")
 })
 
+test("searchRows lists an artist you have once, as yours", () => {
+  const rows = Apple.searchRows({
+    library: { artists: [{ kind: "artist", id: "l.9", source: "library", name: "Future Leaders Of The World" }] },
+    catalog: { artists: [{ kind: "artist", id: "9", source: "catalog", name: "Future Leaders of the World" },
+      { kind: "artist", id: "8", source: "catalog", name: "Tyler, The Creator" }] }
+  })
+  assert.deepEqual(rows.map(r => r.section + ":" + r.apple.id), ["YOUR ARTISTS:l.9", "APPLE MUSIC · ARTISTS:8"])
+})
+
+test("findArtist matches a name on the other side, case and accents aside", () => {
+  const results = { library: { artists: [{ id: "l.1", name: "Husker Du" }] },
+    catalog: { artists: [{ id: "2", name: "Hüsker Dü Tribute" }, { id: "1", name: "Hüsker Dü" }] } }
+  assert.equal(Apple.findArtist(results, "catalog", "hüsker dü").id, "1")
+  assert.equal(Apple.findArtist(results, "library", "Hüsker Dü").id, "l.1")
+  assert.equal(Apple.findArtist(results, "catalog", "Bob Mould"), null)
+  assert.equal(Apple.findArtist(null, "catalog", "Hüsker Dü"), null)
+  assert.equal(Apple.findArtist(results, "catalog", ""), null)
+})
+
+test("mergedArtistView: your albums, then the catalog's others, singles and appears on", () => {
+  const album = (id, source, title, year, extra) => Object.assign({ kind: "album", id, source, title, artist: "F", year }, extra || {})
+  const mine = { artist: { kind: "artist", id: "l.9", source: "library", name: "F" },
+    data: { topSongs: [song("l.s1", "Mine")], albums: [album("l.2", "library", "Lvl IV", 2004),
+      album("l.3", "library", "B-Sides", 2009), album("l.4", "library", "Dark Paradise", 2023, { catalogId: "7" })] } }
+  const theirs = { artist: { kind: "artist", id: "9", source: "catalog", name: "F", genres: ["Rock"], artwork: art },
+    data: { topSongs: [song("s1", "Hit")], albums: [album("5", "catalog", "LVL IV", 2004),
+      album("6", "catalog", "Let Me Out - Single", 2004, { isSingle: true }), album("7", "catalog", "Dark Paradise (Live)", 2023),
+      album("8", "catalog", "Second", 2006), album("9", "catalog", "Unplugged - EP", 2023)],
+      appearsOn: [album("10", "catalog", "Comp", 2001, { artist: "Various Artists" })] } }
+  const view = Apple.mergedArtistView(mine, theirs)
+  // LVL IV is yours by title, Dark Paradise (Live) by catalog id.
+  assert.deepEqual(view.rows.map(r => (r.section || "") + "|" + r.kind + ":" + r.title + ":" + (r.apple ? r.apple.source : "")),
+    ["|playall:Play top songs:", "TOP SONGS|song:Hit:catalog",
+     "YOUR ALBUMS|album:Lvl IV:library", "|album:B-Sides:library", "|album:Dark Paradise:library",
+     "ON APPLE MUSIC|album:Second:catalog", "SINGLES & EPS|album:Let Me Out - Single:catalog",
+     "|album:Unplugged - EP:catalog", "APPEARS ON|album:Comp:catalog"])
+  assert.equal(view.info.title, "F")
+  assert.equal(view.info.subtitle, "Artist · Rock")
+  assert.equal(view.info.detail, "In your library")
+  // Without catalog top songs, the library's.
+  theirs.data.topSongs = []
+  assert.equal(Apple.mergedArtistView(mine, theirs, "Spotify").rows[1].title, "Mine")
+  assert.equal(Apple.mergedArtistView(mine, theirs, "Spotify").rows[5].section, "ON SPOTIFY")
+})
+
 test("queueRows marks the playing entry by its index in the whole queue", () => {
   const rows = Apple.queueRows({ state: "playing", queueOffset: 10, queueIndex: 11,
     queue: [song("a", "One"), song("b", "Two")] })
@@ -110,7 +155,7 @@ test("songs the bridge can't play are dimmed and say so", () => {
   assert.equal(view.rows[1].position, 0)
 })
 
-test("an album or song you own is listed once, as yours, even without a catalog id", () => {
+test("an album, song or artist you own is listed once, as yours, even without a catalog id", () => {
   const rows = Apple.searchRows({
     library: { albums: [{ kind: "album", id: "-5300", source: "library", title: "New Day Rising", artist: "Hüsker Dü" }],
       songs: [song("-1", "Celebrated Summer", { source: "library", album: "New Day Rising" })],
@@ -122,7 +167,7 @@ test("an album or song you own is listed once, as yours, even without a catalog 
   }, [])
   assert.deepEqual(rows.map(r => r.kind + ":" + r.title + ":" + r.apple.source),
     ["artist:Hüsker Dü:library", "album:New Day Rising:library", "song:Celebrated Summer:library",
-     "artist:Hüsker Dü:catalog", "album:Warehouse: Songs and Stories:catalog", "song:Diane:catalog"])
+     "album:Warehouse: Songs and Stories:catalog", "song:Diane:catalog"])
 })
 
 test("Spotify's service names itself in sections, views and notes", () => {

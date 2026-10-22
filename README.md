@@ -26,8 +26,8 @@ media keys and any other mpd client always agree with it.
   ignoring case and accents ("husker" finds Hüsker Dü).
 - **Browse like a file manager:** → opens an artist, then one of their albums;
   ← goes back. A genre opens to its artists. Album covers throughout.
-- **From what's playing:** click the artist, or the album or its cover, to open
-  them.
+- **From what's playing:** click the artist, the album or its cover, or the
+  genre, to open them.
 - **Playlists as you go:** press **A** on any song, album, artist or genre to
   add it to a playlist (mpd's own stored playlists).
 - **Everything about a song or album (`i`):** its tags, format, bitrate and
@@ -205,9 +205,10 @@ stay until you remove them too (each guide says how, by hand).
   anything at once, replacing the queue; `a` or + adds it to the end. Enter on a
   song in an album plays the album from that song. In the expanded panel, the left
   column holds the results, and the right one previews what → would open.
-- **What's playing:** click the artist's name to open the artist, or the album
-  line or the cover to open the album, on the song playing (`O` and `o` do the
-  same). ← goes back to the queue.
+- **What's playing:** click the artist's name to open the artist, the album
+  line or the cover to open the album, on the song playing, or the genre to open
+  it (`O`, `o` and `g` do the same). ← goes back to the queue. On Apple Music, a
+  genre opens Apple's charts for it, when it's one of Apple's top genres.
 - **Playlists** are mpd's stored playlists, so `mpc` and other clients see them
   too. `A` adds the song, album, artist or genre under the cursor to one: pick a
   playlist, or type a new name. `P` lists them, with **Save the queue as a
@@ -242,7 +243,8 @@ stay until you remove them too (each guide says how, by hand).
   listed; and songs can't be taken out of Spotify's queue.
 - **Apple Music:** search your library, then the catalog; browse artists,
   albums and genres; the Mac's queue, **P** for your playlists, **A** to add to
-  them. The Mac plays the music, and its sound comes over the network as a
+  them. An artist is one page, wherever you open it: their top songs, your
+  albums, then the rest of the catalog's (albums, singles and EPs, appears on). The Mac plays the music, and its sound comes over the network as a
   stream that mpd plays, so `mpc` and the media keys follow it too. Once the Mac
   has been paused for a minute (`appleIdleStop`), mpd lets go of the stream, and
   Play reconnects.

@@ -136,8 +136,8 @@ function itemKey(item) {
 
 // Search results: your library first (what you picked), then Apple Music.
 // An album or song you own is listed once, as yours: by catalog id when the
-// bridge has one, else by title and artist. Artists stay in both lists:
-// yours opens to the albums you have, Apple Music's to the whole catalog.
+// bridge has one, else by title and artist. So is an artist, by name: yours
+// opens to your albums and the catalog's together.
 function searchRows(results, genres, service) {
   service = service || "Apple Music"
   var upper = service.toUpperCase()
@@ -164,7 +164,10 @@ function searchRows(results, genres, service) {
   add(library.albums || [], "YOUR ALBUMS", function(a, s) { return albumRow(a, s) })
   add(library.songs || [], "YOUR SONGS", songRow)
   add(genres || [], "GENRES", genreRow)
-  add(catalog.artists || [], upper + " · ARTISTS", artistRow)
+  var yourArtists = {}
+  ;(library.artists || []).forEach(function(artist) { yourArtists[foldKey(artist.name)] = true })
+  add((catalog.artists || []).filter(function(artist) { return !yourArtists[foldKey(artist.name)] }),
+    upper + " · ARTISTS", artistRow)
   add(fresh(catalog.albums, "albums"), upper + " · ALBUMS", function(a, s) { return albumRow(a, s) })
   add(fresh(catalog.songs, "songs"), upper + " · SONGS", songRow)
   add(fresh(catalog.playlists), upper + " · PLAYLISTS", playlistRow)
@@ -209,22 +212,35 @@ function albumView(album, tracks, service) {
     emptyText: (service || "Apple Music") + " lists no songs for this album." } }
 }
 
+function byYear(a, b) {
+  return (a.year || 0) - (b.year || 0)
+}
+
+// A single or an EP: Apple marks singles, and names EPs "… - EP".
+function isShort(album) {
+  return album.isSingle === true || / - (single|ep)$/i.test(album.title || album.name || "")
+}
+
+// Play top songs, then the first five.
+function topSongRows(top) {
+  var rows = []
+  if (top.length === 0) return rows
+  rows.push({ kind: "playall", lead: "󰐊", title: "Play top songs", subtitle: countText(top.length, "song") })
+  top.slice(0, 5).forEach(function(song, i) {
+    var row = songRow(song, i === 0 ? "TOP SONGS" : "")
+    row.subtitle = song.album || ""
+    rows.push(row)
+  })
+  return rows
+}
+
 // The artist view: their top songs, then albums by year (singles and EPs
 // after the albums), then the albums they appear on.
 function artistView(artist, data, service) {
-  var rows = []
-  var top = data.topSongs || []
-  if (top.length > 0) {
-    rows.push({ kind: "playall", lead: "󰐊", title: "Play top songs", subtitle: countText(top.length, "song") })
-    top.slice(0, 5).forEach(function(song, i) {
-      var row = songRow(song, i === 0 ? "TOP SONGS" : "")
-      row.subtitle = song.album || ""
-      rows.push(row)
-    })
-  }
-  var albums = (data.albums || []).slice().sort(function(a, b) { return (a.year || 0) - (b.year || 0) })
-  var full = albums.filter(function(album) { return !album.isSingle })
-  var singles = albums.filter(function(album) { return album.isSingle })
+  var rows = topSongRows(data.topSongs || [])
+  var albums = (data.albums || []).slice().sort(byYear)
+  var full = albums.filter(function(album) { return !isShort(album) })
+  var singles = albums.filter(isShort)
   full.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "ALBUMS" : "", false)) })
   singles.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "SINGLES & EPS" : "", false)) })
   ;(data.appearsOn || []).forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "APPEARS ON" : "")) })
@@ -234,6 +250,54 @@ function artistView(artist, data, service) {
     detail: artist.source === "library" ? "In your library" : "",
     notes: artist.editorialNotes || "",
     emptyText: (service || "Apple Music") + " lists nothing for this artist." } }
+}
+
+// The same artist on the other side (side is "library" or "catalog") of a
+// search's results: the one whose name matches, case and accents aside.
+function findArtist(results, side, name) {
+  var key = foldKey(name)
+  if (key === "") return null
+  var artists = ((results || {})[side] || {}).artists || []
+  for (var i = 0; i < artists.length; i++)
+    if (foldKey(artists[i].name) === key) return artists[i]
+  return null
+}
+
+// An album as the library and the catalog both name it: "Lvl IV" is
+// "LVL IV", and "Let Me Out - Single" is "Let Me Out".
+function albumKey(album) {
+  return foldKey(album.title || album.name).replace(/ - (single|ep)$/, "")
+}
+
+// One artist from both sides, each { artist, data } as the bridge's artist
+// route gives it: the catalog's top songs, your albums, then the catalog's
+// albums you don't have, its singles and EPs, and the albums they appear on.
+function mergedArtistView(mine, theirs, service) {
+  service = service || "Apple Music"
+  var top = theirs.data.topSongs || []
+  var rows = topSongRows(top.length > 0 ? top : mine.data.topSongs || [])
+  var yours = (mine.data.albums || []).slice().sort(byYear)
+  var owned = {}
+  yours.forEach(function(album) {
+    owned[albumKey(album)] = true
+    if (album.catalogId) owned[album.catalogId] = true
+  })
+  var others = (theirs.data.albums || []).filter(function(album) {
+    return !owned[album.id] && !owned[albumKey(album)]
+  }).sort(byYear)
+  var full = others.filter(function(album) { return !isShort(album) })
+  var singles = others.filter(isShort)
+  yours.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "YOUR ALBUMS" : "", false)) })
+  full.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "ON " + service.toUpperCase() : "", false)) })
+  singles.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "SINGLES & EPS" : "", false)) })
+  ;(theirs.data.appearsOn || []).forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "APPEARS ON" : "")) })
+  var artist = theirs.artist
+  return { rows: rows, info: {
+    title: artist.name || mine.artist.name, artwork: artist.artwork || mine.artist.artwork,
+    subtitle: join(["Artist", (artist.genres || mine.artist.genres || [])[0]]),
+    detail: "In your library",
+    notes: artist.editorialNotes || "",
+    emptyText: service + " lists nothing for this artist." } }
 }
 
 // A playlist's view: Play the playlist, then its songs, each with its cover.
@@ -341,6 +405,8 @@ if (typeof module !== "undefined") {
     searchRows: searchRows,
     albumView: albumView,
     artistView: artistView,
+    findArtist: findArtist,
+    mergedArtistView: mergedArtistView,
     playlistView: playlistView,
     playlistsView: playlistsView,
     genreView: genreView,

@@ -23,12 +23,14 @@ Item {
   property color foreground: Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
-  // The artist, and the album (its line, or the cover), open as links.
+  // The artist, the album (its line, or the cover) and the genre open as links.
   property bool canOpenArtist: false
   property bool canOpenAlbum: false
+  property bool canOpenGenre: false
 
   signal openArtist()
   signal openAlbum()
+  signal openGenre()
 
   readonly property var song: mpd.currentSong || ({})
   readonly property var status: mpd.status
@@ -52,6 +54,7 @@ Item {
     var year = Mpd.songYear(song)
     return (song.album || "") + (song.album && year ? " · " : "") + year
   }
+  readonly property string genreText: mpd.ready && hasSong ? song.genre || "" : ""
 
   implicitHeight: column.implicitHeight
 
@@ -115,6 +118,28 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: root.openAlbum()
+      }
+    }
+
+    Text {
+      objectName: "playingGenre"
+      textFormat: Text.PlainText
+      width: Math.min(implicitWidth, parent.width)
+      visible: text !== ""
+      text: root.genreText
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.underline: root.canOpenGenre && genreLink.containsMouse
+      elide: Text.ElideRight
+
+      MouseArea {
+        id: genreLink
+        anchors.fill: parent
+        enabled: root.canOpenGenre
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.openGenre()
       }
     }
 

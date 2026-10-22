@@ -297,8 +297,9 @@ Item {
   function removeAt(index) { root.post("/v1/queue/remove", { index: index }) }
 
   // Browsing.
-  function search(query, callback) {
-    root.get("/v1/search?scope=all&limit=8&q=" + encodeURIComponent(query), callback)
+  // scope: "all" (the default), "library" or "catalog".
+  function search(query, callback, scope) {
+    root.get("/v1/search?scope=" + (scope || "all") + "&limit=8&q=" + encodeURIComponent(query), callback)
   }
   function album(source, id, callback) { root.get("/v1/albums/" + source + "/" + encodeURIComponent(id), callback) }
   function artist(source, id, callback) { root.get("/v1/artists/" + source + "/" + encodeURIComponent(id), callback) }

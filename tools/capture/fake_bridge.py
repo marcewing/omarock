@@ -125,6 +125,9 @@ class Bridge:
         # The library: a copy of Zen Arcade, and two playlists of songs.
         zen = dict(public(CATALOG_ALBUMS["c-al-1"]), id="l-al-1", source="library", catalogId="c-al-1")
         self.library_albums = [zen]
+        # Its artist, as the library has it (Apple Music; Spotify's are followed artists).
+        self.library_artists = [] if self.spotify else [
+            {"kind": "artist", "id": "l-ar-1", "source": "library", "name": "Hüsker Dü"}]
         self.playlists = {
             "p-1": {"kind": "playlist", "id": "p-1", "source": "library", "name": "PunkRock", "curator": "You",
                     "canEdit": True, "lastModified": "2026-10-19T15:00:00Z", "artwork": art("aa2222"),
@@ -272,7 +275,8 @@ class Bridge:
         # Library songs match by title only, so the artist searches keep their rows.
         library = {"songs": [dict(SONGS[s], id="l-" + s, source="library") for s in CATALOG_ALBUMS["c-al-1"]["tracks"]
                              if hit(SONGS[s]["title"])][:limit], "albums": [a for a in self.library_albums if hit(a["title"]) or hit(a["artist"])][:limit],
-                   "artists": [], "playlists": [self.playlist("library", p)[0] for p, v in self.playlists.items() if hit(v["name"])][:limit]}
+                   "artists": [a for a in self.library_artists if hit(a["name"])][:limit],
+                   "playlists": [self.playlist("library", p)[0] for p, v in self.playlists.items() if hit(v["name"])][:limit]}
         catalog = {"songs": [s for s in SONGS.values() if hit(s["title"]) or hit(s["artist"])][:limit],
                    "albums": [public(a) for a in CATALOG_ALBUMS.values() if hit(a["title"]) or hit(a["artist"])][:limit],
                    "artists": [a for a in ARTISTS if hit(a["name"])][:limit],
@@ -425,6 +429,11 @@ class Handler(BaseHTTPRequestHandler):
                 if parts[0] == "albums":
                     album, tracks = b.album(parts[1], parts[2])
                     return {"album": album, "tracks": tracks}
+                if parts[0] == "artists" and parts[1] == "library":
+                    artist = next(a for a in b.library_artists if a["id"] == parts[2])
+                    albums = [a for a in b.library_albums if a["artist"] == artist["name"]]
+                    top = [dict(SONGS[s], id="l-" + s, source="library") for s in CATALOG_ALBUMS["c-al-1"]["tracks"]]
+                    return {"artist": artist, "albums": albums, "topSongs": top, "appearsOn": []}
                 if parts[0] == "artists":
                     artist = next(a for a in ARTISTS if a["id"] == parts[2])
                     albums = [public(a) for a in CATALOG_ALBUMS.values() if a["artistId"] == parts[2]]
