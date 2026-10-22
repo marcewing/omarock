@@ -83,6 +83,10 @@ Run it again any time: what's done is skipped, so it's also how you add a source
 later. Keep the clone: the services install from it, so `git pull && ./install`
 updates them.
 
+**Apple Music** also needs the bridge on a Mac. Clone omarock there too and run
+`./install` on the Mac: it sets up the bridge, and then this machine's
+`./install` connects to it.
+
 **Using Claude Code?** Open the clone in it and ask it to set omarock up. Its
 `omarock-setup` skill knows the steps and the usual snags, and checks before it
 changes anything.

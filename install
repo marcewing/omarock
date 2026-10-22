@@ -9,6 +9,8 @@
 #   ./install            from a clone of omarock, in a terminal on the desktop
 #   ./install --help
 #
+# On a Mac, ./install sets up the Apple Music bridge instead (bridge/install).
+#
 # Secrets (the Soloist key, the SiriusXM login, the bridge's token) are typed
 # into hidden prompts and go straight into files only you can read
 # (~/.config/omarock, mode 600). Nothing is printed or passed on a command line.
@@ -18,6 +20,9 @@
 # ANSWER is y or n, a choice's key, comma-separated keys, or text. Waits are
 # cut to 20 s.
 set -uo pipefail
+
+# Before anything bash 4: a Mac's own bash is 3.2.
+[[ $(uname) == Darwin ]] && exec "$(dirname "$0")/bridge/install" ${1+"$@"}
 
 repo=$(cd "$(dirname "$0")" && pwd)
 plugin_dir=$HOME/.config/omarchy/plugins/marc.omarock
@@ -730,7 +735,7 @@ bridge_status() {  # BRIDGE TOKENFILE: the HTTP status of an authenticated reque
 
 step_apple() {
   step "Apple Music"
-  explain "Apple Music plays on a Mac, through omarock's bridge: an app you build there with your own Apple Developer membership (bridge/README.md). Its sound comes here as a stream mpd plays. Both machines need to reach each other, over Tailscale, say."
+  explain "Apple Music plays on a Mac, through omarock's bridge: an app built there with your own Apple Developer membership (bridge/README.md): clone omarock on the Mac and run ./install there too. Its sound comes here as a stream mpd plays. Both machines need to reach each other, over Tailscale, say."
   local bridge="" stream="" h
   if [[ -f $config/apple.json ]]; then
     bridge=$(jq -r '.bridge // empty' "$config/apple.json")
@@ -741,7 +746,7 @@ step_apple() {
   else
     [[ -n $bridge ]] && note "the bridge at $bridge doesn't answer"
     confirm "Is the bridge built and running on your Mac?" || {
-      note "Build it on the Mac first (bridge/README.md, steps 1 and 2), then run ./install again."; return 1; }
+      note "Set it up on the Mac first (clone omarock there and run ./install), then run ./install here again."; return 1; }
     local args=() host ip addr
     if command -v tailscale >/dev/null; then
       while read -r host ip; do args+=("$ip" "$host ($ip)"); done < <(tailscale status --json 2>/dev/null \

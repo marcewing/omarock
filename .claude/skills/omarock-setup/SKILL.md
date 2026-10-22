@@ -118,7 +118,8 @@ There are two halves, and the Mac's is the user's to build. Follow
 `bridge/README.md`.
 - **On the Mac:** the user builds and installs the bridge, with their own Apple
   Developer team and MusicKit enabled, and allows Apple Music access when macOS
-  asks. Both machines need Tailscale (or another way to reach the Mac).
+  asks. `./install` in a clone on the Mac walks them through it (it runs
+  `bridge/install`). Both machines need Tailscale (or another way to reach the Mac).
 - **Here:**
   - `~/.config/omarock/apple.json` names the bridge and the stream.
   - The bridge's token goes in `~/.config/omarock/bridge-token` (mode 600), put
