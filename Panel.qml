@@ -121,7 +121,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.5.9"
+  readonly property string version: "0.5.10"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -907,9 +907,10 @@ Panel {
         return genre ? root.makeEntry({ kind: "genre", apple: { kind: "genre", id: genre.id, source: "catalog" },
           title: genre.name }, -1) : null
       }
-      var id = kind === "album" ? item.albumId : item.artistId
+      var ids = root.playingIds()
+      var id = kind === "album" ? ids.albumId : ids.artistId
       if (!id) return null
-      return root.makeEntry({ kind: kind, apple: { kind: kind, id: id, source: item.source || "catalog" },
+      return root.makeEntry({ kind: kind, apple: { kind: kind, id: id, source: kind === "album" ? ids.albumSource : ids.artistSource },
         title: (kind === "album" ? item.album : item.artist) || "" }, -1)
     }
     var song = client.currentSong
@@ -919,6 +920,15 @@ Panel {
       return song.album ? root.makeEntry({ kind: "album", album: song.album, artist: song.albumartist || song.artist || "" }, -1) : null
     var artist = Mpd.songArtist(song)
     return artist !== "" ? root.makeEntry({ kind: "artist", artist: artist }, -1) : null
+  }
+
+  // The bridge's playing song's album and artist ids: from its status, else
+  // from /v1/info (AppleClient.songLinks), each with the source it's from.
+  function playingIds() {
+    var item = root.bridge.bridgeStatus.song || ({})
+    var asked = root.bridge.songLinks[Apple.songKey(item)] || ({})
+    return { albumId: item.albumId || asked.albumId || "", albumSource: (item.albumId ? item.source : asked.source) || "catalog",
+      artistId: item.artistId || asked.artistId || "", artistSource: (item.artistId ? item.source : asked.source) || "catalog" }
   }
 
   // o, O and g, or a click on the now playing card's album, artist or genre:
@@ -939,11 +949,11 @@ Panel {
     root.browseStack = [entry]
     root.loadBrowse(entry, function() {
       var song = root.player.currentSong
-      var item = root.bridgeMode ? root.bridge.bridgeStatus.song || ({}) : ({})
+      var albumId = root.bridgeMode ? root.playingIds().albumId : ""
       var index = root.browseRows.findIndex(function(row) {
         if (kind === "album") return row.kind === "track" && row.file === song.file
         if (kind === "genre") return row.kind === "artist" && !row.apple && row.artist === (song.albumartist || song.artist)
-        return row.kind === "album" && (row.apple ? row.apple.id === item.albumId : row.album === song.album)
+        return row.kind === "album" && (row.apple ? row.apple.id === albumId : row.album === song.album)
       })
       if (index >= 0) root.cursorIndex = index
     })

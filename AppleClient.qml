@@ -175,6 +175,28 @@ Item {
     root.elapsedBase = data.position || 0
     root.elapsedAt = Date.now()
     root.elapsed = root.elapsedBase
+    root.fillSongLinks()
+  }
+
+  // The playing song's album and artist ids, by song key, for the songs whose
+  // status comes without them (MusicKit's queue entries often do): asked of
+  // /v1/info once a song, { albumId, artistId, source }, or null while asking.
+  property var songLinks: ({})
+
+  function fillSongLinks() {
+    var song = root.song
+    if (!song || !song.id || (song.albumId && song.artistId)) return
+    var key = Apple.songKey(song)
+    if (root.songLinks[key] !== undefined) return
+    var asking = Object.assign({}, root.songLinks)
+    asking[key] = null
+    root.songLinks = asking
+    root.get("/v1/info/" + song.source + "/song/" + encodeURIComponent(song.id), function(data) {
+      var item = data && data.item ? data.item : {}
+      var links = Object.assign({}, root.songLinks)
+      links[key] = { albumId: item.albumId || "", artistId: item.artistId || "", source: item.source || song.source }
+      root.songLinks = links
+    })
   }
 
   // The long poll: the bridge answers at once when its status moved past

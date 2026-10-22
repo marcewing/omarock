@@ -191,6 +191,7 @@ ShellRoot {
         settingValues: p.settingValues, settingNotes: p.settingNotes, widgetSettings: host.widget.settings,
         appleReady: p.player.ready === true && p.appleMode, appleSeq: p.appleMode ? (p.player.bridgeStatus.seq || 0) : -1,
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
+        bridgeSong: p.bridgeMode ? p.bridge.song : null, playingIds: p.bridgeMode ? p.playingIds() : null,
         info: p.infoCard ? { service: p.infoCard.card.serviceName, kind: p.infoCard.card.kindName,
           status: p.infoCard.card.status, statusKind: p.infoCard.card.statusKind, title: p.infoCard.card.title,
           lines: p.infoCard.card.lines, notes: p.infoCard.card.notes, loading: p.infoCard.loading, cover: p.infoCoverUrl,

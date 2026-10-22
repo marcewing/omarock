@@ -922,6 +922,18 @@ def real_apple_search_scenario(host, output, socket_path, failures):
         mpd_client(socket_path, "playid " + stream_id)
         host.call("open")
         wait_for(lambda: host.state()["appleReady"], "real bridge", timeout=30)
+        song = host.state()["bridgeSong"] or {}
+        print("playing:", {k: song.get(k) for k in ("source", "title", "album", "albumId", "artistId", "catalogId")},
+              file=sys.stderr)
+        if song:
+            # Its album, by the ids in its status or from /v1/info.
+            wait_for(lambda: host.state()["playingIds"]["albumId"] != "", "the playing song's album id", timeout=15)
+            print("ids:", host.state()["playingIds"], file=sys.stderr)
+            host.call("clickPanel", "playingAlbum")
+            wait_for(lambda: host.state()["browse"].startswith("album:") and not host.state()["browseLoading"], "its album", timeout=40)
+            s = host.state()
+            print("album:", s["browse"], "cursor on", s["rows"][s["cursor"]] if s["cursor"] >= 0 else None, file=sys.stderr)
+            host.call("press", "Left")
         host.call("expand", "true")
         host.settle(1)
         host.call("press", "/")
@@ -1694,6 +1706,23 @@ def now_playing_scenario(host, output, socket_path, failures):
     host.call("clickPanel", "playingGenre")
     opens("a click on Apple Music's genre", "genre:Punk")
     back("← from Apple Music's genre comes back to the queue")
+    # A song whose status has no album or artist id (MusicKit's often don't):
+    # /v1/info has them.
+    fake_bridge_info(True)
+    fake_bridge_info(True, "bare")
+    wait_for(lambda: "albumId" not in (host.state()["bridgeSong"] or {"albumId": 1}), "a song without ids")
+    song_id = host.state()["bridgeSong"]["id"]
+    wait_for(lambda: ("GET", f"/v1/info/catalog/song/{song_id}") in [(m, p) for m, p, _ in bridge_requests("/v1/info/")],
+             "the panel asks /v1/info for the ids")
+    host.settle(.5)
+    host.call("clickPanel", "playingAlbum")
+    opens("a click on the album of a song without ids", "album:" + album)
+    back("← from it comes back to the queue")
+    host.call("clickPanel", "playingArtist")
+    opens("a click on the artist of a song without ids", "artist:" + artist)
+    back("← from that artist comes back to the queue")
+    fake_bridge_info(False, "bare")
+    fake_bridge_info(False)
     to_source(host, "local")
     BRIDGE["config"].unlink()
 
@@ -2180,9 +2209,10 @@ def info_closed(host, key, failures, label):
     check(host.state()["opened"], label + ", and the panel stays open", failures)
 
 
-def fake_bridge_info(on):
-    """Give the fake bridge GET /v1/info, or take it away (an older bridge)."""
-    request = urllib.request.Request(f"http://127.0.0.1:{BRIDGE['port']}/v1/fake/info", method="POST",
+def fake_bridge_info(on, switch="info"):
+    """Give the fake bridge GET /v1/info, or take it away (an older bridge);
+    with switch="bare", leave the status's songs without albumId and artistId."""
+    request = urllib.request.Request(f"http://127.0.0.1:{BRIDGE['port']}/v1/fake/{switch}", method="POST",
                                      data=json.dumps({"on": on}).encode(),
                                      headers={"Authorization": "Bearer fake-bridge-token", "Content-Type": "application/json"})
     urllib.request.urlopen(request, timeout=5).read()

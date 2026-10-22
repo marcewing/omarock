@@ -122,6 +122,9 @@ class Bridge:
         self.shuffle, self.repeat = False, "off"
         # GET /v1/info, which older bridges lack (POST /v1/fake/info turns it on).
         self.info_route = False
+        # The status's songs without albumId and artistId, as MusicKit's queue
+        # entries often come (POST /v1/fake/bare).
+        self.bare = False
         # The library: a copy of Zen Arcade, and two playlists of songs.
         zen = dict(public(CATALOG_ALBUMS["c-al-1"]), id="l-al-1", source="library", catalogId="c-al-1")
         self.library_albums = [zen]
@@ -208,6 +211,8 @@ class Bridge:
                "positionAt": time.time(), "queue": self.queue, "queueIndex": self.index, "queueOffset": 0,
                "queueLength": len(self.queue), "shuffle": self.shuffle, "repeat": self.repeat}
         if self.queue and self.state != "stopped": out["song"] = self.queue[self.index]
+        if self.bare and "song" in out:
+            out["song"] = {k: v for k, v in out["song"].items() if k not in ("albumId", "artistId")}
         return out
 
     def play_at(self, index, state="playing"):
@@ -350,6 +355,10 @@ class Handler(BaseHTTPRequestHandler):
             if method == "POST":
                 if path == "fake/info":
                     b.info_route = bool(body["on"])
+                    return {"ok": True}
+                if path == "fake/bare":
+                    b.bare = bool(body["on"])
+                    b.changed()
                     return {"ok": True}
                 if b.spotify and path == "activate":
                     b.current = True
