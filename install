@@ -142,7 +142,7 @@ wait_until() {
       $given_up && break
     done
   done
-  trap - INT
+  trap 'exit 130' INT
   [[ -n $tty ]] && stty "$tty" 2>/dev/null
   [[ -z $answers ]] && printf '\r\e[K'
   $met
@@ -321,7 +321,8 @@ step_mpd() {
   mpd_socket=$(setting socket "")
   [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
   local other dropin_dir=$units/mpd.service.d need_dropin=false
-  other=$(grep -E '^[[:space:]]*bind_to_address[[:space:]]+"/' "$conf" 2>/dev/null | head -1 | cut -d'"' -f2)
+  other=$(grep -E '^[[:space:]]*bind_to_address[[:space:]]+"(/|~/)' "$conf" 2>/dev/null | head -1 | cut -d'"' -f2)
+  other=${other/#\~/$HOME}
   if [[ -n $other && $other != "$mpd_socket" ]]; then
     ok "mpd listens on $other; omarock will use it (its socket setting)"
     mpd_socket=$other
@@ -551,6 +552,11 @@ PY
 # ---- 5. Spotify ----
 
 sp_health() { health http://127.0.0.1:8730; }
+soloist_age() {  # days since the installed Soloist was built, or nothing
+  local built
+  built=$("$HOME/.local/lib/omarock-soloist/soloist" --version 2>/dev/null | grep -oE '\(20[0-9]{6}\)' | tr -d '()')
+  [[ -n $built ]] && echo $((($(date +%s) - $(date -d "$built" +%s)) / 86400))
+}
 sp_paired() { sp_health | jq -e '.soloist.loggedIn' >/dev/null; }
 sp_signed_in() { sp_health | jq -e '.web.signedIn' >/dev/null; }
 sp_up() { [[ -n $(sp_health) ]]; }
@@ -560,7 +566,12 @@ cleanup_firewall() {
   for r in "${added_rules[@]}"; do run sudo ufw delete allow "$r" >/dev/null; done
   added_rules=()
 }
+# However the installer ends (done, stopped, Ctrl-C during a command, the
+# terminal closed), the pairing's firewall rules come out again.
 trap cleanup_firewall EXIT
+trap 'exit 130' INT
+trap 'exit 129' HUP
+trap 'exit 143' TERM
 
 step_spotify() {
   step "Spotify"
@@ -593,7 +604,19 @@ step_spotify() {
     key=""
     ok "saved the Soloist key"
   fi
-  run "$repo/tools/update-soloist" || { bad "couldn't fetch Soloist from Spotify"; return 1; }
+  # Soloist builds stop working 90 days after they're made: fetch one only
+  # when there's none, or this one is getting old.
+  local age
+  age=$(soloist_age)
+  if [[ -z $age || $age -ge 90 ]]; then
+    [[ -n $age ]] && note "Soloist's build is $age days old, and has stopped working."
+    run "$repo/tools/update-soloist" || { bad "couldn't fetch Soloist from Spotify"; return 1; }
+  elif ((age >= 60)); then
+    explain "Soloist's build is $age days old; builds stop working at 90."
+    if confirm "Fetch the latest from Spotify?"; then run "$repo/tools/update-soloist"; fi
+  else
+    ok "Soloist, built $age days ago (builds last 90 days)"
+  fi
   if [[ ! -f $share/spotify/INSTALLED ]]; then
     run "$repo/tools/install-spotify" --start || return 1
   elif ! up_to_date spotify && confirm "This clone has a newer omarock-spotify. Update it?"; then

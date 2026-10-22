@@ -1,0 +1,22 @@
+#!/bin/bash
+# install-fingerprint: what ./install could have changed on this machine, as
+# hashes and names (never contents): mpd.conf, the user units and drop-ins,
+# omarock's config files, the bus, the installed services, omarock's bar
+# settings, ufw's rules and the plugin's commit. Run it before and after a
+# run, in a test VM, and diff: a second run of ./install should change nothing.
+cd ~ || exit 1
+{
+  sha256sum .config/mpd/mpd.conf
+  find .config/systemd/user .config/omarock .config/pipewire .local/share/omarock .local/lib -type f \
+    -not -path '*/sxm-venv/*' -not -name '*.pyc' -print0 2>/dev/null | sort -z | xargs -0 sha256sum
+  find .config/systemd/user -type l -printf '%p -> %l\n' | sort
+  ls .config/mpd
+  python3 -I -c '
+import json
+d = json.load(open(".config/omarchy/shell.json"))
+for side, items in d["bar"]["layout"].items():
+    for it in items:
+        if isinstance(it, dict) and it.get("id") == "marc.omarock": print(side, json.dumps(it, sort_keys=True))'
+  sudo ufw status | sed 1,4d
+  git -C .config/omarchy/plugins/marc.omarock rev-parse HEAD
+} 2>&1

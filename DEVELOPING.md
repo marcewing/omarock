@@ -87,6 +87,11 @@ Nothing touches your mpd's queue or playlists, your PipeWire, or the live bar.
 VM, never on your own desktop. `OMAROCK_INSTALL_ANSWERS=FILE ./install` runs it
 without gum, answering each prompt from FILE: a line per prompt, `TEXT=ANSWER`,
 where TEXT is part of the prompt. Waits are cut to 20 s.
+- **Through gum:** `tools/capture/ptydrive.py` runs it in a terminal of its own
+  (`ssh -tt` into the VM, say) and presses keys as each prompt shows up.
+- **Idempotence:** run `tools/capture/install-fingerprint` before and after a
+  run, and diff the two. A second run on a finished install must change nothing,
+  and run no commands. Only unfinished or optional steps may ask again.
 
 Offscreen Quickshell has no layer shell, so the harness swaps in
 `tools/capture/KeyboardPanel.qml`. It draws the same card in an ordinary window,
