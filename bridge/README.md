@@ -53,18 +53,26 @@ add your Apple ID → your team → Manage Certificates → + → Apple Developm
 ## 2. Build and install
 
 ```sh
-brew install xcodegen ffmpeg icecast
 git clone https://github.com/marcewing/omarock.git
-cd omarock/bridge/app
-./build.sh --run
+cd omarock && ./install
 ```
 
-`build.sh` checks the requirements, asks once for your Team ID and bundle id (it saves
-them in `bridge/app/Local.xcconfig`, which git ignores), builds and signs the app,
-installs it to `~/Applications/OmarockBridge.app` and starts it. At the end it prints
-what the Linux side needs.
+On a Mac, `./install` sets up the bridge (`bridge/install`), one step at a time. It
+checks the requirements and offers to install what's missing from Homebrew (`xcodegen`,
+`ffmpeg`, `icecast`, and `gum` for its prompts). It asks for your Team ID and bundle id
+and saves them in `bridge/app/Local.xcconfig`, which git ignores. Then it builds and
+signs the app, installs it to `~/Applications/OmarockBridge.app`, starts it, and goes
+through the Mac's permissions with you. It ends with what your Omarchy machine needs.
+Every command it runs is shown, and it asks before changing anything.
 
-The first time it runs, the Mac asks two things. Allow both:
+Run it again whenever you like. What's done is checked and skipped. The bridge is
+rebuilt only if this checkout's code has changed since the installed build, and only
+once nothing is listening to the stream.
+
+### The Mac's questions
+
+The first time the bridge runs, the Mac asks two things. Allow both (`./install` waits
+for them, and offers to open System Settings):
 - **Apple Music access** ("OmarockBridge would like to access Apple Music…").
 - **Audio capture**, for its own playback. If you miss the prompt, switch it on in
   System Settings → Privacy & Security → Screen & System Audio Recording (the "System
@@ -72,6 +80,18 @@ The first time it runs, the Mac asks two things. Allow both:
 
 If macOS says the login item needs approval, allow OmarockBridge in System Settings →
 General → Login Items.
+
+### By hand
+
+`./install` uses `bridge/app/build.sh`, which you can run yourself:
+
+```sh
+brew install xcodegen ffmpeg icecast
+bridge/app/build.sh --run
+```
+
+It checks the requirements, asks once for your Team ID and bundle id, builds, installs
+and starts the app, and prints what the Linux side needs.
 
 Check it from the Mac or Linux (`/v1/health` needs no token):
 
@@ -91,6 +111,7 @@ Everything lives in `~/Library/Application Support/omarock-bridge`, not in the r
 | `source.password`, `admin.password`, `relay.password` | Icecast's passwords (made on first run). |
 | `icecast.xml` | Icecast's config, rewritten at each launch for the current Tailscale address. Delete its first comment line to keep your own edits. |
 | `config.json` | Optional settings (below). |
+| `INSTALLED` | The commit the installed app was built from. |
 | `log/` | `bridge.log`, `ffmpeg.log`, and Icecast's `error.log` and `access.log`. |
 
 `config.json`, every field optional:
@@ -106,15 +127,23 @@ Everything lives in `~/Library/Application Support/omarock-bridge`, not in the r
 ### Updating
 
 ```sh
-git pull && bridge/app/build.sh --run
+git pull && ./install
 ```
 
-`--run` waits until nothing is listening to the stream, because restarting the bridge
-under mpd gives mpd errors until it's back. `--run-now` restarts straight away.
+or `git pull && bridge/app/build.sh --run`. Both wait until nothing is listening to the
+stream, because restarting the bridge under mpd gives mpd errors until it's back.
+`build.sh --run-now` restarts straight away.
 
 ## 3. The Linux side
 
-`build.sh` prints these with your addresses filled in:
+Run `./install` on your Omarchy machine and pick Apple Music. It lists the Macs among
+your Tailscale machines, checks the bridge answers, and asks for the bridge's token.
+Paste it (on the Mac, `pbcopy < ~/Library/Application\ Support/omarock-bridge/token`
+puts it on the clipboard without showing it; the Mac's `./install` offers to), or let
+it copy the token with `scp`, which needs the Mac's Remote Login (System Settings →
+General → Sharing).
+
+By hand instead (`build.sh` prints these with your addresses filled in):
 
 ```sh
 mkdir -p ~/.config/omarock

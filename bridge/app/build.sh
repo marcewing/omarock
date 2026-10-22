@@ -11,7 +11,7 @@
 set -euo pipefail
 cd ${0:A:h}
 mode=${1:-}
-support=~/Library/Application\ Support/omarock-bridge
+support=${OMAROCK_BRIDGE_SUPPORT:-$HOME/Library/Application Support/omarock-bridge}
 app=~/Applications/OmarockBridge.app
 
 bundle_id() { sed -n 's/^OMAROCK_BUNDLE_ID *= *//p' Local.xcconfig 2>/dev/null | tail -1; }
@@ -135,10 +135,15 @@ if [[ $mode == --run || $mode == --run-now ]]; then
     # Opened through LaunchServices: it registers its launch agent and hands over to it.
     open "$app"
   fi
+  # The commit it was built from, so ../install rebuilds only when the bridge changes.
+  mkdir -p "$support" && git rev-parse HEAD >"$support/INSTALLED"
   print "Installed $app."
 else
   print "Built $built (install it with --run)."
 fi
+
+# bridge/install shows the next steps itself.
+[[ -n ${OMAROCK_FROM_INSTALL:-} ]] && exit 0
 
 cat <<EOF
 

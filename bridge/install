@@ -1,0 +1,511 @@
+#!/bin/zsh
+# bridge/install: set up omarock's Apple Music bridge on this Mac, or check it.
+# It walks through what the bridge needs (Xcode, Homebrew's tools, Tailscale),
+# your App ID with MusicKit, the build, the Mac's permissions, and what your
+# Omarchy machine needs next. Each step checks what's there first, says what it
+# will change, and asks before changing it; every command it runs is shown.
+# Run it again whenever you like: what's done is skipped, and the bridge is
+# rebuilt only when this checkout's has changed since the installed build.
+#
+#   ./install            from a clone of omarock, in Terminal on the Mac
+#   ./install --help
+#
+# The bridge's token and Icecast's passwords stay in
+# ~/Library/Application Support/omarock-bridge (mode 600), and are never shown.
+# bridge/app/build.sh does the build; run it by hand to update (bridge/README.md).
+#
+# For tests, OMAROCK_INSTALL_ANSWERS=FILE answers the prompts from FILE, without
+# gum: a line per prompt, `TEXT=ANSWER`, where TEXT is part of the prompt and
+# ANSWER is y or n, a choice's key, or text. Waits are cut to 20 s.
+setopt nounset pipefail
+
+repo=${0:A:h:h}
+here=$repo/bridge/app
+support=${OMAROCK_BRIDGE_SUPPORT:-$HOME/Library/Application Support/omarock-bridge}
+app=$HOME/Applications/OmarockBridge.app
+answers=${OMAROCK_INSTALL_ANSWERS:-}
+changed=false   # this run installed or changed something
+export OMAROCK_FROM_INSTALL=1   # build.sh leaves the next steps to this
+
+bold=$'\e[1m' dim=$'\e[2m' reset=$'\e[0m' green=$'\e[32m' red=$'\e[31m' yellow=$'\e[33m'
+ok() { print -r -- "  ${green}✓${reset} $*"; }
+bad() { print -r -- "  ${red}✗${reset} $*"; }
+note() { print -r -- "  ${yellow}–${reset} $*"; }
+explain() { print -r -- "$*" | fold -s -w 76 | sed 's/^/  /'; }
+step_no=0
+step() { (( step_no++ )); print -r -- $'\n'"${bold}${step_no}. $*${reset}"; }
+
+# A command, shown as it would be typed (on stderr, so its output can be
+# silenced alone), then run.
+show() { print -u2 -r -- "  ${dim}\$ $*${reset}"; }
+run() {
+  local shown="" a
+  for a in "$@"; do
+    if [[ $a =~ '^[A-Za-z0-9_./:=@%+,~-]+$' ]]; then shown+=" $a"; else shown+=" ${(qq)a}"; fi
+  done
+  show "${shown# }"
+  "$@"
+}
+
+# Ctrl-C or Esc at a prompt. The prompts run in $(…), so this goes to stderr,
+# and the caller exits (`|| exit 1`).
+stopped() {
+  print -u2 -r -- $'\n'"${bold}Stopped.${reset} Run ./install again to carry on from here."
+  exit 1
+}
+on_int() { print -u2 -r -- $'\n'"${bold}Stopped.${reset} Run ./install again to carry on from here."; exit 130; }
+trap on_int INT
+
+# ---- Prompts: gum in a terminal, or the answers file in tests ----
+
+# The answers file has a line per prompt, `TEXT=ANSWER`: the first line whose
+# TEXT is in the prompt answers it.
+answer() {  # PROMPT [SHOWN]: the prompt's answer from the file, logged
+  local key value
+  while IFS='=' read -r key value; do
+    [[ -n $key && $1 == *"$key"* ]] || continue
+    print -u2 -r -- "  ? $1 ${dim}${2:-$value}${reset}"
+    print -rn -- "$value"
+    return 0
+  done <"$answers"
+  print -u2 -r -- "install: no answer for: $1"
+  kill -TERM $$
+  exit 3
+}
+
+# confirm PROMPT [yes|no]: the default is yes.
+confirm() {
+  if [[ -n $answers ]]; then [[ $(answer "$1") == y* ]]; return; fi
+  local rc
+  gum confirm --default="$([[ ${2:-yes} == yes ]] && print true || print false)" "$1"
+  rc=$?
+  (( rc == 130 )) && stopped
+  return $rc
+}
+
+# ask PROMPT [VALUE] [PLACEHOLDER]: a line of text.
+ask() {
+  if [[ -n $answers ]]; then answer "$1"; return; fi
+  gum input --header "$1" --value "${2:-}" --placeholder "${3:-}" --width 72 || stopped
+}
+
+# choose HEADER DEFAULT KEY LABEL [KEY LABEL ...]: one key. Labels show; keys come back.
+choose() {
+  local header=$1 default=$2 picked i
+  local -a keys labels selected
+  shift 2
+  while (( $# )); do keys+=("$1"); labels+=("$2"); shift 2; done
+  if [[ -n $answers ]]; then answer "$header"; return; fi
+  for i in {1..$#keys}; do [[ $keys[i] == "$default" ]] && selected=(--selected "$labels[i]"); done
+  picked=$(gum choose --header "$header" "${selected[@]}" "${labels[@]}") || stopped
+  for i in {1..$#labels}; do [[ $labels[i] == "$picked" ]] && print -rn -- "$keys[i]"; done
+  return 0
+}
+
+# wait_until TITLE SECONDS COMMAND...: COMMAND again every 2 s until it
+# succeeds, with a spinner. Ctrl-C gives up waiting, not the installer.
+wait_until() {
+  local title=$1 secs=$2 end i=0 given_up=false met=false tty="" _
+  local -a frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  shift 2
+  [[ -n $answers ]] && (( secs > 20 )) && secs=20
+  end=$(( SECONDS + secs ))
+  # Keys typed meanwhile (Ctrl-C's ^C too) aren't echoed over the spinner.
+  [[ -z $answers ]] && tty=$(stty -g 2>/dev/null) && stty -echo -echoctl 2>/dev/null
+  trap 'given_up=true' INT
+  while :; do
+    if "$@" >/dev/null 2>&1; then met=true; break; fi
+    if $given_up || (( SECONDS >= end )); then break; fi
+    if [[ -n $answers ]]; then sleep 2; continue; fi
+    for _ in 1 2 3 4 5 6 7 8; do
+      (( i = i % 10 + 1 ))
+      printf '\r  %s %s' "$frames[i]" "$title"
+      sleep 0.25
+      $given_up && break
+    done
+  done
+  trap on_int INT
+  [[ -n $tty ]] && stty "$tty" 2>/dev/null
+  [[ -z $answers ]] && printf '\r\e[K'
+  $met
+}
+
+# ---- What's there ----
+
+# A value from bridge/app/Local.xcconfig (your Team ID and bundle id; not in git).
+xc_value() { sed -n "s/^$1 *= *//p" "$here/Local.xcconfig" 2>/dev/null | tail -1; }
+# The installed app's bundle id, version and team.
+installed_id() { /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null; }
+installed_version() { /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null; }
+installed_team() { codesign -dv "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p'; }
+# launchd runs it as Contents/MacOS/OmarockBridge, so by name.
+running() { pgrep -qx OmarockBridge; }
+
+# The checkout's commit the installed bridge was built from (build.sh writes
+# it), and whether anything the build uses has changed since.
+build_paths=(bridge/app bridge/tap ':(exclude)bridge/app/build.sh' ':(exclude)*.md')
+installed_commit() { cat "$support/INSTALLED" 2>/dev/null; }
+up_to_date() {
+  local c
+  c=$(installed_commit) && [[ -n $c ]] \
+    && git -C "$repo" diff --quiet "$c" HEAD -- $build_paths 2>/dev/null \
+    && git -C "$repo" diff --quiet HEAD -- $build_paths 2>/dev/null
+}
+
+# This Mac's Tailscale address (100.64.0.0/10), as the bridge picks it: a utun one first.
+tailnet_address() {
+  ifconfig | awk '/^[a-z]/ {ifc = $1} $1 == "inet" && $2 ~ /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./ {print ifc, $2}' \
+    | sort -k1,1 | awk '{print ($1 ~ /^utun/ ? 0 : 1), $2}' | sort -n | head -1 | cut -d' ' -f2
+}
+# config.json's value, or nothing.
+config_value() { plutil -extract "$1" raw -o - "$support/config.json" 2>/dev/null; }
+# This Mac's name among your Tailscale machines.
+tailnet_name() {
+  local cli=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+  [[ -x $cli ]] || cli=${commands[tailscale]:-}
+  [[ -n $cli ]] && "$cli" status --json 2>/dev/null | plutil -extract Self.HostName raw -o - - 2>/dev/null
+}
+bridge_url() { print -r -- "http://${$(config_value listenHost):-$(tailnet_address)}:${$(config_value port):-8710}"; }
+health() { curl -s -m 5 "$(bridge_url)/v1/health" 2>/dev/null; }
+health_ok() { [[ -n $(health) ]]; }
+health_value() { plutil -extract "$1" raw -o - - <<<"$(health)" 2>/dev/null; }
+health_true() { [[ $(health_value "$1") == true ]]; }
+private_ok() { [[ -s $1 && $(stat -f %Lp "$1") == 600 ]]; }
+
+# Asks the bridge for Apple Music access again (a dialog on the Mac, if it hasn't
+# been answered), which also re-reads the subscription. The token goes to curl
+# on stdin, not on its command line.
+reauthorize() {
+  print -r -- "header = \"Authorization: Bearer $(<"$support/token")\"" \
+    | curl -s -m ${1:-5} -o /dev/null -X POST -K - "$(bridge_url)/v1/authorize"
+}
+catalog_now() { reauthorize; health_true canPlayCatalog; }
+
+# The Apple Development certificates' Team IDs (their OU).
+cert_teams() {
+  local h
+  for h in ${(f)"$(security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development/ {print $2}')"}; do
+    security find-certificate -a -Z -p -c "Apple Development" 2>/dev/null \
+      | awk -v h=$h '/^SHA-1 hash:/ {on = ($3 == h)} on && /-----BEGIN/ {p = 1} p && on {print} /-----END/ {p = 0}' \
+      | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]\{10\}\).*/\1/p'
+  done | sort -u
+}
+has_cert() { security find-identity -v -p codesigning 2>/dev/null | grep -q '"Apple Development'; }
+
+pane() {  # NAME URL: offer to open a System Settings pane
+  [[ -z $answers ]] || return 0
+  confirm "Open $1 in System Settings?" && run open "$2"
+}
+
+# ---- 0. Before anything ----
+
+brew=""
+preflight() {
+  if [[ ${1:-} == (-h|--help) ]]; then
+    sed -n '2,/^setopt/p' "$0" | sed '$d; s/^# \{0,1\}//'
+    exit 0
+  fi
+  [[ $(uname) == Darwin ]] || { print "bridge/install sets up the Mac; on Linux, run ./install."; exit 1; }
+  (( EUID != 0 )) || { print "Run ./install as yourself, not root: it asks for sudo when it needs it."; exit 1; }
+  git -C "$repo" rev-parse --verify -q HEAD >/dev/null || {
+    print "Run ./install from a git clone of omarock (git clone https://github.com/marcewing/omarock)."; exit 1; }
+  # Homebrew, on the PATH for this run if it isn't already.
+  brew=${commands[brew]:-}
+  [[ -z $brew && -x /opt/homebrew/bin/brew ]] && brew=/opt/homebrew/bin/brew
+  [[ -z $brew && -x /usr/local/bin/brew ]] && brew=/usr/local/bin/brew
+  [[ -n $brew ]] && path=(${brew:h} $path)
+  if [[ -z $answers ]]; then
+    [[ -t 0 && -t 1 ]] || { print "Run ./install in a terminal: it asks questions."; exit 1; }
+    if (( ! $+commands[gum] )); then
+      if [[ -z $brew ]]; then
+        print "The installer needs Homebrew (https://brew.sh): install it as brew.sh says, then run ./install again."
+        exit 1
+      fi
+      print "The installer's prompts use gum, from Homebrew."
+      read -q "?Install it now (brew install gum)? [y/n] " || { print; exit 1; }
+      print
+      run brew install gum || exit 1
+      rehash
+    fi
+  fi
+}
+
+welcome() {
+  local v
+  v=$(sed -n 's/.*MARKETING_VERSION: *"*\([0-9.]*\).*/\1/p' "$here/project.yml" | head -1)
+  print -r -- $'\n'"${bold}omarock's Apple Music bridge ${v}${reset}, for this Mac"$'\n'
+  explain "The bridge plays Apple Music here and streams it to omarock on your Omarchy machine, over Tailscale. Its sound is muted on this Mac, and nothing else on the Mac is touched. You build it yourself, signed with your Apple Developer membership, which MusicKit needs."
+  echo
+  explain "This goes one step at a time. It shows each command before running it, and asks before it changes anything. Run it again whenever you like: what's done is checked and skipped."
+}
+
+# ---- 1. What the bridge needs ----
+
+step_requirements() {
+  step "What the bridge needs"
+  local v parts
+  v=$(sw_vers -productVersion)
+  parts=(${(s:.:)v})
+  if (( parts[1] > 14 || (parts[1] == 14 && ${parts[2]:-0} >= 2) )); then
+    ok "macOS $v"
+  else
+    bad "macOS $v: the bridge needs 14.2 or later (for Core Audio's process taps)"
+    exit 1
+  fi
+
+  # Xcode, not just the command-line tools.
+  local dev xcodes
+  if ! xcodebuild -version >/dev/null 2>&1; then
+    dev=$(xcode-select -p 2>/dev/null)
+    xcodes=(/Applications/Xcode*.app(N))
+    if (( ! $#xcodes )); then
+      explain "The bridge is built with Xcode (free, from the App Store; the command-line tools alone aren't enough). Install it, open it once, then run ./install again."
+      [[ -z $answers ]] && confirm "Open Xcode in the App Store?" && run open 'macappstore://apps.apple.com/app/id497799835'
+      stopped
+    elif [[ $dev != $xcodes[1]/* ]]; then
+      explain "Xcode is here, but the command-line tools are selected instead ($dev)."
+      confirm "Select Xcode (sudo xcode-select)?" || stopped
+      run sudo xcode-select -s "$xcodes[1]/Contents/Developer" || stopped
+    fi
+    if ! xcodebuild -version >/dev/null 2>&1; then
+      explain "Xcode needs opening once, to agree to its license and add its components."
+      [[ -z $answers ]] && confirm "Open Xcode?" && run open -a "$xcodes[1]"
+      wait_until "Waiting for Xcode… (Ctrl-C to stop)" 900 xcodebuild -version || { bad "xcodebuild doesn't run yet: $(xcodebuild -version 2>&1 | head -1)"; stopped; }
+    fi
+  fi
+  ok "$(xcodebuild -version | head -1)"
+
+  # Homebrew's tools.
+  if [[ -z $brew ]]; then
+    bad "Homebrew isn't here: install it as https://brew.sh says, then run ./install again."
+    stopped
+  fi
+  local need=() t
+  for t in xcodegen ffmpeg icecast; do (( $+commands[$t] )) || need+=($t); done
+  if (( $#need )); then
+    explain "From Homebrew: xcodegen makes the Xcode project, ffmpeg encodes the sound (lossless FLAC), and Icecast serves the stream."
+    confirm "Install ${(j:, :)need} with Homebrew?" || { bad "The bridge needs them."; stopped; }
+    run brew install $need || stopped
+    rehash
+    changed=true
+  fi
+  ok "xcodegen, ffmpeg and Icecast are installed"
+
+  # Tailscale: the bridge serves only on its address (and loopback).
+  local addr
+  addr=$(tailnet_address)
+  if [[ -z $addr ]]; then
+    explain "The bridge serves only on Tailscale, never your LAN. This Mac needs Tailscale, running and logged in to the same tailnet as your Omarchy machine."
+    if [[ -d /Applications/Tailscale.app ]]; then
+      confirm "Open Tailscale?" && run open -a Tailscale
+    else
+      confirm "Open Tailscale's download page?" && run open https://tailscale.com/download/mac
+    fi
+    wait_until "Waiting for Tailscale… (Ctrl-C to stop)" 900 tailnet_address_set || { bad "No Tailscale address on this Mac yet."; stopped; }
+    addr=$(tailnet_address)
+  fi
+  ok "Tailscale: this Mac is $addr"
+}
+tailnet_address_set() { [[ -n $(tailnet_address) ]]; }
+
+# ---- 2. The App ID ----
+
+step_appid() {
+  step "Your App ID with MusicKit"
+  if ! has_cert; then
+    explain "Xcode signs the bridge with your Apple Development certificate. In Xcode: Settings, Accounts, + to add the Apple ID of your developer membership, pick your team, Manage Certificates, + and Apple Development."
+    [[ -z $answers ]] && confirm "Open Xcode?" && run open -a Xcode
+    wait_until "Waiting for the certificate… (Ctrl-C to stop)" 900 has_cert || { bad "No Apple Development certificate yet."; stopped; }
+  fi
+  ok "a signing certificate: $(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development[^"]*\)".*/\1/p' | head -1)"
+
+  local team bundle
+  team=$(xc_value DEVELOPMENT_TEAM)
+  bundle=$(xc_value OMAROCK_BUNDLE_ID)
+  if [[ -n $team && -n $bundle ]]; then
+    ok "Team $team, bundle id $bundle (bridge/app/Local.xcconfig)"
+    return
+  fi
+
+  explain "MusicKit works only for an app whose bundle id is registered to you, with MusicKit switched on. At developer.apple.com: Certificates, IDs & Profiles, Identifiers, + and App IDs (type App). Give it an explicit bundle id of your own, such as com.yourname.omarock.bridge, and register it. Then open it again, tick MusicKit on the App Services tab, and Save. A new App ID can take a few minutes to work."
+  if [[ -z $answers ]] && confirm "Open the Identifiers page?"; then
+    run open https://developer.apple.com/account/resources/identifiers/list
+  fi
+
+  local teams=(${(f)"$(cert_teams)"})
+  if [[ -z $team ]]; then
+    explain "Your Team ID is on developer.apple.com under Membership details: 10 letters and digits.${teams:+ Your certificate's is ${teams[1]}.}"
+    while :; do
+      team=$(ask "Your Team ID (Enter to stop here):" "${teams[1]:-}" "10 letters and digits") || exit 1
+      [[ -z $team ]] && stopped
+      [[ $team =~ '^[A-Z0-9]{10}$' ]] && break
+      bad "A Team ID is 10 capital letters and digits."
+    done
+  fi
+  if [[ -z $bundle ]]; then
+    while :; do
+      bundle=$(ask "Your App ID's bundle id (Enter to stop here):" "" "com.yourname.omarock.bridge") || exit 1
+      [[ -z $bundle ]] && stopped
+      [[ $bundle =~ '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$' ]] && break
+      bad "A bundle id is like com.yourname.omarock.bridge."
+    done
+  fi
+  {
+    grep -vE '^(DEVELOPMENT_TEAM|OMAROCK_BUNDLE_ID) *=' "$here/Local.xcconfig" 2>/dev/null
+    print -r -- "DEVELOPMENT_TEAM = $team"
+    print -r -- "OMAROCK_BUNDLE_ID = $bundle"
+  } >"$here/Local.xcconfig.new" && mv "$here/Local.xcconfig.new" "$here/Local.xcconfig"
+  ok "wrote bridge/app/Local.xcconfig (git ignores it; edit it to change these)"
+  changed=true
+}
+
+# ---- 3. Build, install and start ----
+
+step_build() {
+  step "The bridge"
+  local label team why=""
+  label=$(xc_value OMAROCK_BUNDLE_ID)
+  team=$(xc_value DEVELOPMENT_TEAM)
+  if [[ ! -d $app ]]; then
+    explain "This builds the bridge (a few minutes), signs it as $label, installs it in ~/Applications and starts it. It starts at login from then on, in the background, with no Dock icon."
+    confirm "Build and install it?" || stopped
+    why=new
+  elif [[ $(installed_id) != "$label" || $(installed_team) != "$team" ]]; then
+    explain "~/Applications/OmarockBridge.app is $(installed_id) (team $(installed_team)), and this checkout's Local.xcconfig says $label (team $team). There's one bridge per Mac: building replaces it, and a new bundle id asks for the Mac's permissions again."
+    confirm "Replace it with $label?" no || { note "kept the installed bridge"; return; }
+    why=replace
+  elif ! up_to_date; then
+    local c
+    c=$(installed_commit)
+    if [[ -z $c ]]; then
+      explain "OmarockBridge $(installed_version) is installed, but not by ./install or build.sh, so which build it is isn't known."
+    elif ! git -C "$repo" diff --quiet HEAD -- $build_paths 2>/dev/null; then
+      explain "This checkout's bridge has changes that aren't committed."
+    else
+      explain "This checkout's bridge has changed since the installed build (${c[1,7]}):"
+      git -C "$repo" log --format='    %h %s' "$c..HEAD" -- $build_paths 2>/dev/null | head -8
+    fi
+    explain "Rebuilding restarts the bridge, once nothing is listening to its stream, so it doesn't cut off music on your Omarchy machine."
+    confirm "Rebuild and restart it?" || { note "kept the installed build"; return; }
+    why=update
+  fi
+
+  if [[ -n $why ]]; then
+    run "$here/build.sh" --run || { bad "the build didn't finish (its errors are above)"; stopped; }
+    changed=true
+    ok "OmarockBridge $(installed_version) is installed and started"
+  else
+    ok "OmarockBridge $(installed_version) is installed, built from this checkout (${$(installed_commit)[1,7]})"
+    if ! running; then
+      if launchctl print "gui/$UID/$label" >/dev/null 2>&1; then
+        run launchctl kickstart "gui/$UID/$label"
+      else
+        run open "$app"
+      fi
+      changed=true
+    fi
+  fi
+}
+
+# ---- 4. The Mac's permissions ----
+
+step_health() {
+  step "The bridge's permissions"
+  local url label
+  url=$(bridge_url)
+  label=$(installed_id)
+  if ! wait_until "Waiting for the bridge…" 60 health_ok; then
+    bad "the bridge doesn't answer at $url"
+    explain "Its log says why: $support/log/bridge.log"
+    stopped
+  fi
+  ok "the bridge answers at $url"
+
+  # Started at login: macOS may want the login item approved.
+  if launchctl print "gui/$UID/$label" >/dev/null 2>&1; then
+    ok "it starts at login"
+  elif [[ $(config_value startAtLogin) == false ]]; then
+    note "it doesn't start at login (startAtLogin is false in config.json)"
+  else
+    explain "macOS hasn't let the bridge start at login: allow OmarockBridge in System Settings, General, Login Items & Extensions. It runs now either way."
+    pane "Login Items" "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
+    wait_until "Waiting for the login item… (Ctrl-C to skip)" 300 launchctl print "gui/$UID/$label" \
+      && ok "it starts at login" || note "not allowed yet: the bridge won't start by itself after a restart"
+  fi
+
+  # Apple Music.
+  if ! health_true authorized; then
+    if [[ $(health_value musicAuthorization) == notDetermined ]]; then
+      explain "The bridge asks for Apple Music access in a dialog on this Mac: click Allow."
+      reauthorize 600 &!
+    else
+      explain "The bridge isn't allowed to use Apple Music: switch OmarockBridge on in System Settings, Privacy & Security, Media & Apple Music."
+      pane "Media & Apple Music" "x-apple.systempreferences:com.apple.preference.security?Privacy_Media"
+    fi
+    wait_until "Waiting for Apple Music access… (Ctrl-C to skip)" 600 health_true authorized
+  fi
+  if health_true authorized; then ok "it may use Apple Music"; else bad "it may not use Apple Music yet"; fi
+
+  if health_true authorized && ! health_true canPlayCatalog && ! wait_until "Checking the subscription…" 10 catalog_now; then
+    explain "MusicKit says this Mac can't play Apple Music's catalog. Check that the Music app is signed in to an Apple ID with an Apple Music subscription, and that MusicKit is ticked for the App ID $label. A new App ID can take a few minutes."
+    wait_until "Checking again every few seconds… (Ctrl-C to skip)" 600 catalog_now
+  fi
+  if health_true canPlayCatalog; then ok "it can play Apple Music's catalog"
+  elif health_true authorized; then bad "it can't play Apple Music's catalog yet (run ./install again to check)"
+  fi
+
+  # Audio capture, of its own playback only.
+  if ! health_true capturing && ! wait_until "Checking audio capture…" 10 health_true capturing; then
+    explain "The bridge records only its own playback, and macOS asks once. Allow OmarockBridge in System Settings, Privacy & Security, Screen & System Audio Recording (the System Audio Recording Only list)."
+    pane "Screen & System Audio Recording" "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+    wait_until "Waiting for audio capture… (Ctrl-C to skip)" 600 health_true capturing
+  fi
+  if health_true capturing; then ok "it captures its own playback"; else bad "it can't capture its playback yet: the stream will be silent"; fi
+
+  if ! health_true encoding && ! wait_until "Checking the encoder…" 20 health_true encoding; then
+    bad "ffmpeg isn't encoding the stream: see $support/log/ffmpeg.log and bridge.log"
+  else
+    ok "it streams"
+  fi
+}
+
+# ---- 5. The Omarchy machine ----
+
+step_handoff() {
+  step "Your Omarchy machine"
+  local url stream token=$support/token
+  url=$(bridge_url)
+  stream=$(health_value stream)
+  ok "the bridge: $url"
+  ok "the stream: ${stream:-${url%:*}:8000/omarock.ogg}"
+  if private_ok "$token"; then
+    ok "the token: ${token/#$HOME/~} (only you can read it)"
+  else
+    bad "the token isn't there, or others can read it: ${token/#$HOME/~}"
+    return
+  fi
+  echo
+  explain "Now run ./install on your Omarchy machine and pick Apple Music. It finds this Mac (${$(tailnet_name):-$(tailnet_address)}) among your Tailscale machines, then asks for the bridge's token: paste it, or let it copy the token with scp."
+  if nc -z -G 2 127.0.0.1 22 >/dev/null 2>&1; then
+    ok "Remote Login is on, so scp can fetch the token"
+  else
+    note "scp needs Remote Login (System Settings, General, Sharing); pasting doesn't"
+  fi
+  if confirm "Copy the token to the clipboard now, to paste there?" "$($changed && print yes || print no)"; then
+    show "pbcopy < ${${token/#$HOME/~}// /\\ }"
+    pbcopy <"$token" && ok "copied (paste it once, then copy something else over it)"
+  fi
+}
+
+main() {
+  preflight "$@"
+  welcome
+  step_requirements
+  step_appid
+  step_build
+  step_health
+  step_handoff
+  echo
+}
+
+main "$@"; exit
