@@ -124,8 +124,9 @@ scp you@100.64.0.10:'Library/Application Support/omarock-bridge/token' ~/.config
 chmod 600 ~/.config/omarock/bridge-token
 ```
 
-Then switch on **Apple Music** in omarock's settings (`appleMusic`, off by default).
-omarock's other settings for it:
+Then switch Apple Music on: `omarchy bar set marc.omarock appleMusic true --json`
+(`--json` makes it yes/no rather than text). omarock's other settings for it, set the
+same way (`omarchy bar set marc.omarock <key> <value>`):
 - `appleBridge` and `appleStream`: the addresses, instead of `apple.json`.
 - `appleTokenFile`: the token, if not in `~/.config/omarock/bridge-token`.
 - `appleRejoin` (on by default): reconnects mpd to the stream after each change, so it

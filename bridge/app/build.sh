@@ -147,6 +147,7 @@ On the Linux machine (omarock):
   echo '{ "bridge": "$(field bridge)", "stream": "$(field stream)" }' > ~/.config/omarock/apple.json
   scp $(whoami)@$(field bridge | sed -E 's#^https?://##; s#:[0-9]+$##'):'$(field token)' ~/.config/omarock/bridge-token
   chmod 600 ~/.config/omarock/bridge-token
-(or copy that file by hand), then switch on "Apple Music" in omarock's settings. The first time the bridge runs, the
-Mac asks for Apple Music access and for audio capture: allow both.
+  omarchy bar set marc.omarock appleMusic true --json
+(or copy the token file by hand). The first time the bridge runs, the Mac asks for
+Apple Music access and for audio capture: allow both.
 EOF
