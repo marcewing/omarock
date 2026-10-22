@@ -190,10 +190,27 @@ the Linux side: `apple.json`, the token file, the bridge's `/v1/health` and libF
 ## Uninstalling
 
 ```sh
+./install --uninstall
+```
+
+Each part is its own step, and asks first. It stops the bridge and its Icecast, removes
+the launch agent and `~/Applications/OmarockBridge.app`, and offers to make macOS forget
+the app's permissions. It also offers to delete the support folder (the token, the
+passwords, `config.json`, the logs). The default is to keep that, so a reinstall works
+with your Omarchy machine as it is. It only removes an app whose bundle id matches this
+checkout's `Local.xcconfig`. At the end it lists what stays: Homebrew's tools, Xcode,
+the clone and its `Local.xcconfig`, and your App ID, which you can delete on
+developer.apple.com.
+
+By hand:
+
+```sh
+tccutil reset All com.example.omarock.bridge   # your bundle id: forgets its permissions
 bridge/app/build.sh --uninstall          # stops it and removes the app
 rm -rf ~/Library/Application\ Support/omarock-bridge
-tccutil reset All com.example.omarock.bridge   # your bundle id: forgets its permissions
 ```
+
+`tccutil` finds the app by its bundle id, so run it before the app is removed.
 
 ## Limits
 

@@ -8,6 +8,7 @@
 # rebuilt only when this checkout's has changed since the installed build.
 #
 #   ./install            from a clone of omarock, in Terminal on the Mac
+#   ./install --uninstall   remove the bridge: each part asks first
 #   ./install --help
 #
 # The bridge's token and Icecast's passwords stay in
@@ -17,12 +18,13 @@
 # For tests, OMAROCK_INSTALL_ANSWERS=FILE answers the prompts from FILE, without
 # gum: a line per prompt, `TEXT=ANSWER`, where TEXT is part of the prompt and
 # ANSWER is y or n, a choice's key, or text. Waits are cut to 20 s.
+# OMAROCK_BRIDGE_APP and OMAROCK_BRIDGE_SUPPORT point it at a test app and folder.
 setopt nounset pipefail
 
 repo=${0:A:h:h}
 here=$repo/bridge/app
 support=${OMAROCK_BRIDGE_SUPPORT:-$HOME/Library/Application Support/omarock-bridge}
-app=$HOME/Applications/OmarockBridge.app
+app=${OMAROCK_BRIDGE_APP:-$HOME/Applications/OmarockBridge.app}
 answers=${OMAROCK_INSTALL_ANSWERS:-}
 changed=false   # this run installed or changed something
 export OMAROCK_FROM_INSTALL=1   # build.sh leaves the next steps to this
@@ -76,7 +78,13 @@ answer() {  # PROMPT [SHOWN]: the prompt's answer from the file, logged
 # confirm PROMPT [yes|no]: the default is yes.
 confirm() {
   if [[ -n $answers ]]; then [[ $(answer "$1") == y* ]]; return; fi
-  local rc
+  local rc yn
+  if (( ! $+commands[gum] )); then  # --uninstall doesn't need gum
+    read -r "yn?  $1 [$([[ ${2:-yes} == yes ]] && print Y/n || print y/N)] " || stopped
+    [[ -z $yn ]] && yn=${2:-yes}
+    [[ $yn == [yY]* ]]
+    return
+  fi
   gum confirm --default="$([[ ${2:-yes} == yes ]] && print true || print false)" "$1"
   rc=$?
   (( rc == 130 )) && stopped
@@ -216,7 +224,7 @@ preflight() {
   [[ -n $brew ]] && path=(${brew:h} $path)
   if [[ -z $answers ]]; then
     [[ -t 0 && -t 1 ]] || { print "Run ./install in a terminal: it asks questions."; exit 1; }
-    if (( ! $+commands[gum] )); then
+    if [[ ${1:-} != --uninstall ]] && (( ! $+commands[gum] )); then
       if [[ -z $brew ]]; then
         print "The installer needs Homebrew (https://brew.sh): install it as brew.sh says, then run ./install again."
         exit 1
@@ -497,8 +505,115 @@ step_handoff() {
   fi
 }
 
+# ---- ./install --uninstall ----
+
+# Listeners on the bridge's Icecast mount, from its admin stats (0 if Icecast
+# isn't up). The admin password goes to curl on stdin.
+listeners() {
+  local conf=$support/icecast.xml user pass
+  [[ -f $conf ]] || { print 0; return; }
+  user=$(sed -n 's:.*<admin-user>\(.*\)</admin-user>.*:\1:p' "$conf")
+  pass=$(sed -n 's:.*<admin-password>\(.*\)</admin-password>.*:\1:p' "$conf")
+  print -r -- "user = \"$user:$pass\"" \
+    | curl -s -m 5 -K - 'http://127.0.0.1:8000/admin/listclients?mount=/omarock.ogg' \
+    | sed -n 's:.*<Listeners>\([0-9]*\)</Listeners>.*:\1:p' | head -1
+}
+# The bridge's Icecast: it can outlive a bridge, so by its config.
+icecast_pattern() { print -r -- "icecast -c $support/icecast.xml"; }
+gone() { ! kill -0 $1 2>/dev/null; }
+
+uninstall() {
+  print -r -- $'\n'"${bold}Removing omarock's Apple Music bridge from this Mac${reset}"$'\n'
+  explain "Each part is its own step: it says what goes, and asks first."
+  local id label removed=false forget=false kept_app=false
+  id=$(installed_id)
+  label=$(xc_value OMAROCK_BUNDLE_ID)
+
+  step "The bridge app"
+  if [[ ! -d $app ]]; then
+    ok "no bridge app is installed (${app/#$HOME/~})"
+    if [[ -n $label ]] && launchctl print "gui/$UID/$label" >/dev/null 2>&1; then
+      explain "Its launch agent ($label) is still loaded, without the app."
+      confirm "Remove it (launchctl bootout)?" && run launchctl bootout "gui/$UID/$label"
+    fi
+  elif [[ -n $label && $id != "$label" ]]; then
+    bad "${app/#$HOME/~} is $id, not this checkout's $label (bridge/app/Local.xcconfig): leaving it alone"
+    explain "Run ./install --uninstall in the clone it was built from, or set OMAROCK_BUNDLE_ID in Local.xcconfig to $id."
+    kept_app=true
+  else
+    [[ -z $label ]] && explain "This checkout has no Local.xcconfig, so it may not be the one that built the installed bridge ($id)."
+    explain "This stops the bridge and its Icecast, removes its launch agent, so it no longer starts at login, and deletes ${app/#$HOME/~}."
+    (( ${$(listeners):-0} > 0 )) && note "Something is listening to its stream now (mpd on your Omarchy machine): that music stops."
+    if confirm "Remove the bridge app ($id)?" "$([[ -n $label ]] && print yes || print no)"; then
+      explain "macOS also remembers what you allowed it: Apple Music access and audio capture. Forgetting them means a reinstall asks again."
+      confirm "Make macOS forget them too (tccutil reset)?" && forget=true
+      local pid
+      pid=$(launchctl print "gui/$UID/$id" 2>/dev/null | awk '$1 == "pid" {print $3}')
+      if launchctl print "gui/$UID/$id" >/dev/null 2>&1; then
+        run launchctl bootout "gui/$UID/$id"
+        [[ -n $pid ]] && wait_until "Waiting for the bridge to stop…" 10 gone $pid
+      fi
+      # A copy opened by hand, from this app only.
+      if pgrep -qf "^$app/Contents/MacOS/OmarockBridge"; then
+        run pkill -TERM -f "^$app/Contents/MacOS/OmarockBridge"
+        sleep 2
+      fi
+      pgrep -qf "$(icecast_pattern)" && run pkill -TERM -f "$(icecast_pattern)"
+      # tccutil finds the app by its bundle id, so before it's deleted.
+      if $forget && ! run tccutil reset All "$id"; then
+        note "tccutil didn't: switch it off in System Settings, Privacy & Security instead"
+        forget=false
+      fi
+      run rm -rf "$app"
+      rm -f "$support/INSTALLED"
+      ok "removed the bridge app"
+      removed=true
+    else
+      note "kept the bridge app"
+      kept_app=true
+    fi
+  fi
+
+  step "Its files"
+  if [[ ! -d $support ]]; then
+    ok "nothing left in ${support/#$HOME/~}"
+  elif $kept_app; then
+    ok "kept ${support/#$HOME/~}: the installed bridge uses it"
+  else
+    explain "${support/#$HOME/~} has the bridge's token, Icecast's passwords, its settings and its logs:"
+    ls -1A "$support" | sed 's/^/    /'
+    explain "Keeping it keeps the token, so a reinstall works with your Omarchy machine as it's set up now."
+    if confirm "Delete this folder?" no; then
+      run rm -rf "$support" && ok "deleted it"
+    else
+      note "kept it"
+    fi
+  fi
+
+  step "What stays"
+  local -a stays=(
+    "Homebrew's xcodegen, ffmpeg, icecast and gum: brew uninstall them if nothing else uses them."
+    "Xcode, and your Apple Development certificate."
+    "This clone, with your Team ID and bundle id in bridge/app/Local.xcconfig, and the build in bridge/app/build: delete the clone to remove them."
+    "Your App ID, on developer.apple.com (Certificates, IDs & Profiles, Identifiers): delete it there."
+    "omarock on your Omarchy machine: run ./install --uninstall there, or switch Apple Music off in its settings."
+  )
+  [[ -d $support ]] && ! $kept_app && stays+=("${support/#$HOME/~}: delete it to remove the token and passwords.")
+  $removed && ! $forget && stays+=("macOS's record of the bridge's permissions: in System Settings, Privacy & Security (Media & Apple Music, and Screen & System Audio Recording).")
+  local item
+  for item in $stays; do
+    print -r -- "  - $item" | fold -s -w 76 | sed '2,$s/^/    /'
+  done
+  echo
+}
+
 main() {
   preflight "$@"
+  case ${1:-} in
+    --uninstall) uninstall; return ;;
+    "") ;;
+    *) print -r -- "Unknown option: $1 (see ./install --help)"; exit 2 ;;
+  esac
   welcome
   step_requirements
   step_appid
