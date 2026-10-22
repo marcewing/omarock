@@ -37,7 +37,8 @@ BarWidget {
 
   readonly property bool showSong: hasSong && !vertical
   readonly property string songText: artist !== "" && title !== "" ? artist + " — " + title : title
-  readonly property int maxLabelWidth: Math.max(80, Number(setting("maxLabelWidth", 300)))
+  // omarock's settings file first, as the panel reads it.
+  readonly property int maxLabelWidth: Math.max(80, Number(panel ? panel.setting("maxLabelWidth", 300) : setting("maxLabelWidth", 300)))
   readonly property int artSize: Math.min(18, Math.max(12, barSize - Style.space(6)))
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
   readonly property string barFont: bar ? bar.fontFamily : Style.font.family
@@ -142,8 +143,6 @@ BarWidget {
           font.family: root.barFont
           font.pixelSize: Style.font.body
         }
-
-        BarMouse { target: art }
       }
     }
 
@@ -171,20 +170,22 @@ BarWidget {
 
         Behavior on opacity { NumberAnimation { duration: 140 } }
       }
-
-      BarMouse { target: song }
     }
   }
 
-  // Click, middle click and tooltip for the cover and the song.
-  component BarMouse: MouseArea {
-    required property Item target
+  // Click, middle click and tooltip for the cover and the song: the whole
+  // widget, so the gap between them, its ends and the bar's full height take
+  // the click too (Marc: "Many times ... I am somehow landing between the
+  // album art and the text").
+  MouseArea {
+    objectName: "songMouse"
     anchors.fill: parent
+    visible: root.showSong
     hoverEnabled: true
     acceptedButtons: Qt.LeftButton | Qt.MiddleButton
     cursorShape: Qt.PointingHandCursor
     onClicked: function(mouse) { root.press(mouse.button) }
-    onEntered: if (root.bar) root.bar.showTooltip(target, root.tooltipText)
-    onExited: if (root.bar) root.bar.hideTooltip(target)
+    onEntered: if (root.bar) root.bar.showTooltip(root, root.tooltipText)
+    onExited: if (root.bar) root.bar.hideTooltip(root)
   }
 }

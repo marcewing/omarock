@@ -169,10 +169,19 @@ wait_until() {
 # ---- What's there ----
 
 # setting KEY DEFAULT: omarock's setting, from its entry in Omarchy's shell.json.
-setting() {
-  python3 -I - "$shelljson" "$plugin_id" "$1" "$2" <<'PY'
+# omarock's settings: its own file, else (as before 0.6) its entry in
+# Omarchy's shell.json, else DEFAULT.
+setting() {  # KEY DEFAULT
+  python3 -I - "$config/settings.json" "$shelljson" "$plugin_id" "$1" "$2" <<'PY'
 import json, sys
-path, plugin, key, default = sys.argv[1:]
+mine, path, plugin, key, default = sys.argv[1:]
+try:
+    v = json.load(open(mine)).get(key)
+    if v is not None:
+        print(str(v).lower() if isinstance(v, bool) else v)
+        sys.exit(0)
+except Exception:
+    pass
 try:
     d = json.load(open(path))
     for items in (d.get("bar", {}).get("layout", {}) or {}).values():
@@ -206,6 +215,21 @@ mpd_conf() {
   echo "${XDG_CONFIG_HOME:-$HOME/.config}/mpd/mpd.conf"
 }
 conf_value() { grep -E "^[[:space:]]*$2[[:space:]]" "$1" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*[a-z_]+[[:space:]]+"?([^"]*)"?.*/\1/'; }
+set_conf_value() {  # FILE KEY VALUE: KEY's line becomes VALUE (or is added, first)
+  python3 -I - "$@" <<'PY'
+import re, sys
+path, key, value = sys.argv[1:]
+line = '%-19s "%s"\n' % (key, value.replace("\\", "\\\\").replace('"', '\\"'))
+lines = open(path).read().splitlines(True)
+for i, old in enumerate(lines):
+    if re.match(r"\s*%s\s" % key, old):
+        lines[i] = line
+        break
+else:
+    lines.insert(0, line)
+open(path, "w").write("".join(lines))
+PY
+}
 backed_up=""
 backup() {  # FILE: a copy beside it, once a run
   [[ -f $1 && $backed_up != *"|$1|"* ]] || return 0
@@ -309,7 +333,7 @@ step_mpd() {
   # Without playlist_directory mpd turns stored playlists off, and with them
   # omarock's playlists and radio favourites.
   conf=$(mpd_conf)
-  local changed=false lines=()
+  local changed=false new_music=false lines=()
   if [[ ! -f $conf ]]; then
     explain "mpd needs a config: where your music is, and where to keep its database, playlists and state."
     music=$(ask "Where's your music?" "$(xdg-user-dir MUSIC 2>/dev/null || echo "$HOME/Music")") || exit 1
@@ -319,7 +343,24 @@ step_mpd() {
     lines=("music_directory     \"$music\"")
   else
     ok "mpd's config: $conf"
-    [[ -n $(conf_value "$conf" music_directory) ]] || note "it names no music_directory, so mpd uses your Music folder ($(xdg-user-dir MUSIC 2>/dev/null || echo ~/Music))"
+    # For most, this is their first meeting with mpd: say where it finds the
+    # music, and offer another folder.
+    music=$(conf_value "$conf" music_directory)
+    [[ -n $music ]] || music=$(xdg-user-dir MUSIC 2>/dev/null || echo "$HOME/Music")
+    music=${music/#\~/$HOME}
+    explain "mpd finds your music in $music."
+    if ! confirm "Keep that as your music folder?"; then
+      local new
+      new=$(ask "Where's your music?" "$music") || exit 1
+      new=${new/#\~/$HOME}
+      if [[ -n $new && $new != "$music" ]]; then
+        [[ -d $new ]] || note "$new isn't there now; mpd will find the music once it is."
+        backup "$conf"
+        set_conf_value "$conf" music_directory "$([[ $new == "$HOME"/* ]] && echo "~/${new#"$HOME"/}" || echo "$new")"
+        ok "mpd's music folder is now $new"
+        changed=true new_music=true
+      fi
+    fi
   fi
   local key path
   for key in playlist_directory db_file state_file sticker_file; do
@@ -397,6 +438,7 @@ step_mpd() {
   for ((i = 0; i < 40; i++)); do mpd_answers && break; sleep 0.5; done
   if mpd_answers; then ok "mpd answers on $mpd_socket"; else bad "mpd doesn't answer on $mpd_socket: journalctl --user -u mpd"; stopped; fi
   local songs
+  $new_music && run mpc --quiet update
   songs=$(mpc stats 2>/dev/null | awk '/^Songs:/ {print $2}')
   if mpc status 2>/dev/null | grep -q '^Updating DB'; then
     ok "mpd is reading your music now ($songs songs so far); it carries on in the background"
@@ -711,31 +753,34 @@ step_sxm() {
   elif ! active omarock-sxm; then
     run systemctl --user start omarock-sxm
   fi
-  if sxm_account_set; then
-    ok "the account: $config/siriusxm.json"
-  else
-    explain "Your SiriusXM login goes into $config/siriusxm.json, readable only by you. The password isn't shown as you type."
-    local user pass
-    user=$(ask "SiriusXM email or username (Enter to stop here):") || exit 1
-    [[ -z $user ]] && return 1
-    pass=$(secret "SiriusXM password:") || exit 1
-    printf '%s\0%s' "$user" "$pass" | python3 -I -c '
+  local user pass err again=false
+  while :; do
+    if sxm_account_set && ! $again; then
+      ok "the account: $config/siriusxm.json"
+    else
+      explain "Your SiriusXM login goes into $config/siriusxm.json, readable only by you. The password isn't shown as you type."
+      user=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("username", ""))' "$config/siriusxm.json" 2>/dev/null)
+      user=$(ask "SiriusXM email or username (Enter to stop here):" "$user") || exit 1
+      [[ -z $user ]] && return 1
+      pass=$(secret "SiriusXM password:") || exit 1
+      printf '%s\0%s' "$user" "$pass" | python3 -I -c '
 import json, sys
 u, p = sys.stdin.read().split("\0", 1)
 print(json.dumps({"username": u, "password": p}))' | write_private "$config/siriusxm.json"
-    pass=""
-    ok "saved the account"
-    run systemctl --user restart omarock-sxm
-  fi
-  if wait_until "Signing in to SiriusXM…" 45 sxm_signed_in; then
-    ok "omarock-sxm is signed in"
-  else
-    local err
+      pass=""
+      ok "saved the account"
+      run systemctl --user restart omarock-sxm
+    fi
+    if wait_until "Signing in to SiriusXM…" 45 sxm_signed_in; then
+      ok "omarock-sxm is signed in"
+      break
+    fi
     err=$(sxm_health | jq -r '.error // empty')
     bad "omarock-sxm isn't signed in${err:+: $err}"
-    explain "Check the login in $config/siriusxm.json, then systemctl --user restart omarock-sxm, or run ./install again. An entitlement that's \"revoked\" means the subscription has no streaming."
-    return 1
-  fi
+    explain "A wrong login, most likely. An entitlement that's \"revoked\" means the subscription has no streaming. You can also change the login later, in omarock's settings."
+    confirm "Enter the SiriusXM login again?" || return 1
+    again=true
+  done
   done_[sxm]=1
 }
 
@@ -852,15 +897,14 @@ step_apple() {
 
 # ---- Last: the switches ----
 
-set_setting() {  # KEY JSON: omarock's setting, through Omarchy's bar
-  local now
+set_setting() {  # KEY JSON: one of omarock's settings, into its settings file
+  local now file=$config/settings.json
   now=$(setting "$1" "")
   [[ $now == "$(jq -r 'if type == "string" then . else tostring end' <<<"$2")" ]] && return 0
-  if jq -e 'type == "string"' >/dev/null <<<"$2"; then
-    run omarchy bar set "$plugin_id" "$1" "$(jq -r . <<<"$2")" >/dev/null
-  else
-    run omarchy bar set "$plugin_id" "$1" "$2" --json >/dev/null
-  fi
+  install -d "$config"
+  { jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$file" 2>/dev/null || jq -n --arg k "$1" --argjson v "$2" '{($k): $v}'; } \
+    >"$file.new" && mv "$file.new" "$file"
+  printf '  %s%s: %s%s\n' "$dim" "$1" "$(jq -r . <<<"$2")" "$reset"
 }
 
 step_switches() {
@@ -872,17 +916,9 @@ step_switches() {
     elif ! wants "$src" && [[ $(setting "$key" "$([[ $key == radio ]] && echo true || echo false)") == true ]]; then pending[$key]=false
     fi
   done
-  # A setting made the moment the plugin is added can be lost (Omarchy writes
-  # the bar's layout then too), so each is checked, and set again if need be.
-  local k _
-  for k in "${!pending[@]}"; do
-    for _ in 1 2 3; do
-      set_setting "$k" "${pending[$k]}"
-      sleep 1
-      [[ $(setting "$k" "") == "$(jq -r 'if type == "string" then . else tostring end' <<<"${pending[$k]}")" ]] && break
-      sleep 2
-    done
-  done
+  # Into ~/.config/omarock/settings.json, which the panel follows.
+  local k
+  for k in "${!pending[@]}"; do set_setting "$k" "${pending[$k]}"; done
   for src in radio spotify apple sxm; do
     case $src in radio) key=radio ;; spotify) key=spotify ;; apple) key=appleMusic ;; sxm) key=siriusXM ;; esac
     if [[ $(setting "$key" "$([[ $key == radio ]] && echo true || echo false)") == true ]]; then ok "$key is on"

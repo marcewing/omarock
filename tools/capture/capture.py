@@ -39,7 +39,8 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS = Path(__file__).resolve().parent
 PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
-                "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Info.js", "InfoCard.qml"]
+                "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Info.js", "InfoCard.qml",
+                "Settings.js", "tools/omarock-account"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
 # The fake Apple Music bridge, when one runs: { port, log }.
@@ -85,6 +86,7 @@ def prepare(work):
     for name in ["Commons", "Ui"]:
         shutil.copytree(Path("/usr/share/omarchy/shell") / name, shell / name)
     for name in PLUGIN_FILES:
+        (plugin / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / name, plugin / name)
     # Offscreen Quickshell has no layer shell: swap in a KeyboardPanel that
     # draws the same card in an ordinary window.
@@ -301,6 +303,12 @@ def bar_scenario(host, output, socket_path, failures):
     host.click_bar("cover")
     wait_for(lambda: not host.state()["opened"], "panel closed from the bar")
     check(True, "a click on the cover closes it again", failures)
+    # No dead zones (Marc, 10-22: "landing between the album art and the text").
+    check(host.call("clickBarAt", "gap") == "ok", "a click can land between the cover and the song", failures)
+    wait_for(lambda: host.state()["opened"], "a click in the gap, at the bar's top edge")
+    host.call("clickBarAt", "end")
+    wait_for(lambda: not host.state()["opened"], "a click at the widget's end")
+    check(True, "the gap between cover and song, the bar's top edge and the widget's end all take the click", failures)
 
     mpd_client(socket_path, "clear")
     wait_for(lambda: host.state()["bar"]["queueEmpty"] and not host.state()["bar"]["showSong"], "empty queue")
@@ -2649,19 +2657,27 @@ def favourite_follow_scenario(host, output, failures):
     host.call("close")
 
 
-def settings_log():
-    """The stand-in `omarchy bar set`'s calls so far: [(key, value, json)]."""
-    path = BRIDGE["settings_log"]
-    lines = path.read_text().splitlines() if path.exists() else []
-    return [(r["key"], r["value"], r["json"]) for r in map(json.loads, lines)]
+def settings_file():
+    """omarock's settings file in the test HOME, as saved so far."""
+    path = BRIDGE["config"].parent / "settings.json"
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def settings_cursor_to(host, key):
+    """Move the settings' cursor to a row, up or down."""
+    s = host.state()
+    to, at = s["settingsRows"].index(key), s["settingsCursor"]
+    for _ in range(abs(to - at)): host.call("press", "Down" if to > at else "Up")
 
 
 def settings_scenario(host, output, failures):
     """Marc, 10-21: "where are the settings? ... a setting screen, accessible
-    from a gear icon in the expanded pane". , (or the gear) opens the settings:
-    the manifest's schema in groups, each source with how its service is
-    doing. A change goes to `omarchy bar set` (a stand-in here), and comes back
-    from the bar, as Omarchy does it."""
+    from a gear icon in the expanded pane"; 10-22: "Really everything should be
+    changeable there", in "our own settings file". , (or the gear) opens the
+    settings, in groups, each source with how its service is doing. A change
+    goes into ~/.config/omarock/settings.json; an account or a key into its
+    own file (tools/omarock-account), a secret never shown; the music folder
+    after asking."""
     host.call("settings", "{}")
     host.call("open")
     wait_for(lambda: host.state()["opened"], "open")
@@ -2670,20 +2686,21 @@ def settings_scenario(host, output, failures):
     s = host.state()
     check(s["settingsRows"][:5] == ["radio", "radioState", "spotify", "appleMusic", "siriusXM"],
           ", opens the settings, the sources first: " + ", ".join(s["settingsRows"][:6]), failures)
+    check(all(k in s["settingsRows"] for k in ("musicFolder", "sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
+                                               "spotifyLogin", "bridgeToken")),
+          "with the music folder, and each source's account and keys", failures)
     notes = s["settingNotes"]
     check(notes["spotify"]["kind"] == "ok" and notes["siriusXM"]["kind"] == "ok" and notes["radio"]["text"].endswith("Washington")
           and (notes["appleMusic"]["kind"] == "ok" or "apple.json" in notes["appleMusic"]["text"]),
           "each source says how it's doing: " + " | ".join(n["text"] for n in notes.values()), failures)
     host.grab(output / "compact-settings.png")
 
-    # Space on Spotify's switch: off, through `omarchy bar set`, and back.
-    before = len(settings_log())
+    # Space on Spotify's switch: off, into the settings file, and back.
     host.call("press", "Down")
     host.call("press", "Down")
     host.call("press", "Space")
-    wait_for(lambda: len(settings_log()) > before and host.state()["settingValues"]["spotify"] is False, "Spotify off")
-    check(settings_log()[-1] == ("spotify", "false", True) and "spotify" not in host.state()["sources"],
-          "Space switches Spotify off: omarchy bar set mre.omarock spotify false --json", failures)
+    wait_for(lambda: settings_file().get("spotify") is False and host.state()["settingValues"]["spotify"] is False, "Spotify off")
+    check("spotify" not in host.state()["sources"], "Space switches Spotify off, saved in settings.json", failures)
     host.call("press", "Space")
     wait_for(lambda: host.state()["settingValues"]["spotify"] is True, "Spotify on")
     check("spotify" in host.state()["sources"], "and on again", failures)
@@ -2695,7 +2712,7 @@ def settings_scenario(host, output, failures):
     host.call("typeKeys", "Oregon")
     host.call("press", "Return")
     wait_for(lambda: host.state()["settingValues"]["radioState"] == "Oregon", "radioState saved")
-    check(settings_log()[-1] == ("radioState", "Oregon", False) and host.state()["settingsEditing"] == ""
+    check(settings_file().get("radioState") == "Oregon" and host.state()["settingsEditing"] == ""
           and host.state()["settingNotes"]["radio"]["text"] == "Local stations from Oregon",
           "Enter edits the radio's state, and Enter saves it: " + host.state()["settingNotes"]["radio"]["text"], failures)
     # Esc drops an edit.
@@ -2711,9 +2728,48 @@ def settings_scenario(host, output, failures):
     for _ in range(rows.index("maxLabelWidth") - host.state()["settingsCursor"]): host.call("press", "Down")
     host.call("press", "Right")
     wait_for(lambda: host.state()["settingValues"]["maxLabelWidth"] == 310, "width up")
-    check(settings_log()[-1] == ("maxLabelWidth", "310", True), "→ on a number steps it up: maxLabelWidth 310 --json", failures)
+    check(settings_file().get("maxLabelWidth") == 310, "→ on a number steps it up, saved as a number", failures)
     host.call("press", "Left")
     wait_for(lambda: host.state()["settingValues"]["maxLabelWidth"] == 300, "width back")
+
+    # An account: the SiriusXM username, into siriusxm.json, not settings.json.
+    sxm_login = BRIDGE["config"].parent / "siriusxm.json"
+    settings_cursor_to(host, "sxmUser")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingsEditing"] == "sxmUser", "editing the username")
+    host.call("typeKeys", "me@example.com")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["accounts"].get("sxmUser") == "me@example.com", "the username saved")
+    check(json.loads(sxm_login.read_text())["username"] == "me@example.com" and "sxmUser" not in settings_file()
+          and oct(sxm_login.stat().st_mode & 0o777) == "0o600",
+          "the username goes into siriusxm.json (mode 600), not the settings file", failures)
+    # A secret: typed into a hidden field, kept only in its file.
+    host.call("press", "Down")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingsEditing"] == "sxmPassword", "editing the password")
+    host.call("typeKeys", "hunter 2")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["accounts"].get("sxmPassword") is True, "the password saved")
+    login = json.loads(sxm_login.read_text())
+    check(login == {"username": "me@example.com", "password": "hunter 2"} and host.state()["settingValues"]["sxmPassword"] is True
+          and "hunter" not in json.dumps(host.state()), "the password is saved as typed, and never shown", failures)
+    host.grab(output / "compact-settings-accounts.png")
+
+    # The music folder: asked about first, and Esc keeps it.
+    settings_cursor_to(host, "musicFolder")
+    folder = host.state()["settingValues"]["musicFolder"]
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingsEditing"] == "musicFolder", "editing the folder")
+    host.call("typeKeys", "/elsewhere")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["confirmOpen"], "asked first")
+    check(host.state()["confirmFolder"].endswith("/elsewhere"), "a new music folder is asked about first: "
+          + host.state()["confirmFolder"], failures)
+    host.grab(output / "compact-settings-folder.png")
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["confirmOpen"], "kept")
+    check(host.state()["settingValues"]["musicFolder"] == folder and host.state()["settingsOpen"],
+          "Esc keeps the folder as it was: " + folder, failures)
 
     # Esc closes; the gear in the expanded panel opens it again.
     host.call("press", "Escape")
@@ -2730,6 +2786,10 @@ def settings_scenario(host, output, failures):
     host.call("expand", "false")
     host.call("settings", "{}")
     host.call("close")
+    # The scenarios after this one set the widget's settings, which the file
+    # would outrank.
+    (BRIDGE["config"].parent / "settings.json").unlink()
+    sxm_login.unlink()
 
 
 def sources_switch_scenario(host, socket_path, failures):
@@ -3201,10 +3261,7 @@ def main():
         (work / "screen.json").write_text(json.dumps({"screens": [dict(
             name="CAPTURE", x=0, y=0, width=2560, height=1600,
             logicalDpi=96, logicalBaseDpi=96, dpr=1)]}))
-        # Settings are saved through a stand-in for `omarchy bar set`.
-        BRIDGE["settings_log"] = work / "settings.log"
-        env.update(OMAROCK_SET_SETTING=str(TOOLS / "fake-bar-set"), OMAROCK_SET_SETTING_LOG=str(BRIDGE["settings_log"]),
-                   OMAROCK_CAPTURE_SHELL=str(shell))
+        env.update(OMAROCK_CAPTURE_SHELL=str(shell))
         env.update(QT_QPA_PLATFORM=f"offscreen:configfile={work / 'screen.json'}",
                    QT_QUICK_BACKEND="software",
                    QT_SCALE_FACTOR="2", OMAROCK_PLUGIN=str(plugin))

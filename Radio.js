@@ -63,7 +63,7 @@ function listRows(favorites, local, playingUuid, place, playing) {
   // No state set: say how, as the local stations are otherwise just missing.
   if (!place)
     rows.push({ kind: "note", section: "LOCAL", lead: "󰋼", title: "Set your US state for its local stations",
-      subtitle: "omarchy bar set mre.omarock radioState Maine" })
+      subtitle: "In omarock's settings (,): Your US state" })
   return rows
 }
 

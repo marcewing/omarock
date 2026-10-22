@@ -1,0 +1,98 @@
+#!/bin/bash
+# omarock-account: omarock's accounts and keys, as the settings screen
+# changes them (and you can too). A value comes on stdin, one line, and goes
+# straight into its file in ~/.config/omarock, readable only by you (mode 600);
+# nothing is printed. Then the service that uses it restarts, if it runs.
+#
+#   omarock-account show             what's set, as JSON: names, never secrets
+#   omarock-account sxm-user         the SiriusXM email or username
+#   omarock-account sxm-password     the SiriusXM password
+#   omarock-account spotify-client   the Spotify developer app's Client ID
+#   omarock-account soloist-key      Spotify's Soloist key
+#   omarock-account bridge-token     the Apple Music bridge's token
+#   omarock-account music-folder     mpd's music folder: mpd.conf's music_directory
+#                                    line only (a copy of mpd.conf first), then mpd
+#                                    restarts and reads the folder
+#
+#   echo 'me@example.com' | tools/omarock-account sxm-user
+set -uo pipefail
+config=$HOME/.config/omarock
+sxm=$config/siriusxm.json
+
+write_private() {  # FILE: stdin into FILE, mode 600, all at once
+  install -d "$config"
+  (umask 077 && cat >"$1.new") && chmod 600 "$1.new" && mv "$1.new" "$1"
+}
+value() {  # the one line on stdin, without its newline
+  local v
+  IFS= read -r v || [[ -n $v ]] || { echo "omarock-account: nothing on stdin" >&2; exit 2; }
+  printf '%s' "$v"
+}
+# Saved is saved: a service that isn't there, or won't restart, says so in
+# the settings (its health), not here.
+restart() { systemctl --user try-restart "$1" 2>/dev/null || true; }
+
+case ${1:-} in
+  show)
+    python3 -I - "$sxm" "$config/spotify.json" "$config/soloist-key" "$config/bridge-token" <<'EOF'
+import json, os, sys
+def load(path):
+    try:
+        with open(path) as f: return json.load(f)
+    except Exception: return {}
+sxm, spotify = load(sys.argv[1]), load(sys.argv[2])
+def has(path): return os.path.isfile(path) and os.path.getsize(path) > 0
+print(json.dumps({"sxmUser": sxm.get("username", ""), "sxmPassword": bool(sxm.get("password")),
+                  "spotifyClient": spotify.get("clientId", ""), "soloistKey": has(sys.argv[3]),
+                  "bridgeToken": has(sys.argv[4])}))
+EOF
+    ;;
+  sxm-user|sxm-password)
+    # The other half of the login stays as it was.
+    field=$([[ $1 == sxm-user ]] && echo username || echo password)
+    value | python3 -I -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f: login = json.load(f)
+except Exception: login = {}
+login[sys.argv[2]] = sys.stdin.read()
+print(json.dumps({"username": login.get("username", ""), "password": login.get("password", "")}))' "$sxm" "$field" \
+      | write_private "$sxm" && restart omarock-sxm ;;
+  spotify-client)
+    id=$(value) && jq -n --arg id "$id" '{clientId: $id, redirectUri: "http://127.0.0.1:8730/callback"}' \
+      | write_private "$config/spotify.json" && restart omarock-spotify ;;
+  soloist-key)
+    value | { cat; echo; } | write_private "$config/soloist-key" && restart omarock-soloist ;;
+  bridge-token)
+    value | write_private "$config/bridge-token" ;;
+  music-folder)
+    dir=$(value) && dir=${dir/#\~/$HOME}
+    [[ -d $dir ]] || { echo "omarock-account: no folder $dir" >&2; exit 1; }
+    # The config mpd reads, first found, as mpd looks.
+    conf=""
+    for f in "${XDG_CONFIG_HOME:-$HOME/.config}/mpd/mpd.conf" "$HOME/.mpdconf" "$HOME/.mpd/mpd.conf"; do
+      [[ -f $f ]] && { conf=$f; break; }
+    done
+    [[ -n $conf ]] || { echo "omarock-account: mpd has no config of yours (run ./install)" >&2; exit 1; }
+    cp -p "$conf" "$conf.before-omarock-$(date +%Y%m%d-%H%M%S)" || exit 1
+    python3 -I - "$conf" "$dir" <<'EOF' || exit 1
+import re, sys
+path, folder = sys.argv[1], sys.argv[2]
+line = 'music_directory     "%s"\n' % folder.replace("\\", "\\\\").replace('"', '\\"')
+lines = open(path).read().splitlines(True)
+for i, old in enumerate(lines):
+    if re.match(r"\s*music_directory\s", old):
+        lines[i] = line
+        break
+else:
+    lines.insert(0, line)
+open(path + ".new", "w").write("".join(lines))
+EOF
+    mv "$conf.new" "$conf" && systemctl --user restart mpd || exit 1
+    # mpd reads the new folder once it answers again.
+    socket=${XDG_RUNTIME_DIR:-/run/user/$UID}/mpd/socket
+    for _ in $(seq 40); do MPD_HOST=$socket mpc status >/dev/null 2>&1 && break; sleep 0.5; done
+    MPD_HOST=$socket mpc -q update ;;
+  -h|--help|help|"") sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//' ;;
+  *) echo "omarock-account: no such account: $1 (try --help)" >&2; exit 2 ;;
+esac

@@ -137,13 +137,15 @@ There are two halves, and the Mac's is the user's to build. Follow
 The switches are omarock's settings: `radio` (on by default), `spotify`,
 `appleMusic` and `siriusXM` (off). The user can flip them on omarock's settings
 screen (`,` in the panel, or the gear in the expanded view), which also says how
-each source's service is doing. Or set one with Omarchy's bar command, with the
-user's OK: `omarchy bar set mre.omarock spotify true --json`. `--json` matters:
-without it, the value is the text "true". The bar picks the change up at once.
-The exception is a setting made the moment the plugin is added, which can be
-lost: give the bar a few seconds first. If a setting doesn't show, `omarchy
-restart shell` (ask first).
-The other settings (README.md, Settings) are set the same way.
+each source's service is doing, and changes each source's account and keys and
+the music folder. Or, with the user's OK, set one in
+`~/.config/omarock/settings.json` (a JSON object, `{ "spotify": true }`; keep
+what's there), which the panel follows as it changes. The other settings
+(README.md, Settings) are set the same way.
+
+Accounts and keys aren't in that file: each has its own, mode 600. To change one
+from a terminal, the user pipes it into `tools/omarock-account` (`--help`), which
+restarts the service that uses it. Don't type a secret yourself.
 
 Commands that need the desktop session (`omarchy`, `omarchy-shell`, `qs ipc`)
 fail over a bare ssh login, missing `OMARCHY_PATH` and the like. Run them in a

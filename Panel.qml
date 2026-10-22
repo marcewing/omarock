@@ -9,6 +9,7 @@ import "Apple.js" as Apple
 import "Sxm.js" as Sxm
 import "Radio.js" as Radio
 import "Info.js" as Info
+import "Settings.js" as Settings
 
 // omarock's popup. Laid out like crmne.hyprmoncfg: a compact panel with an
 // Expand button, and an expanded panel in the same popup with Keys, TUI and
@@ -47,8 +48,8 @@ Panel {
     var configured = root.setting("appleTokenFile", "")
     return configured !== "" ? configured : Quickshell.env("HOME") + "/.config/omarock/bridge-token"
   }
-  // The optional sources, each switched on in the widget's settings (the
-  // schema in manifest.json): its button in the panel, and any following of
+  // The optional sources, each switched on in omarock's settings
+  // (Settings.js): its button in the panel, and any following of
   // its service, only then. Internet radio needs nothing set up, so it
   // starts on; the others need a service set up first, so they start off.
   readonly property bool radioEnabled: root.setting("radio", true) === true
@@ -136,7 +137,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.5.11"
+  readonly property string version: "0.6.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -184,19 +185,31 @@ Panel {
   // Playlist name -> { songs, seconds }, for the picker's rows.
   property var playlistCounts: ({})
   // The playlist the delete dialog asks about: { playlist, songs }.
-  property var deleteTarget: null
+  property var confirmTarget: null
   // The info card (i) while it's open: { card (Info.js), coverFile, logo,
   // coverUrl, loading }.
   property var infoCard: null
-  // The settings view (the gear, or ,), and the schema and defaults it shows,
-  // read from this plugin's own manifest.json.
+  // The settings view (the gear, or ,). The settings live in omarock's own
+  // file, ~/.config/omarock/settings.json (Settings.js says what each is);
+  // one not in it falls back to the widget's entry in Omarchy's shell.json.
   property bool settingsOpen: false
-  property var manifestSchema: []
-  property var manifestDefaults: ({})
+  readonly property string configDir: Quickshell.env("HOME") + "/.config/omarock"
+  property var fileSettings: ({})
+  // Omarchy's Panel reads the widget's entry only: omarock's file comes first.
+  function setting(name, fallback) {
+    return Settings.value(root.fileSettings, root.settings, name, fallback)
+  }
+  // The rows the settings screen shows: a source's accounts while it's on.
+  readonly property var settingsSchema: Settings.shown({ sxm: root.sxmEnabled, spotify: root.spotifyEnabled, apple: root.appleEnabled })
+  // Accounts and keys as tools/omarock-account shows them: names, and
+  // whether each secret is set, never a secret.
+  property var accounts: ({})
   readonly property var settingValues: {
     var out = {}
-    root.manifestSchema.forEach(function(f) {
-      out[f.key] = root.setting(f.key, root.manifestDefaults[f.key] !== undefined ? root.manifestDefaults[f.key] : f.defaultValue)
+    root.settingsSchema.forEach(function(f) {
+      if (Settings.stored(f)) out[f.key] = root.setting(f.key)
+      else if (f.type === "folder") out[f.key] = client.musicDirectory.replace(Quickshell.env("HOME"), "~")
+      else if (f.type === "account" || f.type === "secret") out[f.key] = root.accounts[f.key]
     })
     return out
   }
@@ -229,7 +242,10 @@ Panel {
         : note("The bridge at " + root.appleBridge + " answers", "ok"),
       siriusXM: !root.sxmEnabled ? note("Off. It needs a SiriusXM subscription and the omarock-sxm service: sxm/README.md")
         : sxm.available ? note("omarock-sxm runs, and is signed in", "ok")
-        : note(sxm.lastError !== "" ? sxm.lastError : "Can't reach omarock-sxm: systemctl --user status omarock-sxm", "bad")
+        : note(sxm.lastError !== "" ? sxm.lastError : "Can't reach omarock-sxm: systemctl --user status omarock-sxm", "bad"),
+      spotifyLogin: !spotify.reachable ? note("omarock-spotify isn't running", "bad")
+        : spotify.healthAuthorized ? note("Signed in", "ok") : note("Not signed in yet", "bad"),
+      musicFolder: note(client.musicDirectory === "" ? "mpd doesn't say: it tells only clients on its unix socket" : "")
     }
   }
   property int infoSequence: 0
@@ -245,7 +261,7 @@ Panel {
   readonly property bool browsing: browseTop !== null
   readonly property bool columns: expanded && (searchMode || browsing)
   readonly property bool pickerOpen: pickerItem !== null
-  readonly property bool confirmOpen: deleteTarget !== null
+  readonly property bool confirmOpen: confirmTarget !== null
   readonly property bool infoOpen: infoCard !== null
   // The info card's cover: a local album's (by a song of it), a station's
   // logo once it's known to load, else Apple Music's artwork or a channel's.
@@ -701,7 +717,7 @@ Panel {
       Qt.callLater(root.showCurrentSong)
     } else {
       root.pickerItem = null
-      root.deleteTarget = null
+      root.confirmTarget = null
       root.clearSearch()
     }
   }
@@ -1742,6 +1758,7 @@ Panel {
     root.closeInfo()
     settingsView.reset()
     root.settingsOpen = true
+    accountReader.running = true
     // How each switched-on source is doing, now.
     if (root.spotifyEnabled) spotify.checkHealth()
     if (root.sxmEnabled) sxm.checkHealth()
@@ -1753,34 +1770,62 @@ Panel {
     keyCatcher.forceActiveFocus()
   }
 
-  // Saving a setting runs Omarchy's own command, so the settings stay in the
-  // bar's config, and the bar hands the change back at once. One at a time.
-  // Tests point OMAROCK_SET_SETTING at a stand-in.
-  property var settingSaves: []
-  readonly property var settingsCommand: {
-    var custom = Quickshell.env("OMAROCK_SET_SETTING")
-    return custom ? [custom] : ["omarchy", "bar", "set"]
-  }
+  // Saving a setting writes omarock's settings file, all of it, one write at
+  // a time; it takes effect at once, as the panel already has it.
+  property bool settingsUnsaved: false
   function saveSetting(key, value) {
-    var asJson = typeof value === "boolean" || typeof value === "number"
-    var command = root.settingsCommand.concat([root.moduleName, key, String(value)]).concat(asJson ? ["--json"] : [])
-    root.settingSaves = root.settingSaves.concat([{ key: key, command: command }])
-    if (!settingSaver.running) root.nextSettingSave()
+    root.fileSettings = Settings.withValue(root.fileSettings, key, value)
+    root.settingsUnsaved = true
+    root.writeSettings()
   }
-  function nextSettingSave() {
-    if (root.settingSaves.length === 0 || settingSaver.running) return
-    var next = root.settingSaves[0]
-    root.settingSaves = root.settingSaves.slice(1)
-    settingSaver.key = next.key
-    settingSaver.command = next.command
-    settingSaver.running = true
+  function writeSettings() {
+    if (!root.settingsUnsaved || settingWriter.running) return
+    root.settingsUnsaved = false
+    settingWriter.command = ["sh", "-c", 'mkdir -p "$1" && printf "%s" "$2" > "$1/settings.json.new" && mv "$1/settings.json.new" "$1/settings.json"',
+      "sh", root.configDir, JSON.stringify(root.fileSettings, null, 2) + "\n"]
+    settingWriter.running = true
+  }
+
+  // An account, a key or the music folder (tools/omarock-account): the value
+  // goes over stdin, never on a command line. One at a time.
+  readonly property string accountTool: decodeURIComponent(String(Qt.resolvedUrl("tools/omarock-account")).replace(/^file:\/\//, ""))
+  readonly property var accountCommands: ({ sxmUser: "sxm-user", sxmPassword: "sxm-password", spotifyClient: "spotify-client",
+    soloistKey: "soloist-key", bridgeToken: "bridge-token", musicFolder: "music-folder" })
+  function saveAccount(key, value) {
+    if (accountWriter.running) {
+      root.say("Still saving the last change: try again in a moment")
+      return
+    }
+    accountWriter.key = key
+    accountWriter.secret = value
+    accountWriter.command = [root.accountTool, root.accountCommands[key]]
+    accountWriter.running = true
+    root.say(key === "musicFolder" ? "Changing the music folder: mpd restarts…" : "Saving…")
+  }
+  // The settings screen's buttons.
+  function settingAction(key) {
+    if (key !== "spotifyLogin") return
+    spotify.get("/v1/login", function(data, error) {
+      if (data && data.url) {
+        Qt.openUrlExternally(data.url)
+        root.say("Spotify's sign-in is open in your browser")
+      } else {
+        root.say(error !== "" ? error : "omarock-spotify has no sign-in to offer")
+      }
+    })
+  }
+  // A new music folder, from the settings: asked about first, once the
+  // settings' field has handed the keys back (the dialog takes them).
+  function askMusicFolder(path) {
+    if (path === "" || path === root.settingValues.musicFolder) return
+    Qt.callLater(function() { root.confirmTarget = { folder: path } })
   }
 
   // Esc: close the key list, else back out of an artist or album, else clear
   // the search, else close the panel.
   function stepBack() {
     if (root.pickerOpen) root.closePicker()
-    else if (root.confirmOpen) root.cancelDelete()
+    else if (root.confirmOpen) root.cancelConfirm()
     else if (root.settingsOpen) root.closeSettings()
     else if (root.infoOpen) root.closeInfo()
     else if (root.keysOpen) root.keysOpen = false
@@ -1811,18 +1856,23 @@ Panel {
         if (error === "") root.say("Removed " + row.title + " from " + entry.title)
       })
     } else if (row.kind === "playlist" && row.removable) {
-      root.deleteTarget = { playlist: row.playlist, songs: row.songs }
+      root.confirmTarget = { playlist: row.playlist, songs: row.songs }
     }
   }
 
-  function cancelDelete() {
-    root.deleteTarget = null
+  function cancelConfirm() {
+    root.confirmTarget = null
     keyCatcher.forceActiveFocus()
   }
 
-  function confirmDelete() {
-    var name = root.deleteTarget ? root.deleteTarget.playlist : ""
-    root.cancelDelete()
+  function acceptConfirm() {
+    var folder = root.confirmTarget ? root.confirmTarget.folder || "" : ""
+    var name = root.confirmTarget ? root.confirmTarget.playlist || "" : ""
+    root.cancelConfirm()
+    if (folder !== "") {
+      root.saveAccount("musicFolder", folder)
+      return
+    }
     if (name === "") return
     client.deletePlaylist(name, function(error) {
       if (error !== "") return
@@ -2114,29 +2164,76 @@ Panel {
     onStatusChanged: root.followMpd()
   }
 
-  // The settings' schema and defaults, from this plugin's manifest.json.
+  // omarock's settings file, followed as it changes (by the settings
+  // screen, the installer, or by hand).
   FileView {
-    path: decodeURIComponent(String(Qt.resolvedUrl("manifest.json")).replace(/^file:\/\//, ""))
+    id: settingsFile
+    path: root.configDir + "/settings.json"
+    watchChanges: true
     printErrors: false
-    onLoaded: {
-      try {
-        var widget = (JSON.parse(text()) || {}).barWidget || {}
-        root.manifestSchema = widget.schema || []
-        root.manifestDefaults = widget.defaults || {}
-      } catch (e) {}
+    onLoaded: root.fileSettings = Settings.parse(text())
+    onLoadFailed: root.fileSettings = {}
+    onFileChanged: reload()
+  }
+
+  // Writes the settings file (writeSettings), and says why if it couldn't.
+  Process {
+    id: settingWriter
+    stderr: StdioCollector { id: settingWriterErrors; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0)
+        root.say("Couldn't save the settings: " + (String(settingWriterErrors.text || "").trim().split("\n")[0] || "no reason given"))
+      Qt.callLater(root.writeSettings)
     }
   }
 
-  // Saves one setting (saveSetting), and says why if it couldn't.
+  // Saves an account, a key or the music folder (saveAccount).
   Process {
-    id: settingSaver
+    id: accountWriter
     property string key: ""
-    stderr: StdioCollector { id: settingSaverErrors; waitForEnd: true }
+    property string secret: ""
+    stdinEnabled: true
+    stderr: StdioCollector { id: accountWriterErrors; waitForEnd: true }
+    onStarted: {
+      write(secret + "\n")
+      secret = ""
+    }
     onExited: function(exitCode) {
-      if (exitCode !== 0)
-        root.say("Couldn't save " + settingSaver.key + ": "
-          + (String(settingSaverErrors.text || "").trim().split("\n")[0] || "omarchy bar set failed"))
-      Qt.callLater(root.nextSettingSave)
+      var key = accountWriter.key
+      if (exitCode !== 0) {
+        root.say("Couldn't save it: " + (String(accountWriterErrors.text || "").trim().split("\n")[0] || "no reason given"))
+      } else {
+        root.say(key === "musicFolder" ? "mpd plays from the new folder now, and is reading it"
+          : key === "sxmUser" || key === "sxmPassword" ? "Saved: omarock-sxm is signing in again"
+          : key === "soloistKey" ? "Saved: Soloist is restarting" : "Saved")
+        if (key === "bridgeToken") apple.reloadToken()
+        serviceRecheck.restart()
+      }
+      accountReader.running = true
+    }
+  }
+
+  // What's set (tools/omarock-account show), for the settings screen.
+  Process {
+    id: accountReader
+    command: [root.accountTool, "show"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try { root.accounts = JSON.parse(text) || {} } catch (e) { root.accounts = {} }
+      }
+    }
+  }
+
+  // A service just restarted with a new login or key: how it's doing, once
+  // it has had a moment.
+  Timer {
+    id: serviceRecheck
+    interval: 5000
+    onTriggered: {
+      if (root.sxmEnabled) sxm.checkHealth()
+      if (root.spotifyEnabled) spotify.checkHealth()
+      if (root.appleConfigured) apple.checkHealth()
     }
   }
 
@@ -2145,6 +2242,7 @@ Panel {
   // installer, or by hand) is read when the panel opens or its source is
   // switched on.
   function rereadConfig() {
+    settingsFile.reload()
     appleConfigFile.reload()
     apple.reloadToken()
     radio.rereadPlace()
@@ -2368,7 +2466,7 @@ Panel {
         objectName: "settingsView"
         anchors.fill: parent
         visible: root.settingsOpen
-        schema: root.manifestSchema
+        schema: root.settingsSchema
         values: root.settingValues
         notes: root.settingNotes
         placeholders: root.settingPlaceholders
@@ -2377,6 +2475,9 @@ Panel {
         foreground: root.foreground
         fontFamily: root.fontFamily
         onChangeRequested: function(key, value) { root.saveSetting(key, value) }
+        onAccountRequested: function(key, value) { root.saveAccount(key, value) }
+        onActionRequested: function(key) { root.settingAction(key) }
+        onFolderRequested: function(path) { root.askMusicFolder(path) }
         onCloseRequested: root.closeSettings()
         onEditFinished: keyCatcher.forceActiveFocus()
       }
@@ -2396,32 +2497,35 @@ Panel {
       }
 
       ConfirmDialog {
-        id: deleteConfirm
+        id: confirmDialog
         anchors.fill: parent
         z: 10
         opened: root.confirmOpen
-        message: root.deleteTarget
-          ? "Delete the playlist “" + root.deleteTarget.playlist + "”? "
-            + (root.deleteTarget.songs > 0 ? "Its " + root.countText(root.deleteTarget.songs, "song") + " stay in the library."
+        message: root.confirmTarget && root.confirmTarget.folder
+          ? "Play music from “" + root.confirmTarget.folder + "”? omarock keeps a copy of mpd.conf, changes only its "
+            + "music_directory line, then restarts mpd (anything playing stops for a moment) and reads the new folder."
+          : root.confirmTarget
+          ? "Delete the playlist “" + root.confirmTarget.playlist + "”? "
+            + (root.confirmTarget.songs > 0 ? "Its " + root.countText(root.confirmTarget.songs, "song") + " stay in the library."
               : "It's empty.")
           : ""
-        confirmText: "Delete"
+        confirmText: root.confirmTarget && root.confirmTarget.folder ? "Change it" : "Delete"
         background: Color.popups.background
         foreground: root.foreground
         fontFamily: root.fontFamily
-        onCanceled: root.cancelDelete()
-        onConfirmed: root.confirmDelete()
+        onCanceled: root.cancelConfirm()
+        onConfirmed: root.acceptConfirm()
         onOpenedChanged: if (opened) {
           selectedIndex = 1
-          deleteKeys.forceActiveFocus()
+          confirmKeys.forceActiveFocus()
         }
       }
 
       // The dialog's keys: Enter, Esc, ← → and Tab; it swallows the rest.
       Item {
-        id: deleteKeys
+        id: confirmKeys
         Keys.onPressed: function(event) {
-          deleteConfirm.handleKey(event)
+          confirmDialog.handleKey(event)
           event.accepted = true
         }
       }

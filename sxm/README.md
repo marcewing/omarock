@@ -44,8 +44,9 @@ while mpd plays it. Whether that's acceptable is your call.
    curl -s 127.0.0.1:8720/v1/health
    ```
    It should say `"account": true` and `"loggedIn": true`.
-4. **Switch SiriusXM on:** `omarchy bar set mre.omarock siriusXM true --json`. A
-   SiriusXM button appears in the panel, and `m` goes round to it.
+4. **Switch SiriusXM on** in omarock's settings (`,` in the panel). A SiriusXM
+   button appears in the panel, and `m` goes round to it. The login can be
+   changed there later too.
 
 In SiriusXM, the list is your favourite channels, then all of them, each with
 what's on. `A` adds or removes a favourite: your account's, so the SiriusXM app
@@ -62,10 +63,10 @@ sees the change too.
 
 ## Remove it
 
-`./install --uninstall` does this, asking first. By hand:
+`./install --uninstall` does this, asking first. By hand, switch SiriusXM off in
+omarock's settings, then:
 
 ```bash
-omarchy bar set mre.omarock siriusXM false --json
 systemctl --user disable --now omarock-sxm
 rm -f ~/.config/systemd/user/omarock-sxm.service
 systemctl --user daemon-reload

@@ -5,7 +5,8 @@
 | File | What it is |
 | --- | --- |
 | `install` | The guided installer (bash and gum): mpd, the plugin, then each source, using the `tools/install-*` scripts |
-| `manifest.json` | The plugin's manifest, with its settings schema (Omarchy shows it as the widget's settings) |
+| `manifest.json` | The plugin's manifest |
+| `Settings.js` | omarock's settings: what each is, the settings screen's groups, and how a value is found (`~/.config/omarock/settings.json`, else the widget's entry in shell.json, as before 0.6, else its default) |
 | `BarWidget.qml` | The bar: cover and song; loads the panel once |
 | `Panel.qml` | The popup: compact and expanded layouts, keys, search, browsing, the sources |
 | `MpdClient.qml` | The mpd connection: an idle socket for change events, a command socket; the volume (mpd's, or the audio bus's) |
@@ -13,7 +14,7 @@
 | `PlayerCard.qml` | Now playing, seek, transport, volume |
 | `TrackRow.qml`, `CoverArt.qml` | A row of any list, and a cover with a placeholder |
 | `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`), the info card (`i`), the playlist picker (`A`) |
-| `SettingsView.qml` | The settings (`,` or the gear): the manifest's schema as a form, each source with its service's state; changes go through `omarchy bar set` |
+| `SettingsView.qml` | The settings (`,` or the gear): Settings.js as a form, each source with its service's state; settings go into settings.json, accounts, keys and the music folder through `tools/omarock-account` |
 | `Info.js` | Pure helpers: the info card's contents for each source |
 | `AppleClient.qml`, `Apple.js` | A client for the bridge API (bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
 | `SxmClient.qml`, `Sxm.js` | SiriusXM, through omarock-sxm |
@@ -23,7 +24,7 @@
 | `sxm/` | omarock-sxm, the SiriusXM relay |
 | `bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
 | `patches/` | libFLAC and mpd-mpris patches that make Apple Music's stream play well (see bridge/README.md) |
-| `tools/` | Installers (`install-audio`, `install-spotify`, `update-soloist`, `build-libflac`, `build-mpd-mpris`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`), and the test harness (`capture/`) |
+| `tools/` | Installers (`install-audio`, `install-spotify`, `update-soloist`, `build-libflac`, `build-mpd-mpris`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`), and the test harness (`capture/`) |
 | `tests/` | node tests for the pure helpers |
 
 ## How it works

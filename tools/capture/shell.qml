@@ -192,7 +192,8 @@ ShellRoot {
         appleReady: p.player.ready === true && p.appleMode, appleSeq: p.appleMode ? (p.player.bridgeStatus.seq || 0) : -1,
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
         bridgeSong: p.bridgeMode ? p.bridge.song : null, playingIds: p.bridgeMode ? p.playingIds() : null,
-        lookup: p.lookupService,
+        lookup: p.lookupService, accounts: p.accounts,
+        confirmFolder: p.confirmTarget && p.confirmTarget.folder ? p.confirmTarget.folder : "",
         info: p.infoCard ? { service: p.infoCard.card.serviceName, kind: p.infoCard.card.kindName,
           status: p.infoCard.card.status, statusKind: p.infoCard.card.statusKind, title: p.infoCard.card.title,
           lines: p.infoCard.card.lines, notes: p.infoCard.card.notes, loading: p.infoCard.loading, cover: p.infoCoverUrl,
@@ -275,6 +276,15 @@ ShellRoot {
       if (!item || !item.visible) return "not shown"
       return keyboard.mouseClick(item, item.width / 2, item.height / 2, Qt.LeftButton, Qt.NoModifier, -1) ? "ok" : "no window"
     }
+    // A real click on the bar widget off its cover and song: 1 px from its top
+    // edge in the gap between them ("gap"), or at its left end ("end").
+    function clickBarAt(where: string): string {
+      var w = host.widget
+      var song = host.findNamed(w, "song")
+      if (!song) return "not shown"
+      var x = where === "gap" ? song.mapToItem(w, -1, 0).x : 1
+      return keyboard.mouseClick(w, Math.round(x), 1, Qt.LeftButton, Qt.NoModifier, -1) ? "ok" : "no window"
+    }
     // A real click on a bar item (note, cover, song); middle: a middle click.
     function clickBar(name: string, middle: bool): string {
       var item = host.findNamed(host.widget, name)
@@ -283,7 +293,8 @@ ShellRoot {
         Qt.NoModifier, -1) ? "ok" : "no window"
     }
     function settings(json: string): void { host.widget.settings = host.baseSettings(JSON.parse(json)) }
-    // One setting, as Omarchy's bar hands it back after `omarchy bar set`.
+    // One of the widget's settings in shell.json (which omarock's settings
+    // file, when it has the key, outranks).
     function setSetting(key: string, value: string, isJson: bool): void {
       var next = Object.assign({}, host.widget.settings)
       next[key] = isJson ? JSON.parse(value) : value

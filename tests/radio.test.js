@@ -61,7 +61,7 @@ test("listRows without a state ends with how to set one", () => {
   const rows = Radio.listRows([kexp], [], "u2", "")
   assert.deepEqual(rows.map(r => r.kind), ["station", "note"])
   assert.equal(rows[1].section, "LOCAL")
-  assert.match(rows[1].subtitle, /omarchy bar set mre\.omarock radioState/)
+  assert.match(rows[1].subtitle, /settings.*Your US state/)
   // With a state, no note.
   assert.ok(Radio.listRows([kexp], [wjrr], "u2", "Florida").every(r => r.kind === "station"))
 })

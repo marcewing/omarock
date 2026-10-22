@@ -59,8 +59,9 @@ Run the tools from your omarock clone: the plugin's folder,
    - Remove the rules once it's paired.
 6. **Sign in to the Web API:** `tools/omarock-sp login`. It opens Spotify's
    sign-in page; afterwards `tools/omarock-sp health` says `"authorized": true`.
-7. **Switch Spotify on:** `omarchy bar set mre.omarock spotify true --json`. A
-   Spotify button appears in the panel, and `m` goes round to it.
+7. **Switch Spotify on** in omarock's settings (`,` in the panel). A Spotify
+   button appears in the panel, and `m` goes round to it. The settings also
+   change the Client ID and the Soloist key later, and sign you in again.
 
 ## How it behaves
 
@@ -99,10 +100,10 @@ Run the tools from your omarock clone: the plugin's folder,
 
 ## Remove it
 
-`./install --uninstall` does this, asking first. By hand:
+`./install --uninstall` does this, asking first. By hand, switch Spotify off in
+omarock's settings, then:
 
 ```bash
-omarchy bar set mre.omarock spotify false --json
 systemctl --user disable --now omarock-spotify omarock-soloist
 rm -f ~/.config/systemd/user/omarock-spotify.service ~/.config/systemd/user/omarock-soloist.service
 systemctl --user daemon-reload

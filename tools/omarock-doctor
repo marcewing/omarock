@@ -20,10 +20,17 @@ health() { curl -s -m 5 "$1/v1/health" 2>/dev/null; }
 
 plugin=$HOME/.config/omarchy/plugins/mre.omarock
 shelljson=$HOME/.config/omarchy/shell.json
-setting() {  # KEY DEFAULT: omarock's setting, from its entry in shell.json
-  python3 -I - "$shelljson" "$1" "$2" <<'EOF'
+setting() {  # KEY DEFAULT: omarock's setting: its own file's, else (before 0.6) its entry in shell.json
+  python3 -I - "$HOME/.config/omarock/settings.json" "$shelljson" "$1" "$2" <<'EOF'
 import json, sys
-path, key, default = sys.argv[1:]
+mine, path, key, default = sys.argv[1:]
+try:
+    v = json.load(open(mine)).get(key)
+    if v is not None:
+        print(str(v).lower() if isinstance(v, bool) else v)
+        sys.exit(0)
+except Exception:
+    pass
 try:
     d = json.load(open(path))
     for items in (d.get("bar", {}).get("layout", {}) or {}).values():

@@ -1,18 +1,21 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "Settings.js" as Settings
 
-// The settings (the gear, or ,): omarock's widget settings, from the
-// manifest's schema, in groups, each with its value and, for a source, how
-// its service is doing. A change is saved at once: the panel runs Omarchy's
-// `omarchy bar set` (changeRequested), so the settings stay in Omarchy's bar
-// config and the command line agrees. ↑↓ move, Space or Enter toggles,
-// edits or takes the next choice, ←→ change a number or a choice, Esc closes
-// (or drops an edit).
+// The settings (the gear, or ,): omarock's settings (Settings.js), in
+// groups, each with its value and, for a source, how its service is doing.
+// A change is saved at once, by the panel: a setting into omarock's settings
+// file (changeRequested); an account, a key or the music folder through
+// tools/omarock-account (accountRequested, folderRequested). A secret is
+// never shown: its field starts empty, and says whether one is set. ↑↓ move,
+// Space or Enter toggles, edits, presses or takes the next choice, ←→ change
+// a number or a choice, Esc closes (or drops an edit).
 Rectangle {
   id: root
 
-  // The manifest's barWidget.schema, and key -> the value now.
+  // The rows (Settings.shown), and key -> the value now (a secret's: whether
+  // it's set).
   property var schema: []
   property var values: ({})
   // key -> { text, kind } shown under a row: kind "ok", "bad" or "".
@@ -30,6 +33,9 @@ Rectangle {
   property string fontFamily: Style.font.family
 
   signal changeRequested(string key, var value)
+  signal accountRequested(string key, string value)
+  signal actionRequested(string key)
+  signal folderRequested(string path)
   signal closeRequested()
   // An edit ended (saved or dropped): the keys go back to the panel.
   signal editFinished()
@@ -42,12 +48,7 @@ Rectangle {
     root.local = keep
   }
 
-  readonly property var groups: [
-    { title: "SOURCES", keys: ["radio", "radioState", "spotify", "appleMusic", "siriusXM", "lookup"] },
-    { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "tuiCommand"] },
-    { title: "APPLE MUSIC", keys: ["appleBridge", "appleStream", "appleTokenFile", "appleIdleStop", "appleRejoin"] },
-    { title: "ADVANCED", keys: ["socket", "spotifyService", "sxmService", "radioBrowser"] }
-  ]
+  readonly property var groups: Settings.groups
   // The schema's fields in the groups' order; any the groups don't name go last.
   readonly property var rows: {
     var byKey = {}
@@ -78,10 +79,15 @@ Rectangle {
     return root.local[key] !== undefined ? root.local[key] : root.values[key]
   }
 
-  function change(key, value) {
+  // Shown at once, until the panel hands the value back.
+  function shownAs(key, value) {
     var local = Object.assign({}, root.local)
     local[key] = value
     root.local = local
+  }
+
+  function change(key, value) {
+    root.shownAs(key, value)
     root.changeRequested(key, value)
   }
 
@@ -100,9 +106,9 @@ Rectangle {
     var row = root.rows[root.cursor]
     if (!row) return
     if (row.type === "boolean") root.change(row.key, !(root.valueOf(row.key) === true))
-    else if (row.type === "string") root.startEdit(row.key)
-    else if (row.type === "integer") root.startEdit(row.key)
     else if (row.type === "enum") root.choose(row, 1)
+    else if (row.type === "action") root.actionRequested(row.key)
+    else root.startEdit(row.key)
   }
 
   // A choice: the next or previous of its options, going round.
@@ -141,8 +147,21 @@ Rectangle {
   function finishEdit(key, text, save) {
     if (root.editing !== key) return
     root.editing = ""
-    if (save) {
-      var row = root.rows.filter(function(r) { return r.key === key })[0]
+    var row = root.rows.filter(function(r) { return r.key === key })[0]
+    if (save && row && row.type === "secret") {
+      // Kept as typed: a password's spaces are its own.
+      if (text !== "") {
+        root.shownAs(key, true)
+        root.accountRequested(key, text)
+      }
+    } else if (save && row && row.type === "account") {
+      if (text.trim() !== "" && text.trim() !== root.valueOf(key)) {
+        root.shownAs(key, text.trim())
+        root.accountRequested(key, text.trim())
+      }
+    } else if (save && row && row.type === "folder") {
+      if (text.trim() !== "") root.folderRequested(text.trim())
+    } else if (save) {
       var value = row && row.type === "integer" ? Math.round(Number(text)) : text.trim()
       if (row && row.type === "integer" && isNaN(value)) value = root.valueOf(key)
       if (value !== root.valueOf(key)) root.change(key, value)
@@ -211,7 +230,8 @@ Rectangle {
 
           function focusEditor() {
             if (editor.visible) {
-              editor.text = rowItem.value === undefined || rowItem.value === null ? "" : String(rowItem.value)
+              editor.text = rowItem.row.type === "secret" || rowItem.value === undefined || rowItem.value === null ? ""
+                : String(rowItem.value)
               editor.forceActiveFocus()
               editor.selectAll()
             }
@@ -288,9 +308,9 @@ Rectangle {
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               width: rowItem.row.type === "boolean" ? toggle.implicitWidth : rowItem.row.type === "enum" ? choice.implicitWidth
-                : Math.min(Style.space(320), parent.width * 0.5)
+                : rowItem.row.type === "action" ? action.implicitWidth : Math.min(Style.space(320), parent.width * 0.5)
               height: rowItem.row.type === "boolean" ? toggle.implicitHeight : rowItem.row.type === "enum" ? choice.implicitHeight
-                : editor.implicitHeight
+                : rowItem.row.type === "action" ? action.implicitHeight : editor.implicitHeight
 
               ToggleSwitch {
                 id: toggle
@@ -322,11 +342,29 @@ Rectangle {
                 }
               }
 
-              // A text or number setting. It shows the value, and edits on
-              // Enter or a click; Enter saves, Esc drops the edit.
+              // A button: Enter or a click.
+              Button {
+                id: action
+                visible: rowItem.row.type === "action"
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: rowItem.row.button || ""
+                bordered: true
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: {
+                  root.cursor = rowItem.index
+                  root.actionRequested(rowItem.row.key)
+                }
+              }
+
+              // A text or number setting, an account, a secret or the music
+              // folder. It shows the value (a secret, only whether it's set),
+              // and edits on Enter or a click; Enter saves, Esc drops the edit.
               TextField {
                 id: editor
-                visible: rowItem.row.type !== "boolean" && rowItem.row.type !== "enum"
+                visible: rowItem.row.type !== "boolean" && rowItem.row.type !== "enum" && rowItem.row.type !== "action"
+                password: rowItem.row.type === "secret"
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
@@ -334,8 +372,10 @@ Rectangle {
                 foreground: root.foreground
                 font.family: root.fontFamily
                 inputMethodHints: rowItem.row.type === "integer" ? Qt.ImhDigitsOnly : Qt.ImhNone
-                placeholderText: root.placeholders[rowItem.row.key] || ""
-                readonly property string shown: rowItem.value === undefined || rowItem.value === null ? "" : String(rowItem.value)
+                placeholderText: rowItem.row.type === "secret" ? (rowItem.value === true ? "Set · Enter to change it" : "Not set · Enter to set it")
+                  : root.placeholders[rowItem.row.key] || ""
+                readonly property string shown: rowItem.row.type === "secret" || rowItem.value === undefined || rowItem.value === null ? ""
+                  : String(rowItem.value)
                 text: shown
                 onShownChanged: if (!activeFocus) text = shown
                 onActiveFocusChanged: {
@@ -343,11 +383,18 @@ Rectangle {
                     root.cursor = rowItem.index
                     root.editing = rowItem.row.key
                   }
-                  if (!activeFocus && root.editing === rowItem.row.key) root.finishEdit(rowItem.row.key, text, true)
+                  if (!activeFocus && root.editing === rowItem.row.key) {
+                    root.finishEdit(rowItem.row.key, text, true)
+                    if (password) text = ""
+                  }
                 }
                 Keys.onPressed: function(event) {
                   if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     root.finishEdit(rowItem.row.key, editor.text, true)
+                    // A secret leaves nothing behind in the field; the music
+                    // folder shows mpd's until mpd has changed it.
+                    if (editor.password) editor.text = ""
+                    else if (rowItem.row.type === "folder") editor.text = editor.shown
                     event.accepted = true
                   } else if (event.key === Qt.Key_Escape) {
                     editor.text = editor.shown
@@ -372,7 +419,7 @@ Rectangle {
     textFormat: Text.PlainText
     text: root.notice !== "" ? root.notice
       : root.editing !== "" ? "Enter save · Esc cancel"
-      : "↑↓ move · Space or Enter change · ←→ a number · Esc close · saved with omarchy bar set"
+      : "↑↓ move · Space or Enter change · ←→ a number or a choice · Esc close · saved in ~/.config/omarock"
     color: root.notice !== "" ? root.foreground : root.dim
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption

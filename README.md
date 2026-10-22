@@ -233,8 +233,7 @@ stay until you remove them too (each guide says how, by hand).
 ### The other sources
 
 - **Internet radio:** the station playing, your favourites, then the most
-  listened stations in your US state (set it with `omarchy bar set mre.omarock
-  radioState Maine`). `/` finds stations by name, call sign, frequency
+  listened stations in your US state (set it in the settings). `/` finds stations by name, call sign, frequency
   or genre; Enter tunes; `A` keeps a favourite (in the mpd playlist "Radio", so
   `mpc load Radio` plays them); `n`/`p` step through the favourites. Stations that
   send their song show it. HLS-only stations are dimmed: mpd can't play them.
@@ -262,18 +261,26 @@ stay until you remove them too (each guide says how, by hand).
 ## Settings
 
 Press `,` in the panel, or the gear in the expanded view, for the settings
-screen. Each source's switch there also says how its service is doing. A change
-saves at once.
+screen. Everything is there: the sources (each says how its service is doing),
+your music folder, each source's account and keys, and how the panel behaves.
+A change saves at once.
 
-Or set them with Omarchy's bar command, which is what the screen does:
+- **Settings** are kept in `~/.config/omarock/settings.json`, which you can also
+  edit by hand; omarock follows it as it changes:
 
-```bash
-omarchy bar set mre.omarock spotify true --json
-omarchy bar set mre.omarock tuiCommand rmpc
-```
+  ```json
+  { "spotify": true, "tuiCommand": "rmpc" }
+  ```
 
-(`--json` makes `true` a yes/no rather than text.) The bar picks a change up at
-once. They're kept as keys on omarock's entry in `~/.config/omarchy/shell.json`.
+  (Before 0.6 they were keys on omarock's entry in `~/.config/omarchy/shell.json`;
+  those still apply until you change them.)
+- **Accounts and keys** (the SiriusXM login, Spotify's Client ID and Soloist
+  key, the bridge's token) each keep their own file in `~/.config/omarock`,
+  readable only by you. The settings screen never shows a password or key: its
+  field starts empty and says whether one is set. `tools/omarock-account` does
+  the same from a terminal.
+- **The music folder** is mpd's `music_directory`. Changing it asks first, then
+  keeps a copy of mpd.conf, changes only that line, and restarts mpd.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
