@@ -56,6 +56,7 @@ Item {
   signal tuneRequested(var station)
 
   FileView {
+    id: placeFile
     path: Quickshell.env("HOME") + "/.config/omarock/radio.json"
     watchChanges: true
     printErrors: false
@@ -67,6 +68,9 @@ Item {
     onLoadFailed: root.filePlace = ""
     onFileChanged: reload()
   }
+
+  // Read radio.json again: a file made after omarock loaded isn't watched.
+  function rereadPlace() { placeFile.reload() }
 
   function xhr(url, callback) {
     var request = new XMLHttpRequest()

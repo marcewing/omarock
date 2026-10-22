@@ -48,6 +48,9 @@ Item {
   // How often a request failed outright (reachable went false), for tests.
   property int dropouts: 0
   property bool authorized: false
+  // What /v1/health said last. A status reply also sets `authorized` (the
+  // token works), but omarock-spotify answers status before it's signed in.
+  property bool healthAuthorized: false
   property bool canPlayCatalog: false
   property string lastError: ""
   // The bridge's own status (API.md, "Status") and current Song.
@@ -73,6 +76,7 @@ Item {
   readonly property bool current: bridgeStatus.current === true
 
   FileView {
+    id: tokenView
     path: root.tokenFile
     watchChanges: true
     printErrors: false
@@ -80,6 +84,9 @@ Item {
     onFileChanged: reload()
     onLoadFailed: root.token = ""
   }
+
+  // Read the token again: a file made after omarock loaded isn't watched.
+  function reloadToken() { tokenView.reload() }
 
   // One HTTP request; callback(data, error) with error "" on success.
   function request(method, path, body, callback, timeoutMs) {
@@ -154,6 +161,7 @@ Item {
     root.get("/v1/health", function(data, error) {
       root.reachable = !!data
       root.authorized = !!data && data.authorized === true
+      root.healthAuthorized = root.authorized
       root.canPlayCatalog = !!data && data.canPlayCatalog === true
       root.lastError = !data ? error
         : !root.authorized ? root.unauthorizedText : ""

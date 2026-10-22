@@ -56,6 +56,10 @@ Panel {
   readonly property bool appleEnabled: root.setting("appleMusic", false) === true
   readonly property bool sxmEnabled: root.setting("siriusXM", false) === true
   readonly property bool appleConfigured: appleEnabled && appleBridge !== "" && appleStream !== ""
+  // Switched on, or set up (the installer writes apple.json, then switches
+  // Apple Music on): read the files again, and see how the bridge is doing.
+  onAppleEnabledChanged: if (root.appleEnabled) root.rereadConfig()
+  onAppleConfiguredChanged: if (root.appleConfigured) apple.checkHealth()
   // mpd's current song is the stream: Apple Music mode, unless Spotify is
   // the source (it plays without mpd, which stops). The same for SiriusXM and
   // the radio.
@@ -116,7 +120,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.5.4"
+  readonly property string version: "0.5.5"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -200,12 +204,12 @@ Panel {
         : note("No state set (below): no local stations"),
       spotify: !root.spotifyEnabled ? note("Off. It needs Spotify Premium and the omarock-spotify service: spotify/README.md")
         : !spotify.reachable ? note("Can't reach omarock-spotify: systemctl --user status omarock-spotify", "bad")
-        : !spotify.authorized ? note("omarock-spotify runs, but isn't signed in: tools/omarock-sp health", "bad")
+        : !spotify.healthAuthorized ? note("omarock-spotify runs, but isn't signed in: tools/omarock-sp health", "bad")
         : note("omarock-spotify runs, and is signed in", "ok"),
       appleMusic: !root.appleEnabled ? note("Off. It needs the omarock bridge on a Mac: bridge/README.md")
         : !root.appleConfigured ? note("Set the bridge and stream below, or in ~/.config/omarock/apple.json", "bad")
         : !apple.reachable ? note("Can't reach the bridge at " + root.appleBridge, "bad")
-        : !apple.authorized ? note("The bridge answers, but Apple Music access isn't allowed on the Mac yet", "bad")
+        : !apple.healthAuthorized ? note("The bridge answers, but Apple Music access isn't allowed on the Mac yet", "bad")
         : note("The bridge at " + root.appleBridge + " answers", "ok"),
       siriusXM: !root.sxmEnabled ? note("Off. It needs a SiriusXM subscription and the omarock-sxm service: sxm/README.md")
         : sxm.available ? note("omarock-sxm runs, and is signed in", "ok")
@@ -669,6 +673,7 @@ Panel {
     if (root.opened && root.appleMode && apple.genres.length === 0) apple.refreshGenres()
     root.cardResized()
     if (root.opened) {
+      root.rereadConfig()
       root.cursorActive = false
       root.keysOpen = false
       root.settingsOpen = false
@@ -1952,7 +1957,18 @@ Panel {
     }
   }
 
+  // omarock's files in ~/.config/omarock, read again. FileView watches a file
+  // only if it was there when omarock loaded, so one made later (by the
+  // installer, or by hand) is read when the panel opens or its source is
+  // switched on.
+  function rereadConfig() {
+    appleConfigFile.reload()
+    apple.reloadToken()
+    radio.rereadPlace()
+  }
+
   FileView {
+    id: appleConfigFile
     path: Quickshell.env("HOME") + "/.config/omarock/apple.json"
     watchChanges: true
     printErrors: false

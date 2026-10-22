@@ -266,6 +266,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     settings_scenario(host, output, failures)
     sources_switch_scenario(host, socket_path, failures)
     fresh_start_scenario(host, socket_path, failures)
+    late_config_scenario(host, failures)
     teardown_scenario(host, socket_path, failures)
 
 
@@ -2534,6 +2535,35 @@ def sources_switch_scenario(host, socket_path, failures):
     host.call("close")
 
 
+def late_config_scenario(host, failures):
+    """In a fresh install (the 4.5 RC VM, 10-22), ~/.config/omarock didn't exist
+    when omarock loaded; then ./install made it and wrote apple.json. FileView
+    can't watch a file in a folder that isn't there, so Apple Music stayed
+    "not set up". The panel reads its files again when it opens."""
+    folder = BRIDGE["config"].parent
+    aside = folder.with_name(folder.name + "-aside")
+    folder.rename(aside)
+    try:
+        host.call("reload")
+        wait_for(lambda: host.call("state", quiet=True) != "", "the widget again")
+        wait_for(lambda: not host.state()["appleConfigured"], "no apple.json")
+    finally:
+        aside.rename(folder)
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    host.settle(1.5)
+    if host.state()["appleConfigured"]:
+        print("note: Quickshell now notices a file in a folder made after it loaded")
+    host.call("open")
+    try:
+        wait_for(lambda: host.state()["appleConfigured"], "apple.json read", timeout=5)
+    except RuntimeError:
+        pass
+    check(host.state()["appleConfigured"], "apple.json, made after omarock loaded (and its folder too), is read when the panel opens", failures)
+    host.call("close")
+    BRIDGE["config"].unlink()
+
+
 def fresh_start_scenario(host, socket_path, failures):
     """Each time another plugin reloaded (the shell reloads them all), the bar
     showed only the music note until the panel was opened, while SiriusXM
@@ -3015,6 +3045,7 @@ def main():
                             elif name == "info": info_scenario(host, output, socket_path, failures)
                             elif name == "teardown": teardown_scenario(host, socket_path, failures)
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
+                            elif name == "late-config": late_config_scenario(host, failures)
                             elif name == "sources-switch": sources_switch_scenario(host, socket_path, failures)
                             elif name == "settings": settings_scenario(host, output, failures)
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
