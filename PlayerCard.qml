@@ -23,14 +23,17 @@ Item {
   property color foreground: Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
-  // The artist, the album (its line, or the cover) and the genre open as links.
+  // The artist, the album (its line, or the cover) and the genre open as links;
+  // so does the song's title, on a live station (to look it up elsewhere).
   property bool canOpenArtist: false
   property bool canOpenAlbum: false
   property bool canOpenGenre: false
+  property bool canOpenTitle: false
 
   signal openArtist()
   signal openAlbum()
   signal openGenre()
+  signal openTitle()
 
   readonly property var song: mpd.currentSong || ({})
   readonly property var status: mpd.status
@@ -54,7 +57,8 @@ Item {
     var year = Mpd.songYear(song)
     return (song.album || "") + (song.album && year ? " · " : "") + year
   }
-  readonly property string genreText: mpd.ready && hasSong ? song.genre || "" : ""
+  // A song's genre; a station's is in its own line already (extraText).
+  readonly property string genreText: mpd.ready && hasSong && !live ? song.genre || "" : ""
 
   implicitHeight: column.implicitHeight
 
@@ -62,16 +66,27 @@ Item {
     spacing: Style.space(3)
 
     Text {
+      objectName: "playingTitle"
       textFormat: Text.PlainText
-      width: parent.width
+      width: Math.min(implicitWidth, parent.width)
       text: root.titleText
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: root.large ? Style.font.heading : Style.font.subtitle
       font.bold: true
+      font.underline: root.canOpenTitle && titleLink.containsMouse
       wrapMode: Text.WordWrap
       maximumLineCount: 2
       elide: Text.ElideRight
+
+      MouseArea {
+        id: titleLink
+        anchors.fill: parent
+        enabled: root.canOpenTitle
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.openTitle()
+      }
     }
 
     Text {

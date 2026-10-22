@@ -209,6 +209,11 @@ stay until you remove them too (each guide says how, by hand).
   line or the cover to open the album, on the song playing, or the genre to open
   it (`O`, `o` and `g` do the same). ← goes back to the queue. On Apple Music, a
   genre opens Apple's charts for it, when it's one of Apple's top genres.
+- **Heard it on the radio?** On SiriusXM or the radio, click the song's title or
+  the artist (or `o`, `O`) to look it up in Apple Music or Spotify (the
+  `lookup` setting picks), while the station plays on. Enter plays it there and
+  switches to it; `a` adds it to that service's queue, `A` to one of its
+  playlists; Esc comes back to the station.
 - **Playlists** are mpd's stored playlists, so `mpc` and other clients see them
   too. `A` adds the song, album, artist or genre under the cursor to one: pick a
   playlist, or type a new name. `P` lists them, with **Save the queue as a
@@ -277,6 +282,7 @@ once. They're kept as keys on omarock's entry in `~/.config/omarchy/shell.json`.
 | `spotify` | off | Spotify ([spotify/README.md](spotify/README.md)) |
 | `appleMusic` | off | Apple Music ([bridge/README.md](bridge/README.md)) |
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |
+| `lookup` | Apple Music | Where a click on the radio's song looks it up: `Apple Music` or `Spotify` (the other one if that one is off) |
 | `socket` | `$XDG_RUNTIME_DIR/mpd/socket` | mpd's unix socket |
 | `tuiCommand` | `ncmpcpp` | The terminal player `t` and **TUI** open |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |

@@ -48,6 +48,8 @@ ARTISTS = [
     {"kind": "artist", "id": "c-ar-1", "source": "catalog", "name": "Hüsker Dü", "genres": ["Punk"],
      "editorialNotes": "Minneapolis trio."},
     {"kind": "artist", "id": "c-ar-2", "source": "catalog", "name": "Bob Mould", "genres": ["Alternative"]},
+    # What the fake SiriusXM plays on 80s on 8, to look up.
+    {"kind": "artist", "id": "c-ar-3", "source": "catalog", "name": "REO Speedwagon", "genres": ["Rock"]},
 ]
 ALBUMS = {
     # id: (title, artist id, artist, year, colour, extra, [(title, seconds, disc)])
@@ -60,6 +62,8 @@ ALBUMS = {
                [("Sunspots", 140, 1), ("See a Little Light", 197, 1)]),
     "c-al-4": ("Makes No Sense at All", "c-ar-1", "Hüsker Dü", 1985, "5a8a3c", {"isSingle": True},
                [("Makes No Sense at All", 165, 1)]),
+    "c-al-5": ("Hi Infidelity", "c-ar-3", "REO Speedwagon", 1980, "b03030", {"recordLabel": "Epic"},
+               [("Keep On Loving You", 200, 1), ("Take It On The Run", 239, 1)]),
 }
 
 
@@ -275,15 +279,18 @@ class Bridge:
         return out
 
     def search(self, q, scope, limit):
-        f = fold(q)
-        def hit(name): return f in fold(name)
+        words = fold(q).split()
+        # Every word somewhere in the names, as Apple's search finds "title artist".
+        def hit(*names):
+            hay = " ".join(fold(n or "") for n in names)
+            return all(w in hay for w in words)
         # Library songs match by title only, so the artist searches keep their rows.
         library = {"songs": [dict(SONGS[s], id="l-" + s, source="library") for s in CATALOG_ALBUMS["c-al-1"]["tracks"]
                              if hit(SONGS[s]["title"])][:limit], "albums": [a for a in self.library_albums if hit(a["title"]) or hit(a["artist"])][:limit],
                    "artists": [a for a in self.library_artists if hit(a["name"])][:limit],
                    "playlists": [self.playlist("library", p)[0] for p, v in self.playlists.items() if hit(v["name"])][:limit]}
-        catalog = {"songs": [s for s in SONGS.values() if hit(s["title"]) or hit(s["artist"])][:limit],
-                   "albums": [public(a) for a in CATALOG_ALBUMS.values() if hit(a["title"]) or hit(a["artist"])][:limit],
+        catalog = {"songs": [s for s in SONGS.values() if hit(s["title"], s["artist"])][:limit],
+                   "albums": [public(a) for a in CATALOG_ALBUMS.values() if hit(a["title"], a["artist"])][:limit],
                    "artists": [a for a in ARTISTS if hit(a["name"])][:limit],
                    "playlists": [self.playlist("catalog", p)[0] for p, v in self.catalog_playlists.items() if hit(v["name"])][:limit]}
         out = {}

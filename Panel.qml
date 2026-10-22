@@ -83,6 +83,10 @@ Panel {
   // Apple Music and Spotify share the bridge's API, rows and views.
   readonly property bool bridgeMode: appleMode || spotifyMode
   readonly property var bridge: spotifyMode ? spotify : apple
+  // The service the rows on screen come from: the one playing, or the one
+  // a lookup is in.
+  readonly property var browseBridge: lookupService === "apple" ? apple : lookupService === "spotify" ? spotify : bridge
+  readonly property bool browseBridgeMode: lookupService !== "" || bridgeMode
   readonly property string radioBrowser: root.setting("radioBrowser", "")
   // The station to come back to when switching to the radio.
   property string lastStation: ""
@@ -92,6 +96,17 @@ Panel {
   readonly property string source: spotifyMode ? "spotify" : mpdOnApple ? "apple" : mpdOnSxm ? "sxm" : mpdOnRadio ? "radio" : "local"
   // A source switched on shows even when its service can't be reached:
   // switching to it then says why, which helps while setting it up.
+  // A live station's song or artist looked up in Apple Music or Spotify
+  // ("apple" or "spotify", else ""): the search, and what it opens, use that
+  // service while the station plays on. Playing a result switches to it.
+  property string lookupService: ""
+  // Where the lookup goes: the lookup setting's pick, or the other one when
+  // that's switched off.
+  readonly property string lookupTarget: {
+    var apple = root.appleConfigured ? "apple" : ""
+    var spotify = root.spotifyEnabled ? "spotify" : ""
+    return root.setting("lookup", "Apple Music") === "Spotify" ? spotify || apple : apple || spotify
+  }
   readonly property var sources: ["local"].concat(appleEnabled ? ["apple"] : []).concat(spotifyEnabled ? ["spotify"] : [])
     .concat(sxmEnabled ? ["sxm"] : []).concat(radioEnabled ? ["radio"] : [])
   readonly property var sourceNames: ({ local: "local music", apple: "Apple Music", spotify: "Spotify", sxm: "SiriusXM", radio: "the radio" })
@@ -121,7 +136,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.5.10"
+  readonly property string version: "0.5.11"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -746,6 +761,8 @@ Panel {
   function clearSearch() {
     root.resetBrowse()
     root.clearPreview()
+    root.lookupService = ""
+    root.lookupFocus = ""
     root.query = ""
     root.resultRows = []
     root.searching = false
@@ -775,6 +792,23 @@ Panel {
   function runSearch() {
     var sequence = ++root.searchSequence
     var query = root.query
+    if (root.browseBridgeMode) {
+      var bridge = root.browseBridge
+      bridge.search(query, function(results, error) {
+        if (sequence !== root.searchSequence) return
+        root.resultRows = results ? Apple.searchRows(results, Apple.matchGenres(bridge.genres, query, Mpd.fold), bridge.service) : []
+        root.searching = false
+        if (!results) root.say(error)
+        // A lookup's results start on the first song, or artist, found.
+        var first = root.resultRows.findIndex(function(row) { return row.kind === root.lookupFocus })
+        if (first >= 0) {
+          root.cursorActive = true
+          root.cursorIndex = first
+        }
+        root.lookupFocus = ""
+      })
+      return
+    }
     if (root.sxmMode) {
       root.resultRows = Sxm.searchRows(sxm.channels, sxm.nowPlaying, query, Mpd.fold, sxm.currentId)
       root.searching = false
@@ -787,16 +821,6 @@ Panel {
         root.resultRows = stations ? Radio.searchRows(stations, radio.currentUuid, favorites) : []
         root.searching = false
         if (!stations) root.say(error)
-      })
-      return
-    }
-    if (root.bridgeMode) {
-      var bridge = root.bridge
-      bridge.search(query, function(results, error) {
-        if (sequence !== root.searchSequence) return
-        root.resultRows = results ? Apple.searchRows(results, Apple.matchGenres(bridge.genres, query, Mpd.fold), bridge.service) : []
-        root.searching = false
-        if (!results) root.say(error)
       })
       return
     }
@@ -922,6 +946,43 @@ Panel {
     return artist !== "" ? root.makeEntry({ kind: "artist", artist: artist }, -1) : null
   }
 
+  // A live station's song, as it says it (SiriusXM's or a radio station's
+  // title): something to look up. Not an ad, nor the station's own name.
+  readonly property bool liveSong: root.live && !!root.player.currentSong.artist && !(root.sxmMode && sxm.now && sxm.now.isAd)
+  // The kind of row a lookup's results should start on: "song" or "artist".
+  property string lookupFocus: ""
+
+  // A click on a live station's song or artist (or o and O): look it up in
+  // Apple Music or Spotify (lookupTarget), while the station plays on.
+  function lookUp(kind) {
+    var song = root.player.currentSong
+    if (!root.liveSong) {
+      root.say("The station isn't saying what song this is")
+      return
+    }
+    var service = root.lookupTarget
+    if (service === "") {
+      root.say("Switch on Apple Music or Spotify to look up the station's songs")
+      return
+    }
+    var target = service === "apple" ? apple : spotify
+    var text = kind === "artist" ? song.artist : song.title + " " + song.artist
+    function go() {
+      root.clearSearch()
+      root.lookupService = service
+      root.lookupFocus = kind
+      root.leaveSearch()
+      if (root.searchField) root.searchField.text = text
+      root.setQuery(text)
+      root.say(target.service + ": " + (kind === "artist" ? song.artist : song.title) + ". Enter plays it there; Esc comes back")
+    }
+    if (target.ready) go()
+    else target.checkHealth(function(ok, error) {
+      if (ok) go()
+      else root.say(error !== "" ? error : "Can't reach " + target.service)
+    })
+  }
+
   // The bridge's playing song's album and artist ids: from its status, else
   // from /v1/info (AppleClient.songLinks), each with the source it's from.
   function playingIds() {
@@ -935,6 +996,10 @@ Panel {
   // opened from the queue, so ← comes back to it. An album opens on the song
   // playing, an artist on its album, a genre on its artist.
   function openPlaying(kind) {
+    if (root.live && kind !== "genre") {
+      root.lookUp(kind === "artist" ? "artist" : "song")
+      return
+    }
     var entry = root.playingEntry(kind)
     if (!entry) {
       root.say(root.live ? "A live station has no album or artist to open"
@@ -1080,7 +1145,7 @@ Panel {
   // Fills in entry.rows and entry.info from the Apple Music bridge (or
   // Spotify's service), then done().
   function loadAppleEntry(entry, done) {
-    var bridge = root.bridge
+    var bridge = root.browseBridge
     function show(view) {
       entry.rows = view.rows
       entry.info = view.info
@@ -1113,7 +1178,7 @@ Panel {
   // for the same name; when it's there and isn't the same object (Spotify's
   // followed artists are its catalog's), both are fetched and merged.
   function loadAppleArtist(entry, show, shown) {
-    var bridge = root.bridge
+    var bridge = root.browseBridge
     var ref = entry.apple
     var other = ref.source === "library" ? "catalog" : "library"
     var main = null
@@ -1567,15 +1632,19 @@ Panel {
       items = [entry.apple]
       start = row.position
     }
-    root.bridge.playItems(items, mode === "play" ? "play" : "add", start, function(data, error) {
+    var bridge = root.browseBridge
+    // From a lookup, it plays on that service, which then becomes the source.
+    var switchTo = mode === "play" ? root.lookupService : ""
+    bridge.playItems(items, mode === "play" ? "play" : "add", start, function(data, error) {
       if (error !== "") root.say(error)
+      else if (switchTo !== "") root.setSource(switchTo)
     })
     if (mode === "play") {
       root.clearSearch()
       root.leaveSearch()
-      root.say("Playing " + name)
+      root.say("Playing " + name + (switchTo !== "" ? " on " + bridge.service : ""))
     } else {
-      root.say("Added " + name + " to the queue")
+      root.say("Added " + name + " to " + (root.lookupService !== "" ? bridge.service + "'s queue" : "the queue"))
     }
   }
 
@@ -1797,8 +1866,8 @@ Panel {
     root.keysOpen = false
     root.playlistCounts = ({})
     root.pickerItem = item
-    if (root.bridgeMode) {
-      root.bridge.refreshPlaylists(function(list) {
+    if (item.result.items) {
+      root.browseBridge.refreshPlaylists(function(list) {
         if (root.pickerItem !== item || !list) return
         var counts = {}
         list.forEach(function(p) {
@@ -1829,9 +1898,10 @@ Panel {
         else root.say(isNew ? "New playlist " + name + ", with " + item.title : "Added " + item.title + " to " + name)
         root.refreshPlaylistViews()
       }
-      var target = root.bridge.playlists.filter(function(p) { return p.name === name })[0]
-      if (isNew || !target) root.bridge.createPlaylist(name, item.result.items, done)
-      else root.bridge.addToPlaylist(target.id, item.result.items, done)
+      var bridge = root.browseBridge
+      var target = bridge.playlists.filter(function(p) { return p.name === name })[0]
+      if (isNew || !target) bridge.createPlaylist(name, item.result.items, done)
+      else bridge.addToPlaylist(target.id, item.result.items, done)
       return
     }
     client.addToPlaylist(name, item.result, isNew, function(error) {
@@ -1849,7 +1919,7 @@ Panel {
     if (root.searchMode) root.runSearch()
     root.browseStack.forEach(function(entry) {
       if (entry.kind !== "playlist" && entry.kind !== "playlists") return
-      if (!!entry.apple !== root.bridgeMode) return
+      if (!!entry.apple !== root.browseBridgeMode) return
       root.loadEntry(entry, function() {
         if (entry !== root.browseTop) {
           // The left column shows it: hand it the new rows.
@@ -1929,7 +1999,7 @@ Panel {
     }
     if (request.type === "apple") {
       var item = request.item
-      var bridge = root.bridge
+      var bridge = root.browseBridge
       show(Info.appleItem(item, { checking: item.source !== "library" }, bridge.serviceKey), { coverUrl: Apple.artUrl(item.artwork, 160) }, true)
       bridge.info(item, function(extra) {
         var full = extra.item || item
@@ -2317,7 +2387,7 @@ Panel {
         z: 10
         open: root.pickerOpen
         title: root.pickerItem ? root.pickerItem.title : ""
-        playlists: root.bridgeMode ? root.bridge.playlists.filter(function(p) { return p.canEdit !== false }) : client.playlists
+        playlists: root.browseBridgeMode ? root.browseBridge.playlists.filter(function(p) { return p.canEdit !== false }) : client.playlists
         counts: root.playlistCounts
         foreground: root.foreground
         fontFamily: root.fontFamily
@@ -2866,12 +2936,14 @@ Panel {
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
         live: root.live
         canOpenAlbum: root.playingEntry("album") !== null
-        canOpenArtist: root.playingEntry("artist") !== null
+        canOpenArtist: root.live ? root.liveSong && root.lookupTarget !== "" : root.playingEntry("artist") !== null
+        canOpenTitle: root.liveSong && root.lookupTarget !== ""
         foreground: root.foreground
         fontFamily: root.fontFamily
         canOpenGenre: root.playingEntry("genre") !== null
         onOpenAlbum: root.openPlaying("album")
         onOpenArtist: root.openPlaying("artist")
+        onOpenTitle: root.lookUp("song")
         onOpenGenre: root.openPlaying("genre")
       }
 
@@ -3014,12 +3086,14 @@ Panel {
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
         live: root.live
         canOpenAlbum: root.playingEntry("album") !== null
-        canOpenArtist: root.playingEntry("artist") !== null
+        canOpenArtist: root.live ? root.liveSong && root.lookupTarget !== "" : root.playingEntry("artist") !== null
+        canOpenTitle: root.liveSong && root.lookupTarget !== ""
         foreground: root.foreground
         fontFamily: root.fontFamily
         canOpenGenre: root.playingEntry("genre") !== null
         onOpenAlbum: root.openPlaying("album")
         onOpenArtist: root.openPlaying("artist")
+        onOpenTitle: root.lookUp("song")
         onOpenGenre: root.openPlaying("genre")
       }
 

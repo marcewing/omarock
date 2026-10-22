@@ -238,8 +238,10 @@ Item {
   function pause() { root.post("/v1/pause") }
   // The Mac first, then mpd on the stream (see catchUp).
   function resume() { root.post("/v1/resume", {}, root.catchUp) }
+  // Only while mpd's source is this stream: a song played here from a lookup
+  // (the radio playing) mustn't start the radio.
   function startStream() {
-    if (root.streamed && root.mpd && root.mpd.status.state !== "play") root.mpd.send("play")
+    if (root.streamed && root.active && root.mpd && root.mpd.status.state !== "play") root.mpd.send("play")
   }
   // Spotify: become omarock's source (mpd stops, and Spotify carries on with
   // what it had), or stop being it (Spotify pauses).

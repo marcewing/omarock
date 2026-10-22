@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mre.omarock",
   "name": "omarock: multi-source mpd music player",
-  "version": "0.5.10",
+  "version": "0.5.11",
   "author": "Marc Ewing",
   "license": "MIT",
   "description": "A multi-source mpd-based music player. Supports your local music files, internet radio, Spotify, SiriusXM, and Apple Music (through a live bridge running on your Mac). The last three are optional, and require accounts. Drive with keyboard or mouse. Bar shows cover and song, click for compact and expanded panes.",
@@ -23,6 +23,7 @@
       "spotify": false,
       "appleMusic": false,
       "siriusXM": false,
+      "lookup": "Apple Music",
       "socket": "",
       "tuiCommand": "ncmpcpp",
       "closeOnLeave": true,
@@ -71,6 +72,14 @@
         "label": "SiriusXM",
         "defaultValue": false,
         "description": "Needs a SiriusXM subscription and the omarock-sxm service (sxm/README.md). Unofficial."
+      },
+      {
+        "key": "lookup",
+        "type": "enum",
+        "label": "Look up the radio's songs in",
+        "options": ["Apple Music", "Spotify"],
+        "defaultValue": "Apple Music",
+        "description": "Click a song or artist playing on SiriusXM or the radio to find it there, while the station plays on. The other one if this one is off."
       },
       {
         "key": "socket",

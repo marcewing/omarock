@@ -6,8 +6,9 @@ import qs.Ui
 // manifest's schema, in groups, each with its value and, for a source, how
 // its service is doing. A change is saved at once: the panel runs Omarchy's
 // `omarchy bar set` (changeRequested), so the settings stay in Omarchy's bar
-// config and the command line agrees. ↑↓ move, Space or Enter toggles or
-// edits, ←→ change a number, Esc closes (or drops an edit).
+// config and the command line agrees. ↑↓ move, Space or Enter toggles,
+// edits or takes the next choice, ←→ change a number or a choice, Esc closes
+// (or drops an edit).
 Rectangle {
   id: root
 
@@ -42,7 +43,7 @@ Rectangle {
   }
 
   readonly property var groups: [
-    { title: "SOURCES", keys: ["radio", "radioState", "spotify", "appleMusic", "siriusXM"] },
+    { title: "SOURCES", keys: ["radio", "radioState", "spotify", "appleMusic", "siriusXM", "lookup"] },
     { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "tuiCommand"] },
     { title: "APPLE MUSIC", keys: ["appleBridge", "appleStream", "appleTokenFile", "appleIdleStop", "appleRejoin"] },
     { title: "ADVANCED", keys: ["socket", "spotifyService", "sxmService", "radioBrowser"] }
@@ -101,11 +102,26 @@ Rectangle {
     if (row.type === "boolean") root.change(row.key, !(root.valueOf(row.key) === true))
     else if (row.type === "string") root.startEdit(row.key)
     else if (row.type === "integer") root.startEdit(row.key)
+    else if (row.type === "enum") root.choose(row, 1)
   }
 
-  // ←→ on a number: one step down or up. Elsewhere ← closes.
+  // A choice: the next or previous of its options, going round.
+  function choose(row, dx) {
+    var options = row.options || []
+    if (options.length === 0) return
+    var at = options.indexOf(root.valueOf(row.key))
+    var next = options[((at < 0 ? 0 : at + dx) % options.length + options.length) % options.length]
+    if (next !== root.valueOf(row.key)) root.change(row.key, next)
+  }
+
+  // ←→ on a number: one step down or up; on a choice, the previous or next
+  // option. Elsewhere ← closes.
   function adjust(dx) {
     var row = root.rows[root.cursor]
+    if (row && row.type === "enum") {
+      root.choose(row, dx)
+      return
+    }
     if (!row || row.type !== "integer") {
       if (dx < 0) root.closeRequested()
       return
@@ -271,8 +287,10 @@ Rectangle {
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
-              width: rowItem.row.type === "boolean" ? toggle.implicitWidth : Math.min(Style.space(320), parent.width * 0.5)
-              height: rowItem.row.type === "boolean" ? toggle.implicitHeight : editor.implicitHeight
+              width: rowItem.row.type === "boolean" ? toggle.implicitWidth : rowItem.row.type === "enum" ? choice.implicitWidth
+                : Math.min(Style.space(320), parent.width * 0.5)
+              height: rowItem.row.type === "boolean" ? toggle.implicitHeight : rowItem.row.type === "enum" ? choice.implicitHeight
+                : editor.implicitHeight
 
               ToggleSwitch {
                 id: toggle
@@ -288,11 +306,27 @@ Rectangle {
                 }
               }
 
+              // A choice: its value; Enter or a click takes the next option.
+              Button {
+                id: choice
+                visible: rowItem.row.type === "enum"
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: rowItem.value === undefined || rowItem.value === null ? "" : String(rowItem.value)
+                bordered: true
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: {
+                  root.cursor = rowItem.index
+                  root.choose(rowItem.row, 1)
+                }
+              }
+
               // A text or number setting. It shows the value, and edits on
               // Enter or a click; Enter saves, Esc drops the edit.
               TextField {
                 id: editor
-                visible: rowItem.row.type !== "boolean"
+                visible: rowItem.row.type !== "boolean" && rowItem.row.type !== "enum"
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter

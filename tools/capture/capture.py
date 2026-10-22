@@ -252,6 +252,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     leave_scenario(host, failures)
     apple_scenario(host, output, socket_path, failures)
     now_playing_scenario(host, output, socket_path, failures)
+    lookup_scenario(host, output, socket_path, failures)
     spotify_scenario(host, output, socket_path, failures)
     sxm_scenario(host, output, socket_path, failures)
     radio_scenario(host, output, socket_path, failures)
@@ -1727,6 +1728,78 @@ def now_playing_scenario(host, output, socket_path, failures):
     BRIDGE["config"].unlink()
 
 
+def lookup_scenario(host, output, socket_path, failures):
+    """A live station's song looked up in Apple Music: a click on SiriusXM's
+    title (or O for the artist) searches Apple Music while the channel plays
+    on; a adds the song to Apple Music's queue; Enter plays it there and
+    switches. With the lookup setting on Spotify, it searches Spotify."""
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.call("setSource", "sxm")
+    wait_for(lambda: host.state()["sxmMode"] and host.state()["nowPlaying"] == "Take It On The Run · REO Speedwagon",
+             "SiriusXM plays 80s on 8")
+    host.settle(.5)
+    channel = mpd_files(socket_path)[int(mpd_state(socket_path)["song"])]
+
+    def looked_up(service, query):
+        wait_for(lambda: host.state()["lookup"] == service and host.state()["query"] == query
+                 and not host.state()["searching"], service + " looks up " + query)
+        return host.state()
+
+    def still_on_channel(label):
+        st = mpd_state(socket_path)
+        check(host.state()["sxmMode"] and st["state"] == "play" and mpd_files(socket_path)[int(st["song"])] == channel,
+              label, failures)
+
+    check(host.call("clickPanel", "playingTitle") == "ok", "the station's song title can be clicked", failures)
+    s = looked_up("apple", "Take It On The Run REO Speedwagon")
+    check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == "song:Take It On The Run"
+          and "APPLE MUSIC · SONGS" in s["sections"],
+          "the lookup finds the song in Apple Music, the cursor on it: " + ", ".join(s["rows"][:4]), failures)
+    still_on_channel("the channel plays on while you look")
+    host.grab(output / "lookup-sxm.png")
+    host.call("press", "a")
+    wait_for(lambda: bridge_requests("/v1/play") and bridge_requests("/v1/play")[-1][2].get("mode") == "add", "a adds")
+    check(bridge_requests("/v1/play")[-1][2]["items"][0]["kind"] == "song",
+          "a adds the song to Apple Music's queue: " + json.dumps(bridge_requests("/v1/play")[-1][2]), failures)
+    still_on_channel("and the channel still plays")
+    host.call("press", "Escape")
+    wait_for(lambda: host.state()["query"] == "" and host.state()["lookup"] == "", "Esc ends the lookup")
+    check(host.state()["rows"][0].startswith("channel:"), "Esc comes back to the channels", failures)
+
+    host.call("press", "O")
+    s = looked_up("apple", "REO Speedwagon")
+    check(s["rows"][s["cursor"]] == "artist:REO Speedwagon", "O looks up the artist, the cursor on it", failures)
+    host.call("press", "Escape")
+    wait_for(lambda: host.state()["lookup"] == "", "Esc ends it")
+
+    # Enter on the song: it plays on Apple Music, which becomes the source.
+    host.call("clickPanel", "playingTitle")
+    looked_up("apple", "Take It On The Run REO Speedwagon")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["appleMode"], "Apple Music becomes the source")
+    play = bridge_requests("/v1/play")[-1][2]
+    check(play["mode"] == "play" and play["items"][0]["kind"] == "song", "Enter plays the song on Apple Music: " + json.dumps(play), failures)
+    wait_for(lambda: host.state()["nowPlaying"].startswith("Take It On The Run"), "Apple Music plays it")
+    check(host.state()["lookup"] == "" and host.state()["query"] == "", "the lookup is over", failures)
+
+    # The setting: Spotify.
+    host.call("setSetting", "lookup", "Spotify", "false")
+    host.call("setSource", "sxm")
+    wait_for(lambda: host.state()["sxmMode"] and host.state()["nowPlaying"].startswith("Take It On The Run"), "back on SiriusXM")
+    host.settle(.5)
+    host.call("clickPanel", "playingArtist")
+    s = looked_up("spotify", "REO Speedwagon")
+    check(any(x.startswith("SPOTIFY ·") for x in s["sections"]), "with the setting on Spotify, Spotify: " + ", ".join(x for x in s["sections"] if x), failures)
+    host.call("press", "Escape")
+    host.call("setSetting", "lookup", "Apple Music", "false")
+    to_source(host, "local")
+    BRIDGE["config"].unlink()
+
+
 def seeks(command_log):
     return sum(1 for line in command_log.read_text().splitlines() if line.startswith("seekcur"))
 
@@ -2772,8 +2845,10 @@ def teardown_scenario(host, socket_path, failures):
     for QML warnings at the end of the run catches it."""
     url = f"http://127.0.0.1:{BRIDGE['port']}"
     BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
-    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    # Opening reads it (after late-config's folder dance, whether Quickshell
+    # still watches the file is a race).
     host.call("open")
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
     to_source(host, "apple")
     wait_for(lambda: host.state()["appleReady"], "Apple Music mode")
     host.settle(1)
@@ -3214,6 +3289,7 @@ def main():
                             elif name == "radio-tuning": radio_tuning_scenario(host, socket_path, failures)
                             elif name == "info": info_scenario(host, output, socket_path, failures)
                             elif name == "now-playing": now_playing_scenario(host, output, socket_path, failures)
+                            elif name == "lookup": lookup_scenario(host, output, socket_path, failures)
                             elif name == "teardown": teardown_scenario(host, socket_path, failures)
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
                             elif name == "late-config": late_config_scenario(host, failures)
