@@ -18,7 +18,8 @@ skill is the order to go in, and what to watch out for.
 the user wants, then goes through each step below, checking first and asking
 before each change. It needs a real terminal (gum prompts), so suggest the user
 run it in one of their own; it can't run from Claude's shell. It can be run
-again any time. Then run `tools/omarock-doctor` and help with whatever is left,
+again any time, and `./install --uninstall` takes everything off again, asking
+before each piece. Then run `tools/omarock-doctor` and help with whatever is left,
 using the steps below.
 
 ## Ground rules

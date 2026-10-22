@@ -3,13 +3,16 @@
 # hashes and names (never contents): mpd.conf, the user units and drop-ins,
 # omarock's config files, the bus, the installed services, omarock's bar
 # settings, ufw's rules and the plugin's commit. Run it before and after a
-# run, in a test VM, and diff: a second run of ./install should change nothing.
+# run, in a test VM, and diff: a second run of ./install should change nothing,
+# and ./install --uninstall should take it back to before the install.
 cd ~ || exit 1
 {
   sha256sum .config/mpd/mpd.conf
   find .config/systemd/user .config/omarock .config/pipewire .local/share/omarock .local/lib -type f \
     -not -path '*/sxm-venv/*' -not -name '*.pyc' -print0 2>/dev/null | sort -z | xargs -0 sha256sum
   find .config/systemd/user -type l -printf '%p -> %l\n' | sort
+  # Soloist's sign-in and cache change as it runs: names only, top level.
+  find .local/share/omarock-soloist .cache/omarock-soloist -maxdepth 1 2>/dev/null | sort
   ls .config/mpd
   python3 -I -c '
 import json

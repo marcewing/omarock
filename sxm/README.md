@@ -62,6 +62,8 @@ sees the change too.
 
 ## Remove it
 
+`./install --uninstall` does this, asking first. By hand:
+
 ```bash
 omarchy bar set marc.omarock siriusXM false --json
 systemctl --user disable --now omarock-sxm

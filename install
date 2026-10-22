@@ -6,7 +6,8 @@
 # every command it runs is shown. Run it again whenever you like: what's done
 # is skipped, and a source can be added later.
 #
-#   ./install            from a clone of omarock, in a terminal on the desktop
+#   ./install              from a clone of omarock, in a terminal on the desktop
+#   ./install --uninstall  take omarock off again, a piece at a time, asking first
 #   ./install --help
 #
 # On a Mac, ./install sets up the Apple Music bridge instead (bridge/install).
@@ -18,19 +19,24 @@
 # For tests, OMAROCK_INSTALL_ANSWERS=FILE answers the prompts from FILE, without
 # gum: a line per prompt, `TEXT=ANSWER`, where TEXT is part of the prompt and
 # ANSWER is y or n, a choice's key, comma-separated keys, or text. Waits are
-# cut to 20 s.
+# cut to 20 s, and a prompt asked 5 times (a retry its answer can't end) stops
+# the run.
 set -uo pipefail
 
 # Before anything bash 4: a Mac's own bash is 3.2.
 [[ $(uname) == Darwin ]] && exec "$(dirname "$0")/bridge/install" ${1+"$@"}
 
 repo=$(cd "$(dirname "$0")" && pwd)
-plugin_dir=$HOME/.config/omarchy/plugins/marc.omarock
+plugin_id=$(jq -r .id "$repo/manifest.json" 2>/dev/null)
+plugin_dir=$HOME/.config/omarchy/plugins/$plugin_id
 shelljson=$HOME/.config/omarchy/shell.json
 config=$HOME/.config/omarock
 units=$HOME/.config/systemd/user
 share=$HOME/.local/share/omarock
 answers=${OMAROCK_INSTALL_ANSWERS:-}
+asked=""          # with answers: a file of the prompts answered so far
+[[ -n $answers ]] && asked=$(mktemp -t omarock-install.XXXXXX)
+again=./install   # what to run to carry on, after a stop
 
 bold=$'\e[1m' dim=$'\e[2m' reset=$'\e[0m' green=$'\e[32m' red=$'\e[31m' yellow=$'\e[33m'
 ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; }
@@ -54,7 +60,7 @@ run() {
 # Ctrl-C or Esc at a prompt. The prompts run in $(…), so this goes to stderr,
 # and the caller exits (`|| exit 1`).
 stopped() {
-  printf '\n%sStopped.%s Run ./install again to carry on from here.\n' "$bold" "$reset" >&2
+  printf '\n%sStopped.%s Run %s again to carry on from here.\n' "$bold" "$reset" "$again" >&2
   exit 1
 }
 
@@ -65,6 +71,13 @@ stopped() {
 # come only sometimes (mpd still reading the music, say).
 answer() {  # PROMPT [SHOWN]: the prompt's answer from the file, logged
   local key value
+  # The same prompt again and again is a retry the file's answer never gets out of.
+  if (($(grep -cxF -- "$1" "$asked") >= 5)); then
+    echo "install: asked 5 times, giving up: $1" >&2
+    kill -TERM $$
+    exit 3
+  fi
+  printf '%s\n' "$1" >>"$asked"
   while IFS='=' read -r key value; do
     [[ -n $key && $1 == *"$key"* ]] || continue
     printf '  ? %s %s%s%s\n' "$1" "$dim" "${2:-$value}" "$reset" >&2
@@ -157,14 +170,14 @@ wait_until() {
 
 # setting KEY DEFAULT: omarock's setting, from its entry in Omarchy's shell.json.
 setting() {
-  python3 -I - "$shelljson" "$1" "$2" <<'PY'
+  python3 -I - "$shelljson" "$plugin_id" "$1" "$2" <<'PY'
 import json, sys
-path, key, default = sys.argv[1:]
+path, plugin, key, default = sys.argv[1:]
 try:
     d = json.load(open(path))
     for items in (d.get("bar", {}).get("layout", {}) or {}).values():
         for it in items:
-            if isinstance(it, dict) and it.get("id") == "marc.omarock" and key in it:
+            if isinstance(it, dict) and it.get("id") == plugin and key in it:
                 v = it[key]
                 print(str(v).lower() if isinstance(v, bool) else v)
                 sys.exit(0)
@@ -417,7 +430,7 @@ step_mpd() {
 loaded_since() {  # TIME [VERSION]: the shell has logged omarock (that version) loading since TIME
   journalctl --user --since "@$1" --no-pager 2>/dev/null | grep -q "omarock ${2:-.*} loaded"
 }
-plugin_known() { omarchy plugin list --json 2>/dev/null | jq -e 'any(.[]; .id == "marc.omarock")' >/dev/null; }
+plugin_known() { omarchy plugin list --json 2>/dev/null | jq -e --arg id "$plugin_id" 'any(.[]; .id == $id)' >/dev/null; }
 
 step_plugin() {
   step "The bar plugin"
@@ -428,7 +441,7 @@ step_plugin() {
     ok "omarock $installed is installed ($plugin_dir)"
     if newer "$here" "$installed"; then
       if confirm "This clone has omarock $here. Update the plugin?"; then
-        run omarchy plugin update marc.omarock --yes
+        run omarchy plugin update "$plugin_id" --yes
         installed=$(manifest_version "$plugin_dir/manifest.json")
         if [[ $installed != "$here" ]]; then
           bad "the plugin is still $installed: its source ($(git -C "$plugin_dir" remote get-url origin 2>/dev/null)) didn't bring $here"
@@ -446,8 +459,8 @@ step_plugin() {
         fi
       fi
     fi
-    if ! grep -q '"marc.omarock"' "$shelljson" 2>/dev/null; then
-      confirm "omarock isn't on the bar. Put it there?" && run omarchy plugin enable marc.omarock
+    if ! grep -q "\"$plugin_id\"" "$shelljson" 2>/dev/null; then
+      confirm "omarock isn't on the bar. Put it there?" && run omarchy plugin enable "$plugin_id"
     fi
     return
   fi
@@ -455,7 +468,7 @@ step_plugin() {
   # a clone with no remote gives its own folder.
   src=$(git -C "$repo" remote get-url origin 2>/dev/null)
   [[ -z $src || $src == /* ]] && src="file://$repo"
-  explain "omarock is added from $src, as Omarchy adds any plugin. Later, omarchy plugin update marc.omarock updates it."
+  explain "omarock is added from $src, as Omarchy adds any plugin. Later, omarchy plugin update $plugin_id updates it."
   section=$(choose "Where on the bar?" left left "On the left" center "In the middle" right "On the right") || exit 1
   confirm "Add omarock to the bar?" || stopped
   # omarock's own folder, before omarock loads: it watches the files there,
@@ -464,7 +477,7 @@ step_plugin() {
   t0=$(date +%s)
   run omarchy plugin add "$src" --yes || stopped
   wait_until "Waiting for Omarchy to find it…" 15 plugin_known
-  run omarchy plugin enable marc.omarock --section "$section" || stopped
+  run omarchy plugin enable "$plugin_id" --section "$section" || stopped
   if wait_until "Waiting for the bar to load omarock…" 30 loaded_since "$t0" "$here"; then
     ok "omarock $here is on the bar"
   else
@@ -573,7 +586,7 @@ cleanup_firewall() {
 }
 # However the installer ends (done, stopped, Ctrl-C during a command, the
 # terminal closed), the pairing's firewall rules come out again.
-trap cleanup_firewall EXIT
+trap 'cleanup_firewall; [[ -z $asked ]] || rm -f "$asked"' EXIT
 trap 'exit 130' INT
 trap 'exit 129' HUP
 trap 'exit 143' TERM
@@ -844,9 +857,9 @@ set_setting() {  # KEY JSON: omarock's setting, through Omarchy's bar
   now=$(setting "$1" "")
   [[ $now == "$(jq -r 'if type == "string" then . else tostring end' <<<"$2")" ]] && return 0
   if jq -e 'type == "string"' >/dev/null <<<"$2"; then
-    run omarchy bar set marc.omarock "$1" "$(jq -r . <<<"$2")" >/dev/null
+    run omarchy bar set "$plugin_id" "$1" "$(jq -r . <<<"$2")" >/dev/null
   else
-    run omarchy bar set marc.omarock "$1" "$2" --json >/dev/null
+    run omarchy bar set "$plugin_id" "$1" "$2" --json >/dev/null
   fi
 }
 
@@ -879,8 +892,268 @@ step_switches() {
   explain "Change these any time in omarock's settings: press , in the panel, or the gear in the expanded view."
 }
 
+# ---- Taking it off: ./install --uninstall ----
+
+# What omarock set up, in reverse: the plugin, the services, the patches, the
+# bus, then its changes to mpd and its own files. Each step shows what it
+# removes and asks first. mpd, its packages, the music and playlists stay.
+
+present() { local p; for p; do [[ -e $p || -L $p ]] && printf '%s\n' "$p"; done; }
+listing() { local p; for p; do printf '    %s\n' "${p/#"$HOME"/\~}"; done; }
+stop_units() {  # UNIT...: stop and disable those that are installed
+  local u have=()
+  for u; do [[ -f $units/$u.service ]] && have+=("$u.service"); done
+  ((${#have[@]} == 0)) || run systemctl --user disable --now "${have[@]}"
+}
+mpd_back() {  # after a restart: mpd answers again
+  local i
+  for ((i = 0; i < 40; i++)); do mpc status >/dev/null 2>&1 && break; sleep 0.5; done
+  if mpc status >/dev/null 2>&1; then ok "mpd runs"; else bad "mpd doesn't answer: journalctl --user -u mpd"; fi
+}
+
+un_plugin() {
+  [[ -d $plugin_dir ]] || grep -q "\"$plugin_id\"" "$shelljson" 2>/dev/null || return 0
+  step "The bar plugin"
+  explain "Omarchy's own remove takes omarock off the bar, with its settings there, and deletes $plugin_dir."
+  confirm "Remove the omarock plugin?" || return 0
+  run omarchy plugin remove "$plugin_id" --yes
+  if [[ -d $plugin_dir ]]; then bad "$plugin_dir is still there"; else ok "omarock is off the bar"; fi
+}
+
+un_spotify() {
+  local paths
+  mapfile -t paths < <(present "$units/omarock-spotify.service" "$units/omarock-soloist.service" "$share/spotify" \
+    "$HOME/.local/lib/omarock-soloist" "$HOME/.local/share/omarock-soloist" "$HOME/.cache/omarock-soloist")
+  ((${#paths[@]})) || return 0
+  step "Spotify"
+  explain "This stops omarock-spotify and Soloist, and deletes them, with Soloist's sign-in and cache:"
+  listing "${paths[@]}"
+  confirm "Remove Spotify's services?" || return 0
+  stop_units omarock-spotify omarock-soloist
+  run rm -rf "${paths[@]}"
+  run systemctl --user daemon-reload
+  ok "Spotify's services are gone"
+  note "your developer app is still in Spotify's dashboard (developer.spotify.com): delete it there if you like"
+}
+
+un_sxm() {
+  local paths
+  mapfile -t paths < <(present "$units/omarock-sxm.service" "$share/sxm" "$share/sxm-venv")
+  ((${#paths[@]})) || return 0
+  step "SiriusXM"
+  explain "This stops omarock-sxm and deletes it:"
+  listing "${paths[@]}"
+  confirm "Remove the SiriusXM service?" || return 0
+  stop_units omarock-sxm
+  run rm -rf "${paths[@]}"
+  run systemctl --user daemon-reload
+  ok "the SiriusXM service is gone"
+}
+
+un_patches() {
+  local flac mpris
+  mapfile -t flac < <(present "$units/mpd.service.d/omarock-flac.conf" "$HOME/.local/lib/omarock-flac")
+  mapfile -t mpris < <(present "$units/mpd-mpris.service.d/omarock-mpris.conf" "$HOME/.local/lib/omarock-mpris")
+  ((${#flac[@]} + ${#mpris[@]})) || return 0
+  step "The Apple Music patches"
+  if ((${#flac[@]})); then
+    explain "mpd uses omarock's patched libFLAC. This deletes it and the drop-in that loads it, and restarts mpd with Arch's own (anything playing stops for a moment):"
+    listing "${flac[@]}"
+    if confirm "Remove the patched libFLAC, and restart mpd?"; then
+      run rm -rf "${flac[@]}"
+      run systemctl --user daemon-reload
+      run systemctl --user restart mpd
+      mpd_back
+    fi
+  fi
+  if ((${#mpris[@]})); then
+    explain "mpd-mpris runs omarock's patched build. This deletes it and its drop-in, and restarts Arch's own:"
+    listing "${mpris[@]}"
+    if confirm "Remove the patched mpd-mpris?"; then
+      run rm -rf "${mpris[@]}"
+      run systemctl --user daemon-reload
+      run systemctl --user restart mpd-mpris
+      ok "mpd-mpris is Arch's own again"
+    fi
+  fi
+}
+
+# mpd_conf_undo CONF show|write, for the bus: omarock's audio_output goes, and
+# the outputs the installer commented out come back. "show" prints what comes
+# back; "write" writes CONF.new.
+mpd_conf_undo() {
+  python3 -I - "$@" <<'PY'
+import re, sys
+path, mode = sys.argv[1:]
+lines = open(path).read().split("\n")
+out, back, i = [], [], 0
+while i < len(lines):
+    line = lines[i]
+    if re.match(r'\s*audio_output\b', line):
+        j = i
+        while j < len(lines) - 1 and not re.match(r'\s*\}', lines[j]):
+            j += 1
+        if any(re.match(r'\s*target\s+"omarock"', l) for l in lines[i:j + 1]):
+            if out and not out[-1].strip():
+                out.pop()
+            i = j + 1
+            continue
+    if line.startswith("# omarock: mpd plays into the bus now"):
+        i += 1
+        while i < len(lines) and lines[i].startswith("# "):
+            out.append(lines[i][2:])
+            back.append(lines[i][2:])
+            i += 1
+            if re.match(r'\s*\}', back[-1]):
+                break
+        continue
+    out.append(line)
+    i += 1
+if mode == "show":
+    print("\n".join(back))
+else:
+    open(path + ".new", "w").write("\n".join(out).rstrip("\n") + "\n")
+PY
+}
+
+un_bus() {
+  local conf paths block=false back
+  conf=$(mpd_conf)
+  grep -qE '^[[:space:]]*target[[:space:]]+"omarock"' "$conf" 2>/dev/null && block=true
+  mapfile -t paths < <(present "$units/omarock-bus.service" "$units/omarock-guard.service" "$share/audio" \
+    "$HOME/.config/pipewire/client.conf.d/50-omarock-players.conf" "$config/audio-output")
+  $block || ((${#paths[@]})) || return 0
+  step "The audio bus"
+  if $block; then
+    back=$(mpd_conf_undo "$conf" show)
+    explain "mpd plays into the bus. This takes omarock's audio_output out of $conf, and restarts mpd."
+    if [[ -n $back ]]; then
+      explain "The output mpd had before comes back:"
+      printf '    %s\n' "$back"
+    else
+      explain "No output was set aside when the bus went in, so mpd will use its default (PipeWire's default output). Check that's where you want music to play."
+    fi
+  fi
+  if ((${#paths[@]})); then
+    explain "The bus and its guard stop, and these go:"
+    listing "${paths[@]}"
+  fi
+  confirm "Remove the audio bus$($block && echo ", and restart mpd")?" || return 0
+  if $block; then
+    backup "$conf"
+    mpd_conf_undo "$conf" write && mv "$conf.new" "$conf" && ok "wrote $conf"
+  fi
+  stop_units omarock-bus omarock-guard
+  ((${#paths[@]} == 0)) || run rm -rf "${paths[@]}"
+  run systemctl --user daemon-reload
+  if $block; then
+    run systemctl --user restart mpd
+    mpd_back
+    mpc outputs 2>/dev/null | grep '^Output' | sed 's/^/    /'
+  fi
+  ok "the bus is gone; mpd's own volume applies again"
+}
+
+# The unix socket step_mpd added to mpd.conf: its comment and bind_to_address
+# lines. CONF show|write, as mpd_conf_undo.
+mpd_socket_undo() {
+  python3 -I - "$@" <<'PY'
+import re, sys
+path, mode = sys.argv[1:]
+lines = open(path).read().split("\n")
+out, gone, i = [], [], 0
+while i < len(lines):
+    if lines[i].startswith("# omarock: a unix socket"):
+        if out and not out[-1].strip():
+            out.pop()
+        gone.append(lines[i])
+        i += 1
+        while i < len(lines) and re.match(r'\s*bind_to_address\s+"((/|~/)\S*mpd/socket|localhost)"', lines[i]):
+            gone.append(lines[i])
+            i += 1
+        continue
+    out.append(lines[i])
+    i += 1
+if mode == "show":
+    print("\n".join(gone))
+else:
+    open(path + ".new", "w").write("\n".join(out).rstrip("\n") + "\n")
+PY
+}
+
+un_mpd() {
+  local conf gone dropins=() f
+  conf=$(mpd_conf)
+  gone=$([[ -f $conf ]] && mpd_socket_undo "$conf" show)
+  for f in "$units/mpd.service.d/runtime-dir.conf" "$units/mpd-mpris.service.d/follow-mpd.conf"; do
+    head -1 "$f" 2>/dev/null | grep -q '^# omarock:' && dropins+=("$f")
+  done
+  [[ -n $gone ]] || ((${#dropins[@]})) || return 0
+  step "omarock's changes to mpd"
+  explain "omarock also set mpd up for itself. Other mpd clients can use these too, so they stay unless you say otherwise."
+  if [[ -n $gone ]]; then explain "In $conf, mpd's unix socket:"; sed 's/^/    /' <<<"$gone"; fi
+  if ((${#dropins[@]})); then explain "Drop-ins (the socket's folder, and mpd-mpris following mpd):"; listing "${dropins[@]}"; fi
+  confirm "Take these out too, and restart mpd?" no || { ok "kept them"; return 0; }
+  if [[ -n $gone ]]; then
+    backup "$conf"
+    mpd_socket_undo "$conf" write && mv "$conf.new" "$conf" && ok "wrote $conf"
+  fi
+  ((${#dropins[@]} == 0)) || run rm -f "${dropins[@]}"
+  rmdir "$units/mpd.service.d" "$units/mpd-mpris.service.d" 2>/dev/null
+  run systemctl --user daemon-reload
+  run systemctl --user restart mpd
+  unset MPD_HOST
+  mpd_back
+  # Without follow-mpd.conf, mpd-mpris dies with mpd's restart and stays down.
+  if systemctl --user is-enabled -q mpd-mpris 2>/dev/null; then run systemctl --user restart mpd-mpris; fi
+  if [[ -n $gone ]] && ! grep -q '^[[:space:]]*bind_to_address' "$conf"; then
+    note "mpd listens where it does by default now: port 6600 on every network interface, and its socket"
+  fi
+}
+
+un_config() {
+  local files
+  [[ -d $config ]] || return 0
+  step "omarock's own files"
+  mapfile -t files < <(find "$config" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+  explain "$config holds omarock's settings, and the keys and sign-ins you gave it:"
+  if ((${#files[@]})); then printf '    %s\n' "${files[@]}"; else explain "(it's empty)"; fi
+  if confirm "Delete it, keys and sign-ins included?" no; then
+    run rm -rf "$config"
+    ok "deleted"
+  else
+    ok "kept $config"
+  fi
+}
+
+uninstall() {
+  again="./install --uninstall"
+  printf '\n%sTaking omarock off this machine%s\n\n' "$bold" "$reset"
+  explain "This goes through what omarock set up, in reverse: the bar plugin, the services, the patches, the audio bus, then its changes to mpd and its own files. It shows what each step removes, and asks first. mpd stays, with your music, its database and playlists."
+  # mpc reaches mpd where omarock did, while that's still there.
+  mpd_socket=$(setting socket "")
+  [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
+  [[ -S $mpd_socket ]] && export MPD_HOST=$mpd_socket
+  local before=$step_no backups
+  un_plugin
+  un_spotify
+  un_sxm
+  un_patches
+  un_bus
+  un_mpd
+  un_config
+  [[ -d $share ]] && rmdir "$share" 2>/dev/null
+  ((step_no > before)) || ok "nothing of omarock's is set up here"
+  printf '\n%sWhat stays%s\n' "$bold" "$reset"
+  explain "mpd, mpc and mpd-mpris (and ncmpcpp, if it came with them), with mpd's config, database and playlists. omarock's radio favourites are the mpd playlist \"Radio\"."
+  mapfile -t backups < <(compgen -G "$(mpd_conf).before-omarock-*")
+  if ((${#backups[@]})); then explain "Copies of mpd.conf from before each change:"; listing "${backups[@]}"; fi
+  explain "This clone, $repo: delete it when you're done. On a Mac, the Apple Music bridge comes off with ./install --uninstall in its clone there (bridge/README.md)."
+}
+
 main() {
   preflight "$@"
+  if [[ ${1:-} == --uninstall ]]; then uninstall; return; fi
   welcome
   choose_sources
   step_mpd

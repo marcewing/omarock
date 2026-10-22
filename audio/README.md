@@ -71,6 +71,9 @@ half-done edit can't change where the sound goes on the next restart.
 
 ## Remove it, in reverse
 
+`./install --uninstall` does this, asking first, and puts back the output mpd
+had before. By hand:
+
 1. Take omarock's `audio_output` block out of mpd.conf (put your old one back, if
    you had one), and `systemctl --user restart mpd`.
 2. Then:

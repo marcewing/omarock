@@ -33,7 +33,7 @@ change, which the patched library doesn't need, and the reconnect is a short
 stutter.
 
 **Remove:** delete the drop-in, `systemctl --user daemon-reload && systemctl --user
-restart mpd`, and switch `appleRejoin` back on.
+restart mpd`, and switch `appleRejoin` back on. (`./install --uninstall` offers this.)
 
 ## mpd-mpris
 
@@ -46,7 +46,7 @@ systemctl --user daemon-reload && systemctl --user restart mpd-mpris
 ```
 
 **Remove:** delete the drop-in, then `systemctl --user daemon-reload && systemctl
---user restart mpd-mpris`.
+--user restart mpd-mpris`. (`./install --uninstall` offers this.)
 
 ## The mpd patch
 

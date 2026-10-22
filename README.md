@@ -177,8 +177,11 @@ omarchy restart shell        # the shell's own reload keeps running the old code
 The services (Spotify's, SiriusXM's, the audio bus) update from your clone:
 `git pull`, then `./install` again, which offers each update it finds.
 
-`omarchy plugin remove marc.omarock` removes it. Each optional service's guide
-says how to remove it.
+`./install --uninstall` takes omarock off again: the plugin, each service, the
+patches and the audio bus (mpd gets its old output back). It shows what each
+step removes and asks first, and leaves mpd, your music and playlists alone.
+`omarchy plugin remove marc.omarock` alone removes only the plugin; the services
+stay until you remove them too (each guide says how, by hand).
 
 ## Using omarock
 

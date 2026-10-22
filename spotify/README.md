@@ -99,6 +99,8 @@ Run the tools from your omarock clone: the plugin's folder,
 
 ## Remove it
 
+`./install --uninstall` does this, asking first. By hand:
+
 ```bash
 omarchy bar set marc.omarock spotify false --json
 systemctl --user disable --now omarock-spotify omarock-soloist

@@ -86,12 +86,18 @@ Nothing touches your mpd's queue or playlists, your PipeWire, or the live bar.
 **The installer** changes the system it runs on, so test it in a throwaway Omarchy
 VM, never on your own desktop. `OMAROCK_INSTALL_ANSWERS=FILE ./install` runs it
 without gum, answering each prompt from FILE: a line per prompt, `TEXT=ANSWER`,
-where TEXT is part of the prompt. Waits are cut to 20 s.
+where TEXT is part of the prompt. Waits are cut to 20 s, and a prompt asked
+5 times (a retry its answer can't end) stops the run.
 - **Through gum:** `tools/capture/ptydrive.py` runs it in a terminal of its own
   (`ssh -tt` into the VM, say) and presses keys as each prompt shows up.
 - **Idempotence:** run `tools/capture/install-fingerprint` before and after a
   run, and diff the two. A second run on a finished install must change nothing,
   and run no commands. Only unfinished or optional steps may ask again.
+- **Uninstall:** fingerprint a machine before the install, then after
+  `./install --uninstall`, answering yes throughout: the two must match, apart
+  from what the uninstaller says stays (mpd's packages and config lines,
+  its backups). A second `--uninstall` must find nothing. Then `./install` again,
+  to show it comes back.
 
 Offscreen Quickshell has no layer shell, so the harness swaps in
 `tools/capture/KeyboardPanel.qml`. It draws the same card in an ordinary window,
