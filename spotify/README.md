@@ -17,8 +17,8 @@ media keys (MPRIS) ──┘          │                                   │
 - **Spotify Premium.**
 - **A Spotify developer app,** free, at
   [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), made
-  with your own account. omarock uses its Client ID to search, browse and read
-  your library through Spotify's Web API.
+  with your own account. omarock uses its Client ID to search, browse, read
+  your library and save songs and albums to it, through Spotify's Web API.
 - **A Soloist API key** for the player, from the same dashboard.
 - **omarock's audio bus** ([audio/README.md](../audio/README.md)): Soloist plays
   into it.
@@ -118,7 +118,7 @@ Then delete the app in Spotify's developer dashboard.
 | File | What it does |
 | --- | --- |
 | `omarock-soloist.service` | Soloist, as a Connect speaker named after the machine, playing into the bus |
-| `omarock-spotify.py`, `.service` | The service on 127.0.0.1:8730: status (a long poll), search, albums, artists, playlists, info, transport, and Spotify's sign-in |
+| `omarock-spotify.py`, `.service` | The service on 127.0.0.1:8730: status (a long poll), search, albums, artists, playlists, info, transport, saving to your library (`/me/library`), and Spotify's sign-in |
 | `spotify_web.py` | The Web API client (PKCE: no client secret). Also a CLI: `spotify_web.py get /me/player/devices` |
 | `soloist_ws.py` | A small WebSocket client for Soloist's API |
 | `spotify_mpris.py` | Spotify as an MPRIS player ("Spotify"), so the media keys work on it |

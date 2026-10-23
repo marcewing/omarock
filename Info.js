@@ -288,10 +288,13 @@ function yesNo(value) {
 }
 
 // Whether an Apple Music item is in the library, for the top of the card:
-// [text, kind] where kind is "yes", "no", "checking" or "unknown".
+// [text, kind] where kind is "yes", "no", "checking" or "unknown". What the
+// service says outranks the row's source: a Spotify song taken out of the
+// library still has a library row's source.
 function libraryStatus(item, extra) {
-  if (item.source === "library" || extra.inLibrary === true) return ["In your library", "yes"]
+  if (extra.inLibrary === true) return ["In your library", "yes"]
   if (extra.inLibrary === false) return ["Not in your library", "no"]
+  if (item.source === "library") return ["In your library", "yes"]
   if (extra.checking) return ["Checking your library…", "checking"]
   return ["Can't tell if it's in your library", "unknown"]
 }

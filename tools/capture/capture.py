@@ -260,6 +260,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     radio_scenario(host, output, socket_path, failures)
     radio_tuning_scenario(host, socket_path, failures)
     info_scenario(host, output, socket_path, failures)
+    library_scenario(host, output, socket_path, failures)
     list_tuning_scenario(host, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
@@ -1732,6 +1733,134 @@ def now_playing_scenario(host, output, socket_path, failures):
     back("← from that artist comes back to the queue")
     fake_bridge_info(False, "bare")
     fake_bridge_info(False)
+    to_source(host, "local")
+    BRIDGE["config"].unlink()
+
+
+def library_scenario(host, output, socket_path, failures):
+    """The now playing card's Add to library and Add to playlist, L on a row,
+    and the info card's link. Local music: Add to playlist only. Apple Music
+    adds and can't take out; an older bridge says to update it. Spotify adds
+    and takes out again."""
+    def reopen_panel():
+        host.call("close")
+        host.settle(.3)
+        host.call("open")
+        wait_for(lambda: host.state()["opened"], "open")
+        host.settle(.5)
+
+    def library_said(want, label):
+        wait_for(lambda: host.state()["playingLibrary"] == want, label)
+
+    reopen_panel()
+    if not mpd_query(socket_path, "currentsong"):
+        mpd_client(socket_path, "play")
+        wait_for(lambda: mpd_query(socket_path, "currentsong"), "a local song")
+        host.settle(.5)
+    song = dict(line.split(": ", 1) for line in mpd_query(socket_path, "currentsong") if ": " in line)
+    s = host.state()
+    check(s["playingLibrary"] == "" and s["canAddPlayingToPlaylist"],
+          "local music: the card offers Add to playlist, not Add to library", failures)
+    check(host.call("clickPanel", "playingLibrary") == "not shown", "no Add to library link on local music", failures)
+    check(host.call("clickPanel", "playingAddToPlaylist") == "ok", "the card's Add to playlist can be clicked", failures)
+    wait_for(lambda: host.state()["pickerOpen"], "the picker")
+    check(host.state()["pickerTitle"] == song.get("Title", ""), "it's for the song playing: " + host.state()["pickerTitle"], failures)
+    host.call("typeKeys", "Card Picks")
+    host.settle(.3)
+    host.call("press", "Return")
+    picked(host, socket_path, "Card Picks", 1)
+    check(stored(socket_path, "Card Picks") == [song["file"]], "the song playing is in the new playlist", failures)
+    mpd_client(socket_path, 'rm "Card Picks"')
+
+    # Apple Music: the song playing isn't in the library.
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    fake_bridge_info(True, "library")
+    to_source(host, "apple")
+    wait_for(lambda: host.state()["appleReady"] and host.state()["nowPlaying"] != "", "Apple Music playing")
+    reopen_panel()
+    song = host.state()["bridgeSong"]
+    library_said("󰐕 Add to library", "the card offers Add to library")
+    host.grab(output / "library-card.png")
+    check(host.call("clickPanel", "playingLibrary") == "ok", "Add to library can be clicked", failures)
+    library_said("󰄬 In your library", "the card says it's in your library")
+    adds = bridge_requests("/v1/library/add")
+    check(adds and adds[-1][2] == {"items": [{"kind": "song", "id": song["id"], "source": "catalog"}]},
+          "it asks the bridge to add the song: " + json.dumps(adds[-1:]), failures)
+    wait_for(lambda: host.state()["notice"] == f"Added {song['title']} to your Apple Music library", "says so")
+    # Apple Music's API can't take it out: L says it's there already.
+    host.call("press", "L")
+    wait_for(lambda: host.state()["notice"] == song["title"] + " is in your library already", "L: there already")
+    check(len(bridge_requests("/v1/library/add")) == len(adds), "and asks nothing more", failures)
+    # The info card agrees, though the bridge took a while (the library search
+    # of an older bridge doesn't find it): what was added here counts.
+    fake_bridge_info(False)
+    host.call("press", "i")
+    card = info_card(host, "the song playing's card")
+    check(card["statusKind"] == "yes" and host.state()["infoAction"] == "",
+          "the info card: In your library, nothing to click: " + card["status"], failures)
+    host.call("press", "i")
+    fake_bridge_info(True)
+
+    # L on a search result: the album.
+    host.call("press", "/")
+    host.call("typeKeys", "workbook")
+    wait_for(lambda: host.state()["query"] == "workbook" and not host.state()["searching"], "search workbook")
+    cursor_to(host, "album:Workbook", failures)
+    host.call("press", "L")
+    wait_for(lambda: host.state()["notice"] == "Added Workbook to your Apple Music library", "L adds the album")
+    check(bridge_requests("/v1/library/add")[-1][2] == {"items": [{"kind": "album", "id": "c-al-3", "source": "catalog"}]},
+          "L asks the bridge to add the album", failures)
+    # An artist can't go in the library.
+    host.call("type", "mould")
+    wait_for(lambda: host.state()["query"] == "mould" and not host.state()["searching"], "search mould")
+    cursor_to(host, "artist:Bob Mould", failures)
+    before = len(bridge_requests("/v1/library/add"))
+    host.call("press", "L")
+    wait_for(lambda: host.state()["notice"] == "Your Apple Music library takes songs, albums and playlists", "L on an artist")
+    check(len(bridge_requests("/v1/library/add")) == before, "an artist isn't sent", failures)
+    # The info card's link, on a song not in the library.
+    cursor_to(host, "song:Sunspots", failures)
+    host.call("press", "i")
+    card = info_card(host, "Sunspots' card")
+    check(card["statusKind"] == "no" and host.state()["infoAction"] == "Add to library (L)",
+          "the info card offers Add to library: " + host.state()["infoAction"], failures)
+    host.grab(output / "library-info.png")
+    host.call("press", "L")
+    wait_for(lambda: (host.state()["info"] or {}).get("statusKind") == "yes" and not host.state()["info"]["loading"],
+             "the info card says it's in your library now")
+    check(host.state()["infoAction"] == "", "and offers nothing more", failures)
+    host.call("press", "i")
+    # An older bridge: the panel says to update it.
+    fake_bridge_info(False, "library")
+    cursor_to(host, "song:See a Little Light", failures)
+    host.call("press", "L")
+    wait_for(lambda: host.state()["notice"] == "To add to your library, update the bridge on the Mac (./install there)",
+             "an older bridge: update it")
+    fake_bridge_info(True, "library")
+    fake_bridge_info(False)
+    host.call("press", "Escape")
+
+    # Spotify: add, then a click on In your library takes it out.
+    host.call("setSource", "spotify")
+    wait_for(lambda: host.state()["spotifyMode"] and host.state()["nowPlaying"] != "", "Spotify playing")
+    reopen_panel()
+    song = host.state()["bridgeSong"]
+    add, remove = "󰐕 Add to library", "󰄬 In your library"
+    # The song Spotify was left on may be one the (fake) library has.
+    wait_for(lambda: host.state()["playingLibrary"] in (add, remove), "Spotify's card says whether it's in your library")
+    owned = host.state()["playingLibrary"] == remove
+    item = {"items": [{"kind": "song", "id": song["id"], "source": song["source"]}]}
+    for step in range(2):
+        taking_out = owned != (step == 1)
+        host.call("clickPanel", "playingLibrary")
+        library_said(add if taking_out else remove, "Spotify: a click " + ("takes it out" if taking_out else "adds it"))
+        asked = spotify_requests("/v1/library/remove" if taking_out else "/v1/library/add")
+        check(asked and asked[-1][2] == item, "it asks omarock-spotify to " + ("take it out" if taking_out else "add it"), failures)
+        wait_for(lambda: host.state()["notice"] == (f"Took {song['title']} out of your Spotify library" if taking_out
+                                                    else f"Added {song['title']} to your Spotify library"), "says so")
+    spotify_post("/v1/fake/library", {"on": True})
     to_source(host, "local")
     BRIDGE["config"].unlink()
 
@@ -3347,6 +3476,7 @@ def main():
                             elif name == "info": info_scenario(host, output, socket_path, failures)
                             elif name == "now-playing": now_playing_scenario(host, output, socket_path, failures)
                             elif name == "lookup": lookup_scenario(host, output, socket_path, failures)
+                            elif name == "library": library_scenario(host, output, socket_path, failures)
                             elif name == "teardown": teardown_scenario(host, socket_path, failures)
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
                             elif name == "late-config": late_config_scenario(host, failures)

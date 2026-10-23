@@ -18,8 +18,11 @@ Rectangle {
   property string fontFamily: Style.font.family
   // The expanded panel: a bigger cover, and the fields kept to a readable width.
   property bool wide: false
+  // A link beside the library chip ("Add to library (L)"), "" for none.
+  property string actionText: ""
 
   signal closeRequested()
+  signal actionRequested()
 
   function scroll(dy) {
     var most = Math.max(0, flick.contentHeight - flick.height)
@@ -97,29 +100,55 @@ Rectangle {
 
       }
 
-      // In your library or not (Apple Music); in your favourites (SiriusXM, radio).
-      Rectangle {
-        id: statusChip
+      // In your library or not (Apple Music); in your favourites (SiriusXM,
+      // radio). Then, for Apple Music and Spotify, adding it (or taking it out).
+      Row {
+        spacing: Style.space(14)
         visible: !!root.info && root.info.status !== ""
-        readonly property string kind: root.info ? root.info.statusKind : ""
-        width: statusText.implicitWidth + Style.space(20)
-        height: statusText.implicitHeight + Style.space(8)
-        radius: height / 2
-        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, statusChip.kind === "yes" ? 0.16 : 0.06)
-        border.width: 1
-        border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, statusChip.kind === "yes" ? 0.5 : 0.2)
+
+        Rectangle {
+          id: statusChip
+          visible: !!root.info && root.info.status !== ""
+          readonly property string kind: root.info ? root.info.statusKind : ""
+          width: statusText.implicitWidth + Style.space(20)
+          height: statusText.implicitHeight + Style.space(8)
+          radius: height / 2
+          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, statusChip.kind === "yes" ? 0.16 : 0.06)
+          border.width: 1
+          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, statusChip.kind === "yes" ? 0.5 : 0.2)
+
+          Text {
+            id: statusText
+            objectName: "infoStatus"
+            textFormat: Text.PlainText
+            anchors.centerIn: parent
+            text: (statusChip.kind === "yes" ? "󰄬  " : statusChip.kind === "no" ? "󰅖  " : "")
+              + (root.info ? root.info.status : "")
+            color: statusChip.kind === "yes" ? root.foreground : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: statusChip.kind === "yes"
+          }
+        }
 
         Text {
-          id: statusText
-          objectName: "infoStatus"
+          objectName: "infoAction"
           textFormat: Text.PlainText
-          anchors.centerIn: parent
-          text: (statusChip.kind === "yes" ? "󰄬  " : statusChip.kind === "no" ? "󰅖  " : "")
-            + (root.info ? root.info.status : "")
-          color: statusChip.kind === "yes" ? root.foreground : root.dim
+          anchors.verticalCenter: statusChip.verticalCenter
+          visible: root.actionText !== ""
+          text: root.actionText
+          color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
-          font.bold: statusChip.kind === "yes"
+          font.underline: actionLink.containsMouse
+
+          MouseArea {
+            id: actionLink
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.actionRequested()
+          }
         }
       }
 

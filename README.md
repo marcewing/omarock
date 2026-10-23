@@ -27,7 +27,8 @@ media keys and any other mpd client always agree with it.
 - **Browse like a file manager:** → opens an artist, then one of their albums;
   ← goes back. A genre opens to its artists. Album covers throughout.
 - **From what's playing:** click the artist, the album or its cover, or the
-  genre, to open them.
+  genre, to open them. **Add to library** and **Add to playlist** are right
+  under the song.
 - **Playlists as you go:** press **A** on any song, album, artist or genre to
   add it to a playlist (mpd's own stored playlists).
 - **Everything about a song or album (`i`):** its tags, format, bitrate and
@@ -209,6 +210,15 @@ stay until you remove them too (each guide says how, by hand).
   line or the cover to open the album, on the song playing, or the genre to open
   it (`O`, `o` and `g` do the same). ← goes back to the queue. On Apple Music, a
   genre opens Apple's charts for it, when it's one of Apple's top genres.
+  Under the song, **Add to playlist** opens the playlist picker for it, and on
+  Apple Music and Spotify **Add to library** saves it to your library (`L`
+  too). On Spotify, a second click takes it out again; Apple Music's API can
+  only add, so taking it out is for the Music app.
+- **Your library (`L`):** on Apple Music or Spotify, `L` adds the song, album
+  or (Apple Music) playlist under the cursor to your library, or, with no
+  cursor, the song playing. In the info card it adds what the card shows. A
+  song added on Apple Music reaches the Mac's library through iCloud, so it
+  can take a minute to show among your albums; omarock counts it in at once.
 - **Heard it on the radio?** On SiriusXM or the radio, click the song's title or
   the artist (or `o`, `O`) to look it up in Apple Music or Spotify (the
   `lookup` setting picks), while the station plays on. Enter plays it there and

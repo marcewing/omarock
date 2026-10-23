@@ -25,6 +25,10 @@ Item {
   property bool streamed: true
   // Whether songs can be taken out of its queue (Spotify's can't).
   property bool canRemove: true
+  // Whether things can be taken out of your library (Apple Music's API can
+  // only add), and what to update when the service can't do either yet.
+  property bool canUnsave: false
+  property string libraryUpdateText: "To add to your library, update the bridge on the Mac (./install there)"
   // For the errors the panel shows.
   property string bridgeName: "The Apple Music bridge"
   property string unreachableText: "Can't reach the Apple Music bridge on the Mac"
@@ -178,14 +182,18 @@ Item {
     root.fillSongLinks()
   }
 
-  // The playing song's album and artist ids, by song key, for the songs whose
-  // status comes without them (MusicKit's queue entries often do): asked of
-  // /v1/info once a song, { albumId, artistId, source }, or null while asking.
+  // The playing song's album and artist ids, and whether it's in your library,
+  // by song key, for the songs whose status doesn't say (MusicKit's queue
+  // entries often lack the ids; older bridges never say inLibrary): asked of
+  // /v1/info once a song, { albumId, artistId, source, inLibrary }, or null
+  // while asking.
   property var songLinks: ({})
 
   function fillSongLinks() {
     var song = root.song
-    if (!song || !song.id || (song.albumId && song.artistId)) return
+    if (!song || !song.id) return
+    var known = song.source === "library" || song.inLibrary !== undefined
+    if (song.albumId && song.artistId && known) return
     var key = Apple.songKey(song)
     if (root.songLinks[key] !== undefined) return
     var asking = Object.assign({}, root.songLinks)
@@ -194,9 +202,18 @@ Item {
     root.get("/v1/info/" + song.source + "/song/" + encodeURIComponent(song.id), function(data) {
       var item = data && data.item ? data.item : {}
       var links = Object.assign({}, root.songLinks)
-      links[key] = { albumId: item.albumId || "", artistId: item.artistId || "", source: item.source || song.source }
+      links[key] = { albumId: item.albumId || "", artistId: item.artistId || "", source: item.source || song.source,
+        inLibrary: data ? data.inLibrary : undefined }
       root.songLinks = links
     })
+  }
+
+  // Add to your library (songs, albums, and Apple Music's playlists), or,
+  // where canUnsave, take out of it. callback(error), "" when done.
+  function saveToLibrary(items, save, callback) {
+    root.request("POST", save ? "/v1/library/add" : "/v1/library/remove", { items: items }, function(data, error) {
+      if (callback) callback(error === "No such endpoint." ? root.libraryUpdateText : error)
+    }, 30000)
   }
 
   // The long poll: the bridge answers at once when its status moved past

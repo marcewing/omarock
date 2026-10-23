@@ -126,9 +126,13 @@ class Bridge:
         self.shuffle, self.repeat = False, "off"
         # GET /v1/info, which older bridges lack (POST /v1/fake/info turns it on).
         self.info_route = False
-        # The status's songs without albumId and artistId, as MusicKit's queue
-        # entries often come (POST /v1/fake/bare).
+        # The status's songs without albumId, artistId and inLibrary, as an
+        # older bridge sends them (POST /v1/fake/bare).
         self.bare = False
+        # POST /v1/library/add, which older bridges lack (POST /v1/fake/library
+        # takes it away); what it added, and what Spotify's remove took out.
+        self.library_route = True
+        self.saved, self.unsaved = set(), set()
         # The library: a copy of Zen Arcade, and two playlists of songs.
         zen = dict(public(CATALOG_ALBUMS["c-al-1"]), id="l-al-1", source="library", catalogId="c-al-1")
         self.library_albums = [zen]
@@ -147,6 +151,12 @@ class Bridge:
                        "curator": "Apple Music Punk", "description": "The canon.", "artwork": art("222222"),
                        "songs": ["c-so-1", "c-so-5", "c-so-8"]},
         }
+
+    def owns(self, kind, cid):
+        """Whether the library has it: Zen Arcade, and whatever was added."""
+        if (kind, cid) in self.unsaved: return False
+        zen = CATALOG_ALBUMS["c-al-1"]
+        return (kind, cid) in self.saved or (cid in zen["tracks"] if kind == "song" else cid == "c-al-1")
 
     def changed(self):
         self.seq += 1
@@ -214,9 +224,11 @@ class Bridge:
         out = {"seq": self.seq, "state": self.state, "current": self.current, "position": round(self.position(), 2),
                "positionAt": time.time(), "queue": self.queue, "queueIndex": self.index, "queueOffset": 0,
                "queueLength": len(self.queue), "shuffle": self.shuffle, "repeat": self.repeat}
-        if self.queue and self.state != "stopped": out["song"] = self.queue[self.index]
+        if self.queue and self.state != "stopped":
+            song = self.queue[self.index]
+            out["song"] = dict(song, inLibrary=self.owns("song", song["catalogId"]))
         if self.bare and "song" in out:
-            out["song"] = {k: v for k, v in out["song"].items() if k not in ("albumId", "artistId")}
+            out["song"] = {k: v for k, v in out["song"].items() if k not in ("albumId", "artistId", "inLibrary")}
         return out
 
     def play_at(self, index, state="playing"):
@@ -261,14 +273,14 @@ class Bridge:
         if kind == "song":
             cid = iid[2:] if iid.startswith("l-") else iid
             item = SONGS[cid] if source == "catalog" else dict(SONGS[cid], id=iid, source="library")
-            mine = cid in zen["tracks"]
+            mine = self.owns("song", cid)
             library = {"id": "l-" + cid, "added": "2019-04-02T17:03:11Z", "playCount": 12, "skipCount": 1,
                        "lastPlayed": "2026-10-18T21:40:02Z", "rating": 80, "fileKind": "Apple Music AAC audio file",
                        "bitrate": 256, "sampleRate": 44100, "fileSize": 4194304, "cloud": True, "drm": True}
         elif kind == "album":
             cid = "c-al-1" if iid == "l-al-1" else iid
             item = self.album(source, iid)[0]
-            mine = cid == "c-al-1"
+            mine = self.owns("album", cid)
             library = {"id": "l-al-1", "added": "2019-04-02T17:03:11Z", "trackCount": 4, "playCount": 40,
                        "lastPlayed": "2026-10-18T21:40:02Z"}
         else:
@@ -362,6 +374,22 @@ class Handler(BaseHTTPRequestHandler):
             if method == "POST":
                 if path == "fake/info":
                     b.info_route = bool(body["on"])
+                    return {"ok": True}
+                if path == "fake/library":
+                    # And forget what was added or taken out.
+                    b.library_route = bool(body["on"])
+                    b.saved, b.unsaved = set(), set()
+                    b.changed()
+                    return {"ok": True}
+                if path in ("library/add", "library/remove"):
+                    if not b.library_route or (path == "library/remove" and not b.spotify): raise NoEndpoint()
+                    kinds = ("song", "album") if b.spotify else ("song", "album", "playlist")
+                    for item in body["items"]:
+                        if item["kind"] not in kinds: raise ValueError("can't add a " + item["kind"])
+                        key = (item["kind"], item["id"][2:] if item["id"].startswith("l-") else item["id"])
+                        (b.saved if path == "library/add" else b.unsaved).add(key)
+                        (b.unsaved if path == "library/add" else b.saved).discard(key)
+                    b.changed()
                     return {"ok": True}
                 if path == "fake/bare":
                     b.bare = bool(body["on"])

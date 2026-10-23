@@ -193,6 +193,8 @@ ShellRoot {
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
         bridgeSong: p.bridgeMode ? p.bridge.song : null, playingIds: p.bridgeMode ? p.playingIds() : null,
         lookup: p.lookupService, accounts: p.accounts,
+        playingLibrary: p.playingLibraryText, canAddPlayingToPlaylist: p.canAddPlayingToPlaylist,
+        infoAction: p.infoLibraryAction,
         confirmFolder: p.confirmTarget && p.confirmTarget.folder ? p.confirmTarget.folder : "",
         info: p.infoCard ? { service: p.infoCard.card.serviceName, kind: p.infoCard.card.kindName,
           status: p.infoCard.card.status, statusKind: p.infoCard.card.statusKind, title: p.infoCard.card.title,

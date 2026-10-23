@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 MPD_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "mpd/socket"
@@ -844,7 +844,28 @@ def post(path, parts, body):
         add_to_playlist(parts[2], uris)
         WEB.library_items(refresh=True)
         return next((p for p in WEB.library["playlists"] if p["id"] == parts[2]), {"kind": "playlist", "id": parts[2]})
+    if path in ("library/add", "library/remove"):
+        # Spotify's one library endpoint (2026) takes up to 40 URIs at a time.
+        uris = library_uris(body.get("items") or [])
+        for i in range(0, len(uris), 40):
+            status, data = spotify_web.call("PUT" if path == "library/add" else "DELETE",
+                                            "/me/library?" + urllib.parse.urlencode({"uris": ",".join(uris[i:i + 40])}))
+            if status >= 400:
+                raise ApiError(status, data)
+        with WEB.lock:
+            WEB.library = None  # read again when next asked
+        return {"ok": True}
     raise LookupError("No such endpoint.")
+
+
+def library_uris(items):
+    """Songs and albums as the URIs Spotify's library takes."""
+    if not items:
+        raise ValueError("nothing to add")
+    kinds = {"song": "track", "album": "album"}
+    if any(item.get("kind") not in kinds for item in items):
+        raise ValueError("Spotify's library takes songs and albums.")
+    return [f"spotify:{kinds[item['kind']]}:{item['id']}" for item in items]
 
 
 def add_to_playlist(pid, uris):

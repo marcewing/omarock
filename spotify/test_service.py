@@ -86,8 +86,38 @@ def main():
     service.mpd_changed(s, "play", "pause")
     check("mpd pausing changes nothing", s.yielded and s.ws.sent == [], str(s.ws.sent))
 
+    library()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
+
+
+def library():
+    """Add to and remove from the library: Spotify's /me/library, 40 URIs a call,
+    with a stand-in for the Web API."""
+    calls = []
+    service.spotify_web.call = lambda method, path, body=None: (calls.append((method, path)), (200, None))[1]
+    service.WEB.library = {"songs": []}
+    songs = [{"kind": "song", "id": f"t{i}", "source": "catalog"} for i in range(41)]
+    out = service.post("library/add", ["library", "add"], {"items": songs + [{"kind": "album", "id": "a1"}]})
+    query = [service.urllib.parse.parse_qs(service.urllib.parse.urlparse(p).query)["uris"][0].split(",") for _, p in calls]
+    check("add: PUT /me/library, 40 URIs, then the rest", out == {"ok": True} and [m for m, _ in calls] == ["PUT", "PUT"]
+          and len(query[0]) == 40 and query[0][0] == "spotify:track:t0" and query[1] == ["spotify:track:t40", "spotify:album:a1"],
+          str(calls))
+    check("add: the library is read again next time", service.WEB.library is None)
+    calls.clear()
+    service.post("library/remove", ["library", "remove"], {"items": [songs[0]]})
+    check("remove: DELETE /me/library", calls == [("DELETE", "/me/library?uris=spotify%3Atrack%3At0")], str(calls))
+    try:
+        service.post("library/add", ["library", "add"], {"items": [{"kind": "artist", "id": "x"}]})
+        check("an artist isn't added", False)
+    except ValueError as e:
+        check("an artist isn't added", "songs and albums" in str(e), str(e))
+    service.spotify_web.call = lambda method, path, body=None: (403, {"error": {"message": "Insufficient client scope"}})
+    try:
+        service.post("library/add", ["library", "add"], {"items": [songs[0]]})
+        check("Spotify refusing is an error", False)
+    except service.ApiError as e:
+        check("Spotify refusing is an error", "Insufficient client scope" in str(e), str(e))
 
 
 if __name__ == "__main__":

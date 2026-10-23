@@ -30,6 +30,7 @@ Rectangle {
       ["a", "Add it to the end of the queue"],
       ["x", "Remove a song from the queue"],
       ["i", "Everything known about the song, album, station or channel (else what's playing): its service and, for Apple Music and Spotify, whether it's in your library"],
+      ["L", "Apple Music and Spotify: add the song, album or playlist to your library (else the song playing; in the info card, what it shows). On Spotify, again takes it out"],
       ["o  O  g", "Open the album, artist or genre of the song playing (or click them, or the cover, above). On SiriusXM or the radio, o and O look the song or artist up in Apple Music or Spotify"]
     ] },
     { title: "PLAYLISTS", keys: [

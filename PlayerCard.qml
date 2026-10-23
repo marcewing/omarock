@@ -29,11 +29,20 @@ Item {
   property bool canOpenAlbum: false
   property bool canOpenGenre: false
   property bool canOpenTitle: false
+  // Under the song: Add to library (Apple Music and Spotify; "" hides it),
+  // and what it says under the pointer when a click takes the song out
+  // again (Spotify); then Add to playlist.
+  property string libraryText: ""
+  property string libraryHoverText: ""
+  property bool libraryActive: true
+  property bool canAddToPlaylist: false
 
   signal openArtist()
   signal openAlbum()
   signal openGenre()
   signal openTitle()
+  signal libraryClicked()
+  signal addToPlaylist()
 
   readonly property var song: mpd.currentSong || ({})
   readonly property var status: mpd.status
@@ -167,6 +176,52 @@ Item {
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       elide: Text.ElideRight
+    }
+
+    Row {
+      spacing: Style.space(14)
+      visible: root.mpd.ready && root.hasSong && (root.libraryText !== "" || root.canAddToPlaylist)
+
+      ActionLink {
+        objectName: "playingLibrary"
+        visible: root.libraryText !== ""
+        label: root.libraryText
+        hoverLabel: root.libraryHoverText
+        active: root.libraryActive
+        onClicked: root.libraryClicked()
+      }
+
+      ActionLink {
+        objectName: "playingAddToPlaylist"
+        visible: root.canAddToPlaylist
+        label: "󰐕 Add to playlist"
+        onClicked: root.addToPlaylist()
+      }
+    }
+  }
+
+  // A link under the song, like Add to library.
+  component ActionLink: Text {
+    id: link
+    property string label: ""
+    property string hoverLabel: ""
+    property bool active: true
+    signal clicked()
+
+    textFormat: Text.PlainText
+    text: linkMouse.containsMouse && link.hoverLabel !== "" ? link.hoverLabel : link.label
+    color: root.dim
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+    font.underline: link.active && linkMouse.containsMouse
+
+    MouseArea {
+      id: linkMouse
+      anchors.fill: parent
+      enabled: link.active
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: link.clicked()
     }
   }
 

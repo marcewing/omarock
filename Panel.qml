@@ -137,7 +137,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.6.0"
+  readonly property string version: "0.6.1"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1006,6 +1006,138 @@ Panel {
     var asked = root.bridge.songLinks[Apple.songKey(item)] || ({})
     return { albumId: item.albumId || asked.albumId || "", albumSource: (item.albumId ? item.source : asked.source) || "catalog",
       artistId: item.artistId || asked.artistId || "", artistSource: (item.artistId ? item.source : asked.source) || "catalog" }
+  }
+
+  // Adds to (and Spotify's removals from) your library made here, by
+  // libraryKey: true or false. The Mac's Music library gets an add through
+  // iCloud a while later, so until the bridge knows, this says it's in.
+  property var libraryEdits: ({})
+  // The libraryKey of the item being added or removed, while it is.
+  property string librarySaving: ""
+
+  function libraryKey(service, item) {
+    return service + ":" + item.kind + ":" + item.source + ":" + item.id
+  }
+
+  // Whether an Apple Music or Spotify item is in your library: "yes", "no",
+  // or "" while nobody knows. known is what the service said, if it did.
+  function inLibrary(service, item, known) {
+    var edit = root.libraryEdits[root.libraryKey(service, item)]
+    if (edit !== undefined) return edit ? "yes" : "no"
+    if (known === true || (known === undefined && item.source === "library")) return "yes"
+    return known === false ? "no" : ""
+  }
+
+  // The info card's answer, with what was added or removed here since.
+  function withLibraryEdit(service, item, extra) {
+    var edit = root.libraryEdits[root.libraryKey(service, item)]
+    return edit === undefined ? extra : Object.assign({}, extra, { inLibrary: edit, checking: false })
+  }
+
+  // The song playing on Apple Music or Spotify, as an item, and whether it's
+  // in your library (its status says, else /v1/info: AppleClient.songLinks).
+  readonly property var playingItem: {
+    var song = root.bridgeMode ? root.bridge.bridgeStatus.song : null
+    return song && song.id ? { kind: "song", id: song.id, source: song.source || "catalog", title: song.title || "This song" } : null
+  }
+  readonly property string playingLibrary: {
+    var song = root.bridgeMode ? root.bridge.bridgeStatus.song : null
+    if (!root.playingItem) return ""
+    var asked = root.bridge.songLinks[Apple.songKey(song)] || ({})
+    return root.inLibrary(root.bridge.serviceKey, root.playingItem, song.inLibrary !== undefined ? song.inLibrary : asked.inLibrary)
+  }
+  // The card's Add to library ("" hides it), and what it says under the
+  // pointer when a click takes the song out again (Spotify).
+  readonly property string playingLibraryText: {
+    if (!root.playingItem) return ""
+    if (root.librarySaving === root.libraryKey(root.bridge.serviceKey, root.playingItem))
+      return root.playingLibrary === "yes" ? "Removing…" : "Adding…"
+    return root.playingLibrary === "yes" ? "󰄬 In your library" : "󰐕 Add to library"
+  }
+  readonly property string playingLibraryHover: root.playingLibrary === "yes" && root.bridge.canUnsave ? "󰅖 Remove from library" : ""
+  readonly property bool canAddPlayingToPlaylist: !root.live && root.player.ready && !!root.player.currentSong.file
+
+  // L, or the card's Add to library: add the item to target's library, or
+  // take it out again where the service can (Spotify). state is what
+  // inLibrary says; after runs once it's done.
+  function toggleLibrary(target, item, state, title, after) {
+    var kinds = target.serviceKey === "apple" ? ["song", "album", "playlist"] : ["song", "album"]
+    if (kinds.indexOf(item.kind) < 0) {
+      root.say("Your " + target.service + " library takes " + (target.serviceKey === "apple" ? "songs, albums and playlists" : "songs and albums"))
+      return
+    }
+    if (state === "yes" && !target.canUnsave) {
+      root.say(title + " is in your library already")
+      return
+    }
+    var key = root.libraryKey(target.serviceKey, item)
+    if (root.librarySaving === key) return
+    var save = state !== "yes"
+    root.librarySaving = key
+    target.saveToLibrary([{ kind: item.kind, id: item.id, source: item.source }], save, function(error) {
+      if (root.librarySaving === key) root.librarySaving = ""
+      if (error !== "") { root.say(error); return }
+      var edits = Object.assign({}, root.libraryEdits)
+      edits[key] = save
+      root.libraryEdits = edits
+      root.say(save ? "Added " + title + " to your " + target.service + " library"
+        : "Took " + title + " out of your " + target.service + " library")
+      if (after) after()
+    })
+  }
+
+  function libraryPlaying() {
+    var item = root.playingItem
+    if (!item) root.say("L adds the Apple Music or Spotify song playing to your library")
+    else root.toggleLibrary(root.bridge, item, root.playingLibrary, item.title)
+  }
+
+  // L on a row: its song, album or playlist (a Play row stands for its level).
+  function libraryRow(entry, row) {
+    var item = row && (row.kind === "playalbum" || row.kind === "playplaylist") && entry && entry.apple ? entry.apple
+      : row ? row.apple : null
+    if (!item || !root.browseBridgeMode) {
+      root.say("L adds Apple Music and Spotify songs and albums to your library")
+      return
+    }
+    var title = item === (entry && entry.apple) ? entry.title : row.name || row.title || "It"
+    root.toggleLibrary(root.browseBridge, item, root.inLibrary(root.browseBridge.serviceKey, item), title)
+  }
+
+  // L in the info card: what it shows; then the card says so.
+  function libraryInfo() {
+    var open = root.infoCard
+    if (!open || !open.request || open.request.type !== "apple" || open.loading) {
+      if (open && !open.loading) root.say("L adds Apple Music and Spotify songs and albums to your library")
+      return
+    }
+    var item = open.request.item
+    var kind = open.card.statusKind
+    root.toggleLibrary(root.browseBridge, item, kind === "yes" ? "yes" : kind === "no" ? "no" : "",
+      open.card.title || item.title || "It", function() {
+        if (root.infoCard === open) root.openInfo(open.request)
+      })
+  }
+  // The info card's link for it ("" for none).
+  readonly property string infoLibraryAction: {
+    var open = root.infoCard
+    if (!open || !open.request || open.request.type !== "apple" || open.loading) return ""
+    if (root.librarySaving === root.libraryKey(root.browseBridge.serviceKey, open.request.item)) return "Saving…"
+    var kind = open.card.statusKind
+    if (kind === "yes") return root.browseBridge.canUnsave ? "Remove from library (L)" : ""
+    return kind === "no" || kind === "unknown" ? "Add to library (L)" : ""
+  }
+
+  // The card's Add to playlist: the picker, for the song playing.
+  function addPlayingToPlaylist() {
+    var item = root.playingItem
+    if (item) {
+      root.openPicker({ result: { items: [{ kind: "song", id: item.id, source: item.source }] }, title: item.title })
+      return
+    }
+    var song = client.currentSong
+    if (!root.bridgeMode && song && song.file)
+      root.openPicker({ result: { kind: "song", file: song.file }, title: Mpd.songTitle(song) })
   }
 
   // o, O and g, or a click on the now playing card's album, artist or genre:
@@ -2045,15 +2177,17 @@ Panel {
     root.keysOpen = false
     function show(card, look, loading) {
       if (sequence === root.infoSequence)
-        root.infoCard = Object.assign({ card: card, coverFile: "", logo: "", coverUrl: "", loading: loading }, look)
+        root.infoCard = Object.assign({ card: card, coverFile: "", logo: "", coverUrl: "", loading: loading, request: request }, look)
     }
     if (request.type === "apple") {
       var item = request.item
       var bridge = root.browseBridge
-      show(Info.appleItem(item, { checking: item.source !== "library" }, bridge.serviceKey), { coverUrl: Apple.artUrl(item.artwork, 160) }, true)
+      show(Info.appleItem(item, root.withLibraryEdit(bridge.serviceKey, item, { checking: item.source !== "library" }), bridge.serviceKey),
+        { coverUrl: Apple.artUrl(item.artwork, 160) }, true)
       bridge.info(item, function(extra) {
         var full = extra.item || item
-        show(Info.appleItem(full, extra, bridge.serviceKey), { coverUrl: Apple.artUrl(full.artwork, 160) }, false)
+        show(Info.appleItem(full, root.withLibraryEdit(bridge.serviceKey, item, extra), bridge.serviceKey),
+          { coverUrl: Apple.artUrl(full.artwork, 160) }, false)
       })
     } else if (request.type === "station") {
       var station = radio.stations[request.uuid]
@@ -2127,7 +2261,10 @@ Panel {
     else if (t === "o") root.openPlaying("album")
     else if (t === "O") root.openPlaying("artist")
     else if (t === "g") root.openPlaying("genre")
-    else if (t === "a") {
+    else if (t === "L") {
+      if (root.cursorActive) root.libraryRow(root.browseTop, root.cursorRow())
+      else root.libraryPlaying()
+    } else if (t === "a") {
       var row = root.cursorRow()
       if (root.rowQueues(row)) root.activateRow(root.cursorIndex, "add")
     } else if (t === "A") {
@@ -2302,6 +2439,8 @@ Panel {
     serviceKey: "spotify"
     streamed: false
     canRemove: false
+    canUnsave: true
+    libraryUpdateText: "To add to your library, update omarock-spotify: tools/install-spotify"
     bridgeName: "omarock-spotify"
     unreachableText: "Can't reach omarock-spotify (systemctl --user status omarock-spotify)"
     unauthorizedText: "Spotify isn't signed in: run omarock-sp login"
@@ -2406,6 +2545,7 @@ Panel {
         }
         if (root.infoOpen) {
           if (text === "i") root.closeInfo()
+          else if (text === "L") root.libraryInfo()
           return
         }
         if (root.keysOpen && text !== "?") return
@@ -2456,9 +2596,11 @@ Panel {
         coverUrl: root.infoCoverUrl
         loading: !!root.infoCard && root.infoCard.loading
         wide: root.expanded
+        actionText: root.infoLibraryAction
         foreground: root.foreground
         fontFamily: root.fontFamily
         onCloseRequested: root.closeInfo()
+        onActionRequested: root.libraryInfo()
       }
 
       SettingsView {
@@ -3049,6 +3191,12 @@ Panel {
         onOpenArtist: root.openPlaying("artist")
         onOpenTitle: root.lookUp("song")
         onOpenGenre: root.openPlaying("genre")
+        libraryText: root.playingLibraryText
+        libraryHoverText: root.playingLibraryHover
+        libraryActive: root.librarySaving === "" && (root.playingLibrary !== "yes" || root.bridge.canUnsave)
+        canAddToPlaylist: root.canAddPlayingToPlaylist
+        onLibraryClicked: root.libraryPlaying()
+        onAddToPlaylist: root.addPlayingToPlaylist()
       }
 
       PanelSeparator { foreground: root.foreground }
@@ -3199,6 +3347,12 @@ Panel {
         onOpenArtist: root.openPlaying("artist")
         onOpenTitle: root.lookUp("song")
         onOpenGenre: root.openPlaying("genre")
+        libraryText: root.playingLibraryText
+        libraryHoverText: root.playingLibraryHover
+        libraryActive: root.librarySaving === "" && (root.playingLibrary !== "yes" || root.bridge.canUnsave)
+        canAddToPlaylist: root.canAddPlayingToPlaylist
+        onLibraryClicked: root.libraryPlaying()
+        onAddToPlaylist: root.addPlayingToPlaylist()
       }
 
       Rectangle {

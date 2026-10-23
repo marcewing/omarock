@@ -87,6 +87,9 @@ test("appleItem: the library status leads the card", () => {
   const mine = Info.appleItem(Object.assign({}, diane, { source: "library", id: "-53002" }), {})
   assert.equal(mine.status, "In your library")
   assert.ok(lines(mine).includes("YOUR LIBRARY: Library id = -53002"))
+  // A library row taken out of the library (Spotify): the service's word wins.
+  const gone = Info.appleItem(Object.assign({}, diane, { source: "library" }), { inLibrary: false }, "spotify")
+  assert.equal(gone.statusKind, "no")
   assert.deepEqual(lines(out), [
     "SONG: Artist = Hüsker Dü", "SONG: Album = Metal Circus", "SONG: Track = 5 (disc 1)", "SONG: Released = 1 Oct 1983",
     "SONG: Genre = Punk", "SONG: Composer = Grant Hart", "SONG: Length = 4:09",
