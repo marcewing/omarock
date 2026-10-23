@@ -81,6 +81,21 @@ for them, and offers to open System Settings):
 If macOS says the login item needs approval, allow OmarockBridge in System Settings →
 General → Login Items.
 
+### Keep the Music app running
+
+Changes to your library reach the Mac's library only while the Music app runs. That
+includes songs you add from omarock and changes from your other devices. Until then,
+the bridge's library lists, search and an artist's albums don't have them. omarock still
+shows what you added as in your library: Apple knows at once. So have Music open at
+login, in System Settings → General → Login Items & Extensions → Open at Login → +.
+`./install` offers to add it, or from a terminal:
+
+```sh
+osascript -e 'tell application "System Events" to make login item at end with properties {path:"/System/Applications/Music.app"}'
+```
+
+macOS opens Music's window at login. Closing the window leaves Music running.
+
 ### By hand
 
 `./install` uses `bridge/app/build.sh`, which you can run yourself:
@@ -219,7 +234,8 @@ rm -rf ~/Library/Application\ Support/omarock-bridge
   playlists are read-only.
 - One Mac plays for one omarock at a time: the Mac has one Apple Music queue.
 - Library lists come from the Mac's music library, read every 5 minutes, and again a
-  few times in the minutes after an add (Music gets adds from iCloud a little later).
+  few times in the minutes after an add. Adds reach it only while the Music app runs
+  (above).
 
 ## The code
 

@@ -441,6 +441,24 @@ step_health() {
       && ok "it starts at login" || note "not allowed yet: the bridge won't start by itself after a restart"
   fi
 
+  # Library changes (adds from omarock or other devices) reach this Mac only while
+  # Music runs. Reading Login Items can make macOS ask to let this terminal control
+  # System Events.
+  local items
+  if ! items=$(osascript -e 'tell application "System Events" to get the path of every login item' 2>/dev/null); then
+    note "couldn't read Login Items: to bring library changes down, add Music in System Settings, General, Login Items & Extensions"
+  elif [[ $items == *"/Music.app"* ]]; then
+    ok "the Music app opens at login, so library changes come down"
+  else
+    explain "Changes to your library, such as songs added from omarock or on your other devices, reach this Mac only while the Music app runs. Until then the bridge's library lists and search don't have them. Opening Music at login keeps it running: macOS opens its window, and closing the window leaves Music running."
+    if confirm "Open the Music app at login?"; then
+      run osascript -e 'tell application "System Events" to make login item at end with properties {path:"/System/Applications/Music.app"}' >/dev/null \
+        && ok "the Music app opens at login" || note "couldn't add it: add Music in System Settings, General, Login Items & Extensions"
+    else
+      note "Music doesn't open at login: open it yourself when you want library changes here"
+    fi
+  fi
+
   # Apple Music.
   if ! health_true authorized; then
     if [[ $(health_value musicAuthorization) == notDetermined ]]; then
