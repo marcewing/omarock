@@ -13,7 +13,8 @@
 | `Mpd.js` | Pure helpers: quoting, parsing, accent-insensitive patterns, albums, covers |
 | `PlayerCard.qml` | Now playing, seek, transport, volume |
 | `TrackRow.qml`, `CoverArt.qml` | A row of any list, and a cover with a placeholder |
-| `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`), the info card (`i`), the playlist picker (`A`) |
+| `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`, over the panel or in its own window), the info card (`i`), the playlist picker (`A`) |
+| `Hints.js` | Pure helpers: the hint line's keys, fitted to its fixed number of lines |
 | `SettingsView.qml` | The settings (`,` or the gear): Settings.js as a form, each source with its service's state; settings go into settings.json, accounts, keys and the music folder through `tools/omarock-account` |
 | `Info.js` | Pure helpers: the info card's contents for each source |
 | `AppleClient.qml`, `Apple.js` | A client for the bridge API (bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
@@ -79,6 +80,11 @@ it (the search, browsing, cards, the cursor), which keeps each scenario
 starting fresh; `hide` closes it the way the bar does, as `--only keep-state`
 needs.
 
+`--only hints` checks that the panel and its hint line keep their height,
+whatever the hints or a notice say, and covers the keys window. Offscreen, a
+newly shown window takes the keys, so the scenario hands them back to the
+popup. Under Hyprland the open panel keeps them, as a run in the test VM showed.
+
 - **`--scratch-mpd DIR`** starts a throwaway mpd over DIR. Its only output is mpd's
   `null` output, which plays to nowhere. It runs the playlist scenario against
   real mpd behaviour.
@@ -138,6 +144,10 @@ opened; `--only fresh-start` checks that.
 - iTunes rips often lack AlbumArtist on compilations, and spread one album over
   several artist folders. So omarock treats an album as its name, not its
   folder, and spots the few names shared by different albums (`Mpd.sharedName`).
+- mpd's `albumartist` filter falls back to `artist` only for songs with no
+  AlbumArtist tag. A compilation tagged "Various Artists" never matches an
+  artist's name that way. So an artist's page also finds their songs by
+  `artist`, which brings in those compilations.
 - **Streams:**
   - mpd's HTTP input gives up on a stream that sends nothing for about 10 s, and
     moves on through the queue. So live sources play in repeat-one mode (`repeat 1`,
@@ -173,6 +183,9 @@ opened; `--only fresh-start` checks that.
   jump.
 - A property whose name starts with `on` and a capital is taken for a signal
   handler's name, and silently never works.
+- Hyprland floats a Quickshell `FloatingWindow` whose minimum and maximum
+  sizes are the same, and centres it. Without a fixed size it tiles. (The keys
+  window; seen on Hyprland 0.56.2.)
 - A reply that lands while a plugin reload tears a client down can find the
   client there but its functions gone; the HTTP clients check for both.
 - **Quickshell 0.3.2's `Socket` crashes the whole shell** if an `onError` handler

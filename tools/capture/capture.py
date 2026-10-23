@@ -40,7 +40,7 @@ TOOLS = Path(__file__).resolve().parent
 PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Info.js", "InfoCard.qml",
-                "Settings.js", "tools/omarock-account"]
+                "Settings.js", "Hints.js", "tools/omarock-account"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
 # The fake Apple Music bridge, when one runs: { port, log }.
@@ -262,6 +262,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     info_scenario(host, output, socket_path, failures)
     library_scenario(host, output, socket_path, failures)
     keep_state_scenario(host, output, failures)
+    hints_scenario(host, output, failures)
     list_tuning_scenario(host, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
@@ -1682,6 +1683,26 @@ def now_playing_scenario(host, output, socket_path, failures):
     opens("g", "genre:" + genre)
     back("← from g's genre comes back to the queue")
 
+    # A song on a compilation: the artist opens on it (APPEARS ON), the genre
+    # on Compilations, where the genre lists it. Then the queue as it was.
+    was = mpd_state(socket_path).get("songid", "")
+    file = next(line[6:] for line in mpd_query(socket_path, 'find "(title == \\"Fernweh\\")"') if line.startswith("file: "))
+    added = next(line[4:] for line in mpd_query(socket_path, f'addid "{file}"') if line.startswith("Id: "))
+    mpd_client(socket_path, "playid " + added)
+    wait_for(lambda: host.state()["nowPlaying"].startswith("Fernweh"), "Fernweh, from Left Of The Signal, playing")
+    host.call("clickPanel", "playingArtist")
+    s = opens("a click on a compilation song's artist", "artist:Flügel Café")
+    check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == "album:Left Of The Signal",
+          "the artist opens on the compilation, under APPEARS ON: " + json.dumps([s["cursor"], s["rows"]]), failures)
+    back("← from the artist comes back to the queue")
+    host.call("clickPanel", "playingGenre")
+    s = opens("a click on a compilation song's genre", "genre:Alternative & Punk")
+    check(s["cursor"] >= 0 and s["rows"][s["cursor"]].startswith("compilations:"),
+          "the genre opens on its Compilations: " + json.dumps([s["cursor"], s["rows"]]), failures)
+    back("← from the genre comes back to the queue")
+    if was: mpd_client(socket_path, "playid " + was)
+    mpd_client(socket_path, "deleteid " + added)
+
     host.call("expand", "true")
     host.settle(1)
     host.call("clickPanel", "playingArtist")
@@ -2050,6 +2071,152 @@ def keep_state_scenario(host, output, failures):
     check(s["query"] == "" and s["browse"] == "" and s["info"] is None, "close() in the harness starts fresh", failures)
 
 
+def hints_scenario(host, output, failures):
+    """The line of key hints keeps its height whatever it says, so the panel
+    doesn't grow: hints that don't fit are left out, and a long notice is cut
+    short. The keys page's RIGHT NOW lists the keys that do something where
+    the panel is, all of them. w, or its Window button, keeps the keys open in
+    a window of their own, fixed in size so Hyprland floats it, and RIGHT NOW
+    there follows the panel."""
+    long_notice = "A notice far too long for the line: " + "it goes on and on, " * 12 + "and ends here."
+
+    def line(label):
+        s = host.state()
+        h = s["hintLine"] or {}
+        print(label, json.dumps(h), s["cardHeight"], file=sys.stderr)
+        return s, h
+
+    def steady(label, lines, height, card=None):
+        s, h = line(label)
+        check(h.get("height") == height and 0 < h.get("lines", 0) <= lines,
+              f"{label}: the hints keep their height ({h.get('height')}, was {height}) in {lines} line(s) or fewer", failures)
+        if card is not None:
+            check(s["cardHeight"] == card, f"{label}: the panel keeps its height ({s['cardHeight']}, was {card})", failures)
+        if s["notice"] == "":
+            check(not h.get("truncated") and (s["searchFocused"] or h.get("text", "").endswith("? keys")),
+                  f"{label}: what's shown fits, and ends with ? keys: {h.get('text')}", failures)
+            shown = [part for part in h.get("text", "").split(" · ")]
+            check(all(part in s["hint"].split(" · ") for part in shown),
+                  f"{label}: every hint shown is one of the hints here: {h.get('text')} / {s['hint']}", failures)
+        return s
+
+    host.call("close")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.settle(.5)
+
+    for expanded in (False, True):
+        mode = "expanded" if expanded else "compact"
+        lines = 1 if expanded else 2
+        host.call("expand", "true" if expanded else "false")
+        host.settle(.8)
+        s, h = line(mode + ": the queue")
+        height, card = h.get("height"), s["cardHeight"]
+        check(height and height > 0, mode + ": the hint line is there", failures)
+        host.call("press", "Down")
+        host.settle(.3)
+        steady(mode + ": a song in the queue", lines, height, card)
+        host.call("press", "/")
+        host.call("typeKeys", "glass")
+        wait_for(lambda: host.state()["query"] == "glass" and not host.state()["searching"], "search glass")
+        host.settle(.3)
+        s = steady(mode + ": typing a search", lines, height, card)
+        # In the box, letters are text: Enter, Shift+Enter, ↓ and Esc are the keys.
+        check(s["searchFocused"] and s["hint"] == "Enter open · Shift+Enter add to queue · ↓ to the list · Esc clear",
+              mode + ": typing, the box's own keys: " + s["hint"], failures)
+        cursor_to(host, "artist:Glass Harbor", failures)
+        steady(mode + ": search results", lines, height, card)
+        check(host.state()["hint"].endswith("Esc clear · ? keys"), mode + ": the list's keys again: " + host.state()["hint"], failures)
+        cursor_to(host, "artist:Glass Harbor", failures)
+        host.call("press", "Right")
+        wait_for(lambda: host.state()["browse"] == "artist:Glass Harbor" and not host.state()["browseLoading"], "the artist")
+        steady(mode + ": an artist", lines, height, card)
+        if cursor_to(host, "album:Paper Satellites", failures):
+            host.call("press", "Right")
+            wait_for(lambda: host.state()["browse"] == "album:Paper Satellites" and not host.state()["browseLoading"], "the album")
+            cursor_to(host, "track:Orbit Song", failures)
+            host.settle(.3)
+            s = steady(mode + ": a song in an album", lines, height, card)
+            check(s["hintLine"]["text"] == s["hint"] or expanded is False and s["hintLine"]["lines"] == 2,
+                  mode + ": the album song's hints: " + s["hintLine"]["text"], failures)
+            if not expanded: host.grab(output / "hints-compact.png")
+        host.call("say", long_notice)
+        host.settle(.3)
+        s = steady(mode + ": a long notice", lines, height, card)
+        check(s["hintLine"]["text"] == long_notice and s["hintLine"]["truncated"],
+              mode + ": the notice is cut short, not wrapped onto more lines", failures)
+        if expanded: host.grab(output / "hints-expanded.png")
+        wait_for(lambda: host.state()["notice"] == "", "the notice goes")
+        host.call("close")
+        host.call("open")
+        wait_for(lambda: host.state()["opened"], "open")
+        host.settle(.3)
+
+    # The keys page: RIGHT NOW is the keys here, ? aside.
+    host.call("expand", "false")
+    host.call("press", "/")
+    host.call("typeKeys", "glass")
+    wait_for(lambda: host.state()["query"] == "glass" and not host.state()["searching"], "search glass")
+    cursor_to(host, "artist:Glass Harbor", failures)
+    host.call("press", "Right")
+    wait_for(lambda: host.state()["browse"] == "artist:Glass Harbor" and not host.state()["browseLoading"], "the artist")
+    cursor_to(host, "album:Paper Satellites", failures)
+    host.settle(.3)
+    host.call("press", "?")
+    wait_for(lambda: host.state()["keysOpen"], "the keys page")
+    s = host.state()
+    check(s["keysHere"][0] == "→ Open it (or Enter)" and "← Back a level" in s["keysHere"]
+          and not any(k.startswith("? ") for k in s["keysHere"]),
+          "RIGHT NOW on an album row: " + json.dumps(s["keysHere"]), failures)
+    host.grab(output / "keys-here.png")
+
+    # w keeps it open in a window of its own; the panel's page closes.
+    host.call("press", "w")
+    wait_for(lambda: host.state()["keysWindow"]["open"], "the keys window")
+    host.settle(.5)
+    s = host.state()
+    w = s["keysWindow"]
+    check(not s["keysOpen"] and s["opened"], "the panel stays open, its keys page closed", failures)
+    check(w["fixed"] and w["width"] > 0, "the window has a fixed size, so Hyprland floats it: " + json.dumps(w), failures)
+    check(w["here"] == s["keysHere"], "the window's RIGHT NOW is the panel's: " + json.dumps(w["here"]), failures)
+    path = output / "keys-window.png"
+    path.unlink(missing_ok=True)
+    check(host.call("grabKeysWindow", str(path)) == "ok", "the window can be captured", failures)
+    wait_for(lambda: complete_png(path), path.name)
+
+    # It follows the panel: into the album, onto a song. (Offscreen the new
+    # window takes the keys; under Hyprland the open panel keeps them.)
+    host.call("activatePopup")
+    host.settle(.3)
+    host.call("press", "Right")
+    wait_for(lambda: host.state()["browse"] == "album:Paper Satellites" and not host.state()["browseLoading"], "the album")
+    cursor_to(host, "track:Orbit Song", failures)
+    wait_for(lambda: "Enter Play from this song" in host.state()["keysWindow"]["here"],
+             "the window's RIGHT NOW follows the cursor onto a song")
+    check(host.state()["keysWindow"]["here"] == host.state()["keysHere"], "and agrees with the panel", failures)
+
+    # Its own keys: Esc closes it.
+    check(host.call("activateKeysWindow") == "ok", "the window takes the keys", failures)
+    host.settle(.3)
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["keysWindow"]["open"], "Esc closes the keys window")
+
+    # The Window button on the keys page does the same as w.
+    host.call("close")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.call("keys", "true")
+    host.settle(.3)
+    host.call("activatePopup")
+    host.settle(.3)
+    pressed = host.call("mouse", "keysWindowButton", "press", .5)
+    host.call("mouse", "keysWindowButton", "release", .5)
+    check(pressed == "ok", "a click on the keys page's Window button: " + pressed, failures)
+    wait_for(lambda: host.state()["keysWindow"]["open"], "the Window button opens the keys window")
+    host.call("close")
+    check(not host.state()["keysWindow"]["open"], "the harness's close closes it too", failures)
+
+
 def lookup_scenario(host, output, socket_path, failures):
     """A live station's song looked up in Apple Music: a click on SiriusXM's
     title (or O for the artist) searches Apple Music while the channel plays
@@ -2144,19 +2311,22 @@ def browse_scenario(host, output, command_log, failures):
     wait_for(lambda: host.state()["query"] == "glass" and not host.state()["searching"], "typed search")
     host.settle()
     s = host.state()
-    check(s["rows"][0] == "artist:Glass Harbor" and s["hint"].startswith("→ open"),
-          "typed 'glass': top result is the artist, hint says → opens it: " + s["hint"], failures)
+    # In the box → moves the text cursor, so the hint says Enter.
+    check(s["rows"][0] == "artist:Glass Harbor" and s["hint"].startswith("Enter open"),
+          "typed 'glass': top result is the artist, hint says Enter opens it: " + s["hint"], failures)
 
     # Enter in the search box opens the top result.
     host.call("press", "Return")
     wait_for(lambda: browsed(host, "artist:Glass Harbor"), "artist view")
     host.settle()
     s = host.state()
+    # Both compilations: Left Of The Signal has an album artist (Various
+    # Artists), Signal Hill Sampler none.
     check(s["rows"] == ["playall:Play all songs", "album:Low Tide Signals", "album:Paper Satellites",
-                        "album:Signal Hill Sampler"], "artist view: " + ", ".join(s["rows"]), failures)
+                        "album:Left Of The Signal", "album:Signal Hill Sampler"], "artist view: " + ", ".join(s["rows"]), failures)
     check(s["sections"][1] == "ALBUMS" and s["sections"][3] == "APPEARS ON"
-          and s["subtitles"][3] == "1990 · on 1 of 4 songs",
-          "the compilation is under APPEARS ON: " + s["subtitles"][3], failures)
+          and s["subtitles"][3:] == ["1988 · on 1 of 3 songs", "1990 · on 1 of 4 songs"],
+          "the compilations are under APPEARS ON: " + ", ".join(s["subtitles"][3:]), failures)
     check(s["cursor"] == 1 and not s["searchFocused"], "cursor starts on the first album, keys leave the search box",
           failures)
     host.grab(output / "compact-artist.png")
@@ -2198,6 +2368,7 @@ def browse_scenario(host, output, command_log, failures):
     check(host.state()["browse"] == "artist:Glass Harbor", "Esc also goes back", failures)
 
     # The compilation opens whole, each song with its artist.
+    host.call("press", "Down")
     host.call("press", "Down")
     host.call("press", "Return")
     wait_for(lambda: browsed(host, "album:Signal Hill Sampler"), "compilation view")
@@ -3663,6 +3834,7 @@ def main():
                             elif name == "lookup": lookup_scenario(host, output, socket_path, failures)
                             elif name == "library": library_scenario(host, output, socket_path, failures)
                             elif name == "keep-state": keep_state_scenario(host, output, failures)
+                            elif name == "hints": hints_scenario(host, output, failures)
                             elif name == "teardown": teardown_scenario(host, socket_path, failures)
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
                             elif name == "late-config": late_config_scenario(host, failures)

@@ -47,6 +47,28 @@ ShellRoot {
     return null
   }
 
+  // The line of key hints as shown: its text, height and lines.
+  function hintLine() {
+    var p = popup()
+    var text = p ? host.findNamed(p.contentItem[0].parent.parent, "hints") : null
+    return text ? { text: text.text.replace(/ /g, " "), height: Math.round(text.parent.height),
+      lines: text.lineCount, truncated: text.truncated } : null
+  }
+
+  // RIGHT NOW in the keys window, as shown.
+  function keysWindowHere() {
+    var w = host.panel.keysWindow
+    var here = w.visible ? host.findNamed(w.contentItem, "keysHere") : null
+    if (!here) return []
+    var rows = []
+    for (var i = 0; i < here.children.length; i++) {
+      var row = here.children[i]
+      if (row.children && row.children.length === 2 && row.children[0].text !== undefined)
+        rows.push(row.children[0].text + " " + row.children[1].text)
+    }
+    return rows
+  }
+
   // The settings view, while it's open.
   function settingsView() {
     var p = popup()
@@ -129,6 +151,7 @@ ShellRoot {
       p.settingsOpen = false
       p.cursorActive = false
       p.searchFocused = false
+      p.closeKeysWindow()
     }
     function hide(): void { host.panel.close() }
     // Where the keys are: the search box, the picker's box, or the panel's keys.
@@ -195,7 +218,14 @@ ShellRoot {
         query: p.query, searching: p.searching, rows: p.rows.map(function(r) { return r.kind + ":" + r.title }),
         subtitles: p.rows.map(function(r) { return r.subtitle || "" }),
         sections: p.rows.map(function(r) { return r.section || "" }),
-        cursor: p.cursorActive ? p.cursorIndex : -1, notice: p.notice, hint: p.hintText,
+        cursor: p.cursorActive ? p.cursorIndex : -1, notice: p.notice,
+        hint: p.hintParts.map(function(h) { return h.key + " " + h.what }).join(" · "),
+        hintLine: host.hintLine(), cardHeight: popup() ? Math.round(popup().contentItem[0].parent.parent.height) : 0,
+        keysOpen: p.keysOpen, keysHere: p.hereKeys.map(function(r) { return r[0] + " " + r[1] }),
+        keysWindow: { open: p.keysWindow.visible, width: p.keysWindow.width, height: p.keysWindow.height,
+          fixed: p.keysWindow.minimumSize.width > 0 && p.keysWindow.minimumSize.width === p.keysWindow.maximumSize.width
+            && p.keysWindow.minimumSize.height === p.keysWindow.maximumSize.height,
+          here: host.keysWindowHere() },
         browse: p.browseTop ? p.browseTop.kind + ":" + p.browseTop.title : "",
         browseLoading: p.browseLoading, browseInfo: p.browseInfo,
         queueLength: p.queueRows.length, searchFocused: !!p.searchField && p.searchField.activeFocus,
@@ -245,6 +275,30 @@ ShellRoot {
       var card = popupWindow.contentItem[0].parent.parent
       return card.grabToImage(function(result) { result.saveToFile(path) }) ? "ok" : "Capture failed"
     }
+    function say(text: string): void { host.panel.say(text) }
+    // The popup takes the keys back. Offscreen, a new window takes them;
+    // under Hyprland the open panel keeps them.
+    function activatePopup(): string {
+      var popupWindow = popup()
+      var window = popupWindow ? popupWindow.contentItem[0].Window.window : null
+      if (!window) return "No popup"
+      window.requestActivate()
+      return "ok"
+    }
+    // The keys window takes the keys, as when it's clicked.
+    function activateKeysWindow(): string {
+      var w = host.panel.keysWindow
+      var view = w.visible ? host.findNamed(w.contentItem, "keysWindow") : null
+      if (!view || !view.Window.window) return "No keys window"
+      view.Window.window.requestActivate()
+      return "ok"
+    }
+    function grabKeysWindow(path: string): string {
+      var w = host.panel.keysWindow
+      var view = w.visible ? host.findNamed(w.contentItem, "keysWindow") : null
+      if (!view) return "No keys window"
+      return view.grabToImage(function(result) { result.saveToFile(path) }) ? "ok" : "Capture failed"
+    }
     // The pointer over the popup's card, from its top left; beyond its size
     // is outside it.
     function hover(x: real, y: real): string {
@@ -272,7 +326,8 @@ ShellRoot {
     function mouse(name: string, action: string, fraction: real): string {
       var popupWindow = popup()
       if (!popupWindow) return "No popup"
-      var item = host.findNamed(popupWindow.contentItem[0], name)
+      // Over the panel's content, or the pages over it (the keys).
+      var item = host.findNamed(popupWindow.contentItem[0], name) || host.findNamed(popupWindow.contentItem[0].parent.parent, name)
       if (!item || !item.visible) return "not shown"
       var x = item.width * fraction, y = item.height / 2
       var done = action === "press" ? keyboard.mousePress(item, x, y, Qt.LeftButton, Qt.NoModifier, -1)

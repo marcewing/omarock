@@ -635,11 +635,17 @@ Item {
 
   // An album artist's albums for the artist view; callback({ albums,
   // appearsOn }), or null when mpd fails. One count per album tells their own
-  // albums from the compilations they appear on.
+  // albums from the compilations they appear on. mpd's albumartist falls
+  // back to artist only for a song with no album artist, so compilations
+  // that have one ("Various Artists") come from a second find, by artist.
   function artistAlbums(artist, callback) {
-    root.send(Mpd.command("find", [Mpd.tagFilter("albumartist", "==", artist)]), function(lines, error) {
+    root.send(Mpd.commandListOk([
+      Mpd.command("find", [Mpd.tagFilter("albumartist", "==", artist)]),
+      Mpd.command("find", [Mpd.tagFilter("artist", "==", artist)])
+    ]), function(lines, error) {
       if (error !== "") { callback(null); return }
-      var albums = Mpd.groupAlbums(Mpd.parseSongs(lines))
+      var replies = Mpd.splitReplies(lines)
+      var albums = Mpd.groupAlbums(Mpd.unionSongs(Mpd.parseSongs(replies[0] || []), Mpd.parseSongs(replies[1] || [])))
       var named = albums.filter(function(album) { return album.album !== "" })
       if (named.length === 0) { callback(Mpd.splitAppearances(albums, {})); return }
       root.send(Mpd.commandListOk(named.map(function(album) {

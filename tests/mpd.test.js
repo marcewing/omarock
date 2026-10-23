@@ -107,6 +107,13 @@ test("splitAppearances: under half the album's songs means a compilation", () =>
     ["a", "b"])
 })
 
+test("unionSongs: the artist's songs by album artist, then by artist, each file once", () => {
+  const own = [song("Zen Arcade/01.mp3", 1), song("Zen Arcade/02.mp3", 2)]
+  const performed = [song("Zen Arcade/02.mp3", 2), song("Left Of The Dial/3-07.mp3", 7, { albumartist: "Various Artists" })]
+  assert.deepEqual(Mpd.unionSongs(own, performed).map(s => s.file),
+    ["Zen Arcade/01.mp3", "Zen Arcade/02.mp3", "Left Of The Dial/3-07.mp3"])
+})
+
 test("parseSongs splits on file lines and joins repeated tags", () => {
   const songs = Mpd.parseSongs([
     "file: a/1.mp3", "Title: One", "Artist: X", "Artist: Y", "Pos: 0", "Id: 5",

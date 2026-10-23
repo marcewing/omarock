@@ -10,6 +10,7 @@ import "Sxm.js" as Sxm
 import "Radio.js" as Radio
 import "Info.js" as Info
 import "Settings.js" as Settings
+import "Hints.js" as Hints
 
 // omarock's popup. Laid out like crmne.hyprmoncfg: a compact panel with an
 // Expand button, and an expanded panel in the same popup with Keys, TUI and
@@ -137,7 +138,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.6.2"
+  readonly property string version: "0.6.3"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -366,31 +367,78 @@ Panel {
   readonly property var enterRow: root.rows[root.enterIndex] || null
   onEnterRowChanged: root.schedulePreview()
   onColumnsChanged: root.schedulePreview()
-  readonly property string hintText: {
+  // Typing in the search box, where letters are text, not keys.
+  readonly property bool typing: !!root.searchField && root.searchField.activeFocus
+
+  // What Enter (→ out of the search box) does on a row of a kind, for the
+  // hints; null where it does nothing.
+  function enterHint(kind, typing) {
+    var hint = Hints.hint
+    if (root.opens(kind)) return typing ? hint("Enter", "open", "Open it", true) : hint("→", "open", "Open it (or Enter)", true)
+    if (kind === "channel" || kind === "station") return hint("Enter", "tune", "Tune it", true)
+    if (kind === "track") return hint("Enter", "play from here", "Play from this song", true)
+    if (kind === "shuffleall") return hint("Enter", "shuffle all", "Shuffle all the songs", true)
+    if (kind === "savequeue") return hint("Enter", "save the queue", "Save the queue as a playlist", true)
+    return kind !== "note" && kind !== "" ? hint("Enter", "play", "Play it", true) : null
+  }
+
+  // The keys that do something here (Hints.js): the line under the list
+  // shows what fits, the most useful first, and the keys page all of them.
+  readonly property var hintParts: {
     var row = root.enterRow
     var kind = row ? row.kind : ""
-    var source = root.sources.length < 2 ? "" : " · m " + root.sourceNames[root.nextSource()]
-    if (!root.searchMode && !root.browsing && root.sxmMode)
-      return root.cursorActive && row ? "Enter tune · A " + (row.favorite ? "unfavourite" : "favourite") + " · i info · n p channel" + source + " · ? keys"
-        : "Space play/stop · / find a channel · n p channel" + source + " · ? keys"
-    if (!root.searchMode && !root.browsing && root.radioMode)
-      return root.cursorActive && row ? "Enter tune · A " + (row.favorite ? "unfavourite" : "favourite") + " · i info · n p favourite" + source + " · ? keys"
-        : "Space play/stop · / find a station · n p favourite" + source + " · ? keys"
-    if (!root.searchMode && !root.browsing)
-      return root.cursorActive && row ? "Enter play · A add to playlist" + (root.bridgeMode && !root.bridge.canRemove ? "" : " · x remove")
-          + " · i info · P playlists · ? keys"
-        : "Space play/pause · / search · P playlists" + source + " · ? keys"
-    var parts = [root.opens(kind) ? "→ open" : kind === "channel" || kind === "station" ? "Enter tune" : kind === "track" ? "Enter play from here"
-      : kind === "shuffleall" ? "Enter shuffle all" : kind === "savequeue" ? "Enter save the queue"
-      : kind === "note" || kind === "" ? "" : "Enter play"]
-    if (root.rowQueues(row)) parts.push("a add to queue")
-    if (root.playlistItem(root.browseTop, row)) parts.push("A add to playlist")
-    if (kind === "channel" || kind === "station") parts.push(row.favorite ? "A unfavourite" : "A favourite")
-    if (row && row.removable) parts.push(kind === "playlist" ? "x delete" : "x remove")
-    if (root.infoRequest(root.browseTop, row)) parts.push("i info")
-    parts.push(root.browsing ? "← back" : "Esc clear", "? keys")
-    return parts.filter(function(part) { return part !== "" }).join(" · ")
+    var hint = Hints.hint
+    var next = root.sourceNames[root.nextSource()]
+    var source = root.sources.length < 2 ? [] : [hint("m", next, "Switch to " + next)]
+    var info = hint("i", "info", "Everything known about it")
+    var keys = hint("?", "keys", "", true)
+    var library = root.libraryHint(root.browsing ? root.browseTop : null, row)
+    var parts = []
+    // In the search box: what the box does with Enter, ↓ and Esc.
+    if (root.typing) {
+      var top = root.searchMode ? root.rows[root.cursorActive ? root.cursorIndex : 0] : null
+      var enter = top ? root.enterHint(top.kind, true) : null
+      if (enter) parts.push(enter)
+      if (top && root.rowQueues(top)) parts.push(hint("Shift+Enter", "add to queue", "Add it to the end of the queue"))
+      if (root.query === "" && !root.browsing) return parts.concat([hint("Esc", "to the list", "Leave the search box for the list", true)])
+      if (root.rows.length > 0) parts.push(hint("↓", "to the list", "Down to the list, where the other keys work", true))
+      return parts.concat([root.browsing ? hint("Esc", "back", "Back a level", true) : hint("Esc", "clear", "Clear the search", true)])
+    }
+    if (!root.searchMode && !root.browsing && (root.sxmMode || root.radioMode)) {
+      var steps = root.sxmMode ? hint("n p", "channel", "Next or previous channel") : hint("n p", "favourite", "Next or previous favourite")
+      parts = root.cursorActive && row
+        ? [hint("Enter", "tune", "Tune it", true), hint("A", row.favorite ? "unfavourite" : "favourite",
+          row.favorite ? "Take it out of your favourites" : "Add it to your favourites"), info, steps]
+        : [hint("Space", "play/stop", "Play or stop", true),
+          hint("/", root.sxmMode ? "find a channel" : "find a station", root.sxmMode ? "Search the channels" : "Search for a station"), steps]
+      return parts.concat(source, [keys])
+    }
+    if (!root.searchMode && !root.browsing) {
+      if (!root.cursorActive || !row)
+        return [hint("Space", "play/pause", "Play or pause", true), hint("/", "search", "Search"),
+          hint("P", "playlists", "Your playlists")].concat(source, [keys])
+      parts = [hint("Enter", "play", "Play from this song", true), hint("A", "add to playlist", "Add the song to a playlist")]
+      if (!root.bridgeMode || root.bridge.canRemove) parts.push(hint("x", "remove", "Take the song out of the queue"))
+      parts.push(info)
+      if (library !== "") parts.push(hint("L", library))
+      return parts.concat([hint("P", "playlists", "Your playlists"), keys])
+    }
+    var main = root.enterHint(kind, false)
+    if (main) parts.push(main)
+    if (root.rowQueues(row)) parts.push(hint("a", "add to queue", "Add it to the end of the queue"))
+    if (root.playlistItem(root.browseTop, row)) parts.push(hint("A", "add to playlist", "Add it to a playlist"))
+    if (kind === "channel" || kind === "station")
+      parts.push(hint("A", row.favorite ? "unfavourite" : "favourite", row.favorite ? "Take it out of your favourites" : "Add it to your favourites"))
+    if (row && row.removable)
+      parts.push(kind === "playlist" ? hint("x", "delete", "Delete the playlist (asks first)") : hint("x", "remove", "Take it out of the playlist"))
+    if (root.infoRequest(root.browseTop, row)) parts.push(info)
+    if (library !== "") parts.push(hint("L", library))
+    parts.push(root.browsing ? hint("←", "back", "Back a level", true) : hint("Esc", "clear", "Clear the search", true), keys)
+    return parts
   }
+
+  // The keys page's RIGHT NOW: the same keys, ? aside (it's open).
+  readonly property var hereKeys: Hints.rows(root.hintParts.filter(function(part) { return part.key !== "?" }))
 
   function open() {
     root.controller.show()
@@ -1088,8 +1136,7 @@ Panel {
   // take it out again where the service can (Spotify). state is what
   // inLibrary says; after runs once it's done.
   function toggleLibrary(target, item, state, title, after) {
-    var kinds = target.serviceKey === "apple" ? ["song", "album", "playlist"] : ["song", "album"]
-    if (kinds.indexOf(item.kind) < 0) {
+    if (root.libraryKinds(target).indexOf(item.kind) < 0) {
       root.say("Your " + target.service + " library takes " + (target.serviceKey === "apple" ? "songs, albums and playlists" : "songs and albums"))
       return
     }
@@ -1119,10 +1166,28 @@ Panel {
     else root.toggleLibrary(root.bridge, item, root.playingLibrary, item.title)
   }
 
+  function libraryKinds(target) {
+    return target.serviceKey === "apple" ? ["song", "album", "playlist"] : ["song", "album"]
+  }
+
   // L on a row: its song, album or playlist (a Play row stands for its level).
-  function libraryRow(entry, row) {
-    var item = row && (row.kind === "playalbum" || row.kind === "playplaylist") && entry && entry.apple ? entry.apple
+  function libraryItem(entry, row) {
+    return row && (row.kind === "playalbum" || row.kind === "playplaylist") && entry && entry.apple ? entry.apple
       : row ? row.apple : null
+  }
+
+  // What L would do on a row, for the hints: "" where it does nothing.
+  function libraryHint(entry, row) {
+    var item = root.libraryItem(entry, row)
+    var target = root.browseBridge
+    if (!item || !root.browseBridgeMode || root.libraryKinds(target).indexOf(item.kind) < 0) return ""
+    var album = entry && item === entry.apple && item.kind === "album" ? root.albumLibrary(entry, entry.rows) : null
+    var state = album ? album.state : root.inLibrary(target.serviceKey, item, row.item ? row.item.inLibrary : undefined)
+    return state !== "yes" ? "add to library" : target.canUnsave ? "remove from library" : ""
+  }
+
+  function libraryRow(entry, row) {
+    var item = root.libraryItem(entry, row)
     if (!item || !root.browseBridgeMode) {
       root.say("L adds Apple Music and Spotify songs and albums to your library")
       return
@@ -1249,6 +1314,8 @@ Panel {
         if (kind === "genre") return row.kind === "artist" && !row.apple && row.artist === (song.albumartist || song.artist)
         return row.kind === "album" && (row.apple ? row.apple.id === albumId : row.album === song.album)
       })
+      // A compilation's song: the genre lists its album under Compilations.
+      if (index < 0 && kind === "genre") index = root.browseRows.findIndex(function(row) { return row.kind === "compilations" })
       if (index >= 0) root.cursorIndex = index
     })
   }
@@ -2635,6 +2702,7 @@ Panel {
           else if (text === "L") root.libraryInfo()
           return
         }
+        if (root.keysOpen && text === "w") root.openKeysWindow()
         if (root.keysOpen && text !== "?") return
         root.handleText(text)
       }
@@ -2671,7 +2739,9 @@ Panel {
         fontFamily: root.fontFamily
         tuiName: root.tuiCommand
         version: root.version
+        here: root.hereKeys
         onCloseRequested: root.keysOpen = false
+        onWindowRequested: root.openKeysWindow()
       }
 
       InfoCard {
@@ -3242,15 +3312,85 @@ Panel {
     }
   }
 
-  component Hints: Text {
-    textFormat: Text.PlainText
-    text: root.notice !== "" ? root.notice : root.hintText
-    color: root.notice !== "" ? root.foreground : root.dim
+  // The key hints, or the latest notice, in a fixed number of lines, so the
+  // panel never changes height: hints that don't fit are left out (the keys
+  // page has them all), and a notice too long is cut short.
+  component HintLine: Item {
+    id: hintLine
+    property int lines: 1
+    property alias horizontalAlignment: hintText.horizontalAlignment
+    implicitHeight: root.captionLine * lines
+
+    Text {
+      id: hintText
+      objectName: "hints"
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: root.notice !== "" ? root.notice
+        : hintLine.width > 0 && root.captionLine > 0 ? Hints.fit(root.hintParts, hintLine.width - 1, hintLine.lines, root.captionWidth) : ""
+      color: root.notice !== "" ? root.foreground : root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+      elide: Text.ElideRight
+      maximumLineCount: hintLine.lines
+    }
+  }
+
+  FontMetrics {
+    id: captionMetrics
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption
-    wrapMode: Text.WordWrap
-    elide: Text.ElideRight
-    maximumLineCount: 2
+  }
+  FontMetrics {
+    id: bodyMetrics
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.body
+  }
+  readonly property int captionLine: Math.ceil(captionMetrics.lineSpacing)
+  readonly property int bodyLine: Math.ceil(bodyMetrics.lineSpacing)
+  function captionWidth(text) { return captionMetrics.advanceWidth(text) }
+
+  // The keys in a window of their own (the keys page's Window, or w), to
+  // keep beside the panel; RIGHT NOW follows the panel. A fixed size makes
+  // Hyprland float it, centred, rather than tile it.
+  readonly property alias keysWindow: keysFloat
+  function openKeysWindow() {
+    root.keysOpen = false
+    keysFloat.visible = true
+  }
+  function closeKeysWindow() { keysFloat.visible = false }
+
+  FloatingWindow {
+    id: keysFloat
+    title: "omarock keys"
+    visible: false
+    color: Color.popups.background
+    readonly property size fixedSize: Qt.size(Style.space(520),
+      Math.min(Style.space(720), screen ? screen.height - Style.space(80) : Style.space(720)))
+    implicitWidth: fixedSize.width
+    implicitHeight: fixedSize.height
+    minimumSize: fixedSize
+    maximumSize: fixedSize
+    // Closed by Hyprland (Super+W): it's gone, but still visible to QML,
+    // and w couldn't bring it back.
+    onClosed: keysFloat.visible = false
+
+    KeysHelp {
+      objectName: "keysWindow"
+      anchors.fill: parent
+      anchors.margins: Style.space(16)
+      windowed: true
+      focus: true
+      foreground: root.foreground
+      fontFamily: root.fontFamily
+      tuiName: root.tuiCommand
+      version: root.version
+      here: root.hereKeys
+      onCloseRequested: root.closeKeysWindow()
+    }
   }
 
   // ---------- Compact ----------
@@ -3336,23 +3476,33 @@ Panel {
       SearchBox { width: parent.width }
 
       QueueHeading {
+        id: compactQueueHeading
         width: parent.width
         visible: !root.searchMode && !root.browsing
       }
 
       BrowseHeading {
+        id: compactBrowseHeading
         width: parent.width
         visible: root.browsing
       }
 
       TrackList {
         width: parent.width
-        height: Style.space(root.browsing ? 254 : !root.searchMode ? 272 : 310)
+        // What the heading above takes comes out of the list, so the panel
+        // is the same height on the queue, in search and browsing; and so
+        // does the hints' second line, so it's as tall as it was with one.
+        height: Style.space(310) - root.captionLine
+          - (compactQueueHeading.visible ? compactQueueHeading.height + parent.spacing : 0)
+          - (compactBrowseHeading.visible ? compactBrowseHeading.height + parent.spacing : 0)
       }
 
       PanelSeparator { foreground: root.foreground }
 
-      Hints { width: parent.width }
+      HintLine {
+        width: parent.width
+        lines: 2
+      }
     }
   }
 
@@ -3632,7 +3782,9 @@ Panel {
           anchors.verticalCenter: parent.verticalCenter
           anchors.leftMargin: Style.space(12)
           anchors.rightMargin: Style.space(12)
-          implicitHeight: Math.max(footerState.implicitHeight, footerHints.implicitHeight)
+          // A line of each, whatever the song's title needs (another
+          // script's font can be taller).
+          implicitHeight: Math.max(root.bodyLine, footerHints.implicitHeight)
 
           Text {
             id: footerState
@@ -3647,7 +3799,7 @@ Panel {
             elide: Text.ElideRight
           }
 
-          Hints {
+          HintLine {
             id: footerHints
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter

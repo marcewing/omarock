@@ -242,10 +242,17 @@ stay until you remove them too (each guide says how, by hand).
   channel under the cursor (or what's playing). At the top: the service and, for
   Spotify and Apple Music, whether it's in your library. For a local song: its
   tags, format, average bitrate, size and path.
-- **Keys** do what you'd guess, and the hint line says what Enter will do: Space
-  play/pause, `/` search, arrows to move, open and go back, Shift+←/→ to seek,
-  `n`/`p`, `+`/`-`, `m` the next source, `,` settings, `t` a terminal player (ncmpcpp), `?` for
-  the full list.
+- **Keys** do what you'd guess: Space play/pause, `/` search, arrows to move,
+  open and go back, Shift+←/→ to seek, `n`/`p`, `+`/`-`, `m` the next source, `,`
+  settings, `t` a terminal player (ncmpcpp), `?` for the full list.
+  - **The hint line** under the list shows the keys that work where you are: on
+    the row under the cursor, or in the search box while you type. It never
+    changes the panel's height. When there are too many for it, the least used
+    are left out.
+  - **The keys page (`?`)** starts with RIGHT NOW: all of those keys, in full.
+    Its **Window** button (or `w`) keeps the keys open in a window of their own,
+    beside the panel. Right now there follows the panel as you move, and Esc
+    or `q` closes the window. Hyprland floats it, because its size is fixed.
 - **From a key binding:** `qs ipc -p /usr/share/omarchy/shell call mre.omarock toggle`
   opens the panel.
 

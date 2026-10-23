@@ -398,6 +398,16 @@ function songSeconds(song) {
   return parseFloat(song.duration || song.time || 0) || 0
 }
 
+// The songs of two finds, each file once, in the order they came.
+function unionSongs(first, second) {
+  var seen = {}
+  return first.concat(second).filter(function(song) {
+    if (seen[song.file]) return false
+    seen[song.file] = true
+    return true
+  })
+}
+
 // An album artist's songs as albums, each { album, year, songs, seconds },
 // oldest first. Songs with no album tag come last, as album "".
 function groupAlbums(songs) {
@@ -668,6 +678,7 @@ if (typeof module !== "undefined") {
     songSeconds: songSeconds,
     groupAlbums: groupAlbums,
     splitAppearances: splitAppearances,
+    unionSongs: unionSongs,
     filesOf: filesOf,
     sortGenreAlbums: sortGenreAlbums,
     isVarious: isVarious,

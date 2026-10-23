@@ -2,7 +2,9 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// The full key list, over the panel. ? or Esc closes it.
+// The full key list, over the panel (? or Esc closes it), or in a window of
+// its own (Window, or w). RIGHT NOW, at the top, is the keys that do
+// something where the panel is, and follows it.
 Rectangle {
   id: root
 
@@ -10,8 +12,31 @@ Rectangle {
   property string fontFamily: Style.font.family
   property string tuiName: "ncmpcpp"
   property string version: ""
+  // [key, what it does] for RIGHT NOW.
+  property var here: []
+  // In its own window: it takes the keys itself, and has no Window button.
+  property bool windowed: false
 
   signal closeRequested()
+  signal windowRequested()
+
+  function scroll(dy) {
+    flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY + dy))
+  }
+
+  Keys.enabled: root.windowed
+  Keys.onPressed: function(event) {
+    var step = Style.space(40)
+    if (event.key === Qt.Key_Escape || event.text === "q" || event.text === "?") root.closeRequested()
+    else if (event.key === Qt.Key_Down || event.text === "j") root.scroll(step)
+    else if (event.key === Qt.Key_Up || event.text === "k") root.scroll(-step)
+    else if (event.key === Qt.Key_PageDown || event.key === Qt.Key_Space) root.scroll(flick.height - step)
+    else if (event.key === Qt.Key_PageUp) root.scroll(step - flick.height)
+    else if (event.key === Qt.Key_Home) flick.contentY = 0
+    else if (event.key === Qt.Key_End) root.scroll(flick.contentHeight)
+    else return
+    event.accepted = true
+  }
 
   readonly property var groups: [
     { title: "PLAYBACK", keys: [
@@ -50,6 +75,7 @@ Rectangle {
       ["t", "Open the terminal player (" + root.tuiName + ")"],
       [",", "Settings: the sources, and how the panel behaves"],
       ["?", "Show or hide these keys"],
+      ["w", "With the keys showing: keep them open in a window of their own"],
       ["Tab", "Next panel on the bar"]
     ] }
   ]
@@ -59,10 +85,12 @@ Rectangle {
 
   MouseArea {
     anchors.fill: parent
+    enabled: !root.windowed
     onClicked: root.closeRequested()
   }
 
   Flickable {
+    id: flick
     anchors.fill: parent
     anchors.margins: Style.space(4)
     contentHeight: content.implicitHeight
@@ -103,6 +131,23 @@ Rectangle {
         }
 
         Button {
+          objectName: "keysWindowButton"
+          anchors.right: closeButton.left
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          visible: !root.windowed
+          text: "Window"
+          iconText: "󰏌"
+          iconSize: fontSize
+          tooltipText: "Keep the keys open in a window of their own (w)"
+          bordered: true
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          fontSize: Style.font.caption
+          onClicked: root.windowRequested()
+        }
+
+        Button {
           id: closeButton
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -115,48 +160,65 @@ Rectangle {
         }
       }
 
+      // Its own group, so a move in the panel redraws only these rows.
+      KeyGroup {
+        objectName: "keysHere"
+        width: content.width
+        visible: root.here.length > 0
+        title: "RIGHT NOW"
+        keys: root.here
+      }
+
       Repeater {
         model: root.groups
 
-        Column {
+        KeyGroup {
           required property var modelData
           width: content.width
-          spacing: Style.space(5)
+          title: modelData.title
+          keys: modelData.keys
+        }
+      }
+    }
+  }
 
-          PanelSectionHeader {
-            text: modelData.title
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-          }
+  component KeyGroup: Column {
+    id: group
+    property string title: ""
+    property var keys: []
+    spacing: Style.space(5)
 
-          Repeater {
-            model: modelData.keys
+    PanelSectionHeader {
+      text: group.title
+      foreground: root.foreground
+      fontFamily: root.fontFamily
+    }
 
-            Row {
-              required property var modelData
-              spacing: Style.space(12)
+    Repeater {
+      model: group.keys
 
-              Text {
-                textFormat: Text.PlainText
-                width: Style.space(96)
-                text: modelData[0]
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
+      Row {
+        required property var modelData
+        spacing: Style.space(12)
 
-              Text {
-                textFormat: Text.PlainText
-                width: content.width - Style.space(108)
-                text: modelData[1]
-                color: Qt.darker(root.foreground, 1.3)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                wrapMode: Text.WordWrap
-              }
-            }
-          }
+        Text {
+          textFormat: Text.PlainText
+          width: Style.space(96)
+          text: modelData[0]
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: group.width - Style.space(108)
+          text: modelData[1]
+          color: Qt.darker(root.foreground, 1.3)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          wrapMode: Text.WordWrap
         }
       }
     }
