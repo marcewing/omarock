@@ -127,11 +127,21 @@ if [[ $mode == --run || $mode == --run-now ]]; then
     stop_bridge $previous || true
     launchctl bootout gui/$UID/$previous 2>/dev/null || true
   fi
+  # Copied in beside the installed app first, then swapped in with two renames, so there's
+  # never a half-copied app at $app for macOS to open (and call damaged).
+  mkdir -p ~/Applications
+  stage=$(mktemp -d ~/Applications/.OmarockBridge.XXXXXX)
+  trap 'rm -rf "$stage"' EXIT
+  ditto "$built" "$stage/OmarockBridge.app"
+  swap_in() {
+    [[ -e $app ]] && mv "$app" "$stage/old.app"
+    mv "$stage/OmarockBridge.app" "$app"
+  }
   if stop_bridge $label; then
-    mkdir -p ~/Applications && rm -rf "$app" && ditto "$built" "$app"
+    swap_in
     launchctl kickstart gui/$UID/$label
   else
-    mkdir -p ~/Applications && rm -rf "$app" && ditto "$built" "$app"
+    swap_in
     # Opened through LaunchServices: it registers its launch agent and hands over to it.
     open "$app"
   fi
