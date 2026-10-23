@@ -130,6 +130,10 @@ class Bridge:
         # album's songs without inLibrary, as an older bridge sends them
         # (POST /v1/fake/bare).
         self.bare = False
+        # The status's song from the library, with an artist id the library's
+        # artist route can't find, as the bridge gives a song whose album
+        # MusicKit doesn't list (POST /v1/fake/orphan).
+        self.orphan = False
         # POST /v1/library/add, which older bridges lack (POST /v1/fake/library
         # takes it away); what it added, and what Spotify's remove took out.
         self.library_route = True
@@ -230,6 +234,8 @@ class Bridge:
             out["song"] = dict(song, inLibrary=self.owns("song", song["catalogId"]))
         if self.bare and "song" in out:
             out["song"] = {k: v for k, v in out["song"].items() if k not in ("albumId", "artistId", "inLibrary")}
+        if self.orphan and "song" in out:
+            out["song"] = dict(out["song"], source="library", artistId="l-ar-gone")
         return out
 
     def play_at(self, index, state="playing"):
@@ -392,8 +398,8 @@ class Handler(BaseHTTPRequestHandler):
                         (b.unsaved if path == "library/add" else b.saved).discard(key)
                     b.changed()
                     return {"ok": True}
-                if path == "fake/bare":
-                    b.bare = bool(body["on"])
+                if path in ("fake/bare", "fake/orphan"):
+                    setattr(b, path[5:], bool(body["on"]))
                     b.changed()
                     return {"ok": True}
                 if b.spotify and path == "activate":
@@ -482,7 +488,8 @@ class Handler(BaseHTTPRequestHandler):
                         if b.spotify: album = dict(album, inLibrary=b.owns("album", parts[2]))
                     return {"album": album, "tracks": tracks}
                 if parts[0] == "artists" and parts[1] == "library":
-                    artist = next(a for a in b.library_artists if a["id"] == parts[2])
+                    artist = next((a for a in b.library_artists if a["id"] == parts[2]), None)
+                    if artist is None: raise KeyError(f"No library artist with id {parts[2]}.")
                     albums = [a for a in b.library_albums if a["artist"] == artist["name"]]
                     top = [dict(SONGS[s], id="l-" + s, source="library") for s in CATALOG_ALBUMS["c-al-1"]["tracks"]]
                     return {"artist": artist, "albums": albums, "topSongs": top, "appearsOn": []}

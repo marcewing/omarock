@@ -138,7 +138,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.6.4"
+  readonly property string version: "0.6.5"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1473,11 +1473,15 @@ Panel {
   // While the bridge fetches the artist, a search of the other side looks
   // for the same name; when it's there and isn't the same object (Spotify's
   // followed artists are its catalog's), both are fetched and merged.
+  // When the artist's own id doesn't open, that name on the other side
+  // opens instead: a library song whose album the bridge doesn't count as
+  // yours carries an artist id its artist route can't find.
   function loadAppleArtist(entry, show, shown) {
     var bridge = root.browseBridge
     var ref = entry.apple
     var other = ref.source === "library" ? "catalog" : "library"
     var main = null
+    var mainError = null
     var found = undefined
     var failed = shown(null)
     function merge(data) {
@@ -1485,8 +1489,18 @@ Panel {
       var theirs = ref.source === "library" ? data : main
       show(Apple.mergedArtistView({ artist: mine.artist, data: mine }, { artist: theirs.artist, data: theirs }, bridge.service))
     }
+    function instead() {
+      var match = found ? Apple.findArtist(found, other, entry.title) : null
+      if (!match) { failed(null, mainError); return }
+      bridge.artist(other, match.id, function(data) {
+        if (data) show(Apple.artistView(data.artist, data, bridge.service))
+        else failed(null, mainError)
+      })
+    }
     function both() {
-      if (!main || found === undefined) return
+      if (found === undefined) return
+      if (mainError !== null) { instead(); return }
+      if (!main) return
       var match = found ? Apple.findArtist(found, other, main.artist.name || entry.title) : null
       if (!match || match.id === ref.id) {
         show(Apple.artistView(main.artist, main, bridge.service))
@@ -1498,8 +1512,8 @@ Panel {
       })
     }
     bridge.artist(ref.source, ref.id, function(data, error) {
-      if (!data) { failed(null, error); return }
-      main = data
+      if (!data) mainError = error || "The artist didn't open"
+      else main = data
       both()
     })
     bridge.search(entry.title, function(results) {

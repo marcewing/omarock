@@ -1755,6 +1755,20 @@ def now_playing_scenario(host, output, socket_path, failures):
     back("← from that artist comes back to the queue")
     fake_bridge_info(False, "bare")
     fake_bridge_info(False)
+    # A library song whose artist id the bridge can't open (its album isn't
+    # one MusicKit lists): the same name in the catalog opens instead.
+    fake_bridge_info(True, "orphan")
+    wait_for(lambda: (host.state()["bridgeSong"] or {}).get("artistId") == "l-ar-gone", "a song with an artist id that won't open")
+    host.settle(.3)
+    asked = len(bridge_requests("/v1/artists/"))
+    host.call("clickPanel", "playingArtist")
+    s = opens("a click on an artist whose id doesn't open", "artist:" + artist)
+    paths = [p for _, p, _ in bridge_requests("/v1/artists/")[asked:]]
+    check(not (s["browseInfo"] or {}).get("failed") and any(r.startswith("album:") for r in s["rows"])
+          and paths[:1] == ["/v1/artists/library/l-ar-gone"] and any(p.startswith("/v1/artists/catalog/") for p in paths),
+          "it opens the catalog's artist of that name: " + json.dumps([paths, s["rows"]]), failures)
+    back("← from it comes back to the queue")
+    fake_bridge_info(False, "orphan")
     to_source(host, "local")
     BRIDGE["config"].unlink()
 
