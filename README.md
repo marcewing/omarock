@@ -220,8 +220,9 @@ stay until you remove them too (each guide says how, by hand).
 - **Your library (`L`):** on Apple Music or Spotify, `L` adds the song, album
   or (Apple Music) playlist under the cursor to your library, or, with no
   cursor, the song playing. In the info card it adds what the card shows. A
-  song added on Apple Music reaches the Mac's library through iCloud, so it
-  can take a while to show among your albums; omarock counts it in at once.
+  song added on Apple Music reaches the Mac's library through iCloud, and only
+  comes down while the Music app is running on the Mac. Until then it doesn't
+  show among your albums, though omarock counts it in at once.
 - **An album's place in your library:** an Apple Music or Spotify album says,
   beside its name, **In your library**, **4 of 12 in your library** (with a ✓ by
   each song you have), or **Add to library**. A click adds the whole album; on
