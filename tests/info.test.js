@@ -90,6 +90,13 @@ test("appleItem: the library status leads the card", () => {
   // A library row taken out of the library (Spotify): the service's word wins.
   const gone = Info.appleItem(Object.assign({}, diane, { source: "library" }), { inLibrary: false }, "spotify")
   assert.equal(gone.statusKind, "no")
+  // An album you have some songs of, counted from its list; all of it wins.
+  const metal = { kind: "album", id: "1440857700", source: "catalog", title: "Metal Circus", artist: "Hüsker Dü" }
+  const part = Info.appleItem(metal, { inLibrary: false, songsInLibrary: { have: 1, total: 7 } })
+  assert.equal(part.status, "1 of 7 songs in your library")
+  assert.equal(part.statusKind, "some")
+  assert.equal(Info.appleItem(metal, { inLibrary: true, songsInLibrary: { have: 1, total: 7 } }).statusKind, "yes")
+  assert.equal(Info.appleItem(metal, { inLibrary: false, songsInLibrary: { have: 0, total: 7 } }).statusKind, "no")
   assert.deepEqual(lines(out), [
     "SONG: Artist = Hüsker Dü", "SONG: Album = Metal Circus", "SONG: Track = 5 (disc 1)", "SONG: Released = 1 Oct 1983",
     "SONG: Genre = Punk", "SONG: Composer = Grant Hart", "SONG: Length = 4:09",

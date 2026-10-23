@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 MPD_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "mpd/socket"
@@ -529,7 +529,7 @@ class Web:
                 out["catalogError"] = str(e)
         return out
 
-    def album(self, aid, source="catalog"):
+    def album(self, aid, source="catalog", library=False):
         data = self.get(f"/albums/{aid}?market=from_token")
         tracks = [song(t, source, album=data) for t in (data.get("tracks") or {}).get("items") or [] if t]
         nxt = (data.get("tracks") or {}).get("next")
@@ -537,7 +537,26 @@ class Web:
             page = self.get(nxt)
             tracks += [song(t, source, album=data) for t in page.get("items") or [] if t]
             nxt = page.get("next")
-        return {"album": album_obj(data, source), "tracks": tracks}
+        out = {"album": album_obj(data, source), "tracks": tracks}
+        if library:
+            # For the album view: the saved album, and the liked songs.
+            pairs = [(out["album"], "spotify:album:" + aid)] + [(t, "spotify:track:" + t["id"]) for t in tracks]
+            known = self.in_library([uri for _, uri in pairs])
+            for obj, uri in pairs:
+                if uri in known:
+                    obj["inLibrary"] = known[uri]
+        return out
+
+    def in_library(self, uris):
+        """{uri: in your library} for these URIs, 40 a call; what Spotify
+        doesn't answer is left out."""
+        out = {}
+        for i in range(0, len(uris), 40):
+            part = uris[i:i + 40]
+            status, data = spotify_web.call("GET", "/me/library/contains?" + urllib.parse.urlencode({"uris": ",".join(part)}))
+            if status == 200 and isinstance(data, list) and len(data) == len(part):
+                out.update(zip(part, map(bool, data)))
+        return out
 
     def artist(self, aid, source="catalog"):
         artist = self.get(f"/artists/{aid}")
@@ -703,7 +722,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts[:1] == ["genres"]:
                 raise LookupError("Spotify has no genre charts for apps any more")
             if len(parts) == 3 and parts[0] == "albums":
-                return WEB.album(parts[2], parts[1])
+                return WEB.album(parts[2], parts[1], library=True)
             if len(parts) == 3 and parts[0] == "artists":
                 return WEB.artist(parts[2], parts[1])
             if len(parts) == 3 and parts[0] == "playlists":

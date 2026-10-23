@@ -87,6 +87,8 @@ def main():
     check("mpd pausing changes nothing", s.yielded and s.ws.sent == [], str(s.ws.sent))
 
     library()
+    album_library()
+    renewal()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
 
@@ -118,6 +120,66 @@ def library():
         check("Spotify refusing is an error", False)
     except service.ApiError as e:
         check("Spotify refusing is an error", "Insufficient client scope" in str(e), str(e))
+
+
+def album_library():
+    """The album route says which of its songs, and whether the album, are in
+    your library: /me/library/contains, 40 URIs a call."""
+    tracks = [{"id": f"t{i}", "name": f"Song {i}", "artists": [{"id": "ar", "name": "Artist"}]} for i in range(41)]
+    album = {"id": "a1", "name": "Album", "artists": [{"id": "ar", "name": "Artist"}], "tracks": {"items": tracks}}
+    asked = []
+
+    def call(method, path, body=None):
+        if path.startswith("/albums/"):
+            return 200, album
+        uris = service.urllib.parse.parse_qs(service.urllib.parse.urlparse(path).query)["uris"][0].split(",")
+        asked.append(uris)
+        return 200, [uri in ("spotify:album:a1", "spotify:track:t1", "spotify:track:t40") for uri in uris]
+    service.spotify_web.call = call
+    out = service.Handler.route(None, "GET", ["albums", "catalog", "a1"], {}, {})
+    mine = [t["id"] for t in out["tracks"] if t.get("inLibrary")]
+    check("album: the saved album and the liked songs", out["album"].get("inLibrary") is True and mine == ["t1", "t40"]
+          and all(t.get("inLibrary") is False for t in out["tracks"] if t["id"] not in mine), str(mine))
+    check("album: 40 URIs a call", [len(u) for u in asked] == [40, 2], str([len(u) for u in asked]))
+    service.spotify_web.call = lambda method, path, body=None: (200, album) if path.startswith("/albums/") else (403, None)
+    out = service.Handler.route(None, "GET", ["albums", "catalog", "a1"], {}, {})
+    check("album: Spotify not saying leaves it out", "inLibrary" not in out["album"]
+          and not any("inLibrary" in t for t in out["tracks"]))
+    asked.clear()
+    service.spotify_web.call = call
+    service.WEB.album("a1")
+    check("album for playing: not asked", asked == [], str(asked))
+
+
+def renewal():
+    """Requests arriving together renew the sign-in once, not each."""
+    import json
+    import tempfile
+    web = service.spotify_web
+    folder = Path(tempfile.mkdtemp())
+    web.CONFIG, web.TOKENS = folder / "spotify.json", folder / "spotify-token.json"
+    web.CONFIG.write_text(json.dumps({"clientId": "test"}))
+    web.TOKENS.write_text(json.dumps({"access_token": "old", "refresh_token": "r1", "expires_at": 0}))
+    renewals = []
+
+    def token_request(fields):
+        renewals.append(fields["refresh_token"])
+        time.sleep(0.2)
+        return {"access_token": "new", "refresh_token": "r2", "expires_in": 3600}
+    web.token_request = token_request
+    got, errors = [], []
+
+    def ask():
+        try: got.append(web.access_token())
+        except Exception as e: errors.append(repr(e))
+    threads = [threading.Thread(target=ask) for _ in range(4)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    check("renewing: once for four requests", renewals == ["r1"] and got == ["new"] * 4 and not errors,
+          f"{renewals} {got} {errors}")
+    check("renewing: the new tokens saved, nothing left behind",
+          json.loads(web.TOKENS.read_text())["refresh_token"] == "r2" and sorted(p.name for p in folder.iterdir())
+          == ["spotify-token.json", "spotify.json"], str(list(folder.iterdir())))
 
 
 if __name__ == "__main__":

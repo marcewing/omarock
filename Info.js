@@ -293,6 +293,9 @@ function yesNo(value) {
 // library still has a library row's source.
 function libraryStatus(item, extra) {
   if (extra.inLibrary === true) return ["In your library", "yes"]
+  // An album you have some songs of (the panel counts them from the album's list).
+  var some = extra.songsInLibrary
+  if (some && some.have > 0) return [some.have + " of " + some.total + " songs in your library", "some"]
   if (extra.inLibrary === false) return ["Not in your library", "no"]
   if (item.source === "library") return ["In your library", "yes"]
   if (extra.checking) return ["Checking your library…", "checking"]

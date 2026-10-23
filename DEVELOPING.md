@@ -74,6 +74,11 @@ It drives the panel with real key presses (QtTest's event injector) and clicks,
 saves screenshots, and fails on any QML warning from the plugin, or if the panel
 sends mpd an output command.
 
+The panel keeps its state when it closes. So the harness's `close` also resets
+it (the search, browsing, cards, the cursor), which keeps each scenario
+starting fresh; `hide` closes it the way the bar does, as `--only keep-state`
+needs.
+
 - **`--scratch-mpd DIR`** starts a throwaway mpd over DIR. Its only output is mpd's
   `null` output, which plays to nowhere. It runs the playlist scenario against
   real mpd behaviour.

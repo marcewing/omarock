@@ -261,6 +261,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     radio_tuning_scenario(host, socket_path, failures)
     info_scenario(host, output, socket_path, failures)
     library_scenario(host, output, socket_path, failures)
+    keep_state_scenario(host, output, failures)
     list_tuning_scenario(host, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
@@ -1840,6 +1841,71 @@ def library_scenario(host, output, socket_path, failures):
              "an older bridge: update it")
     fake_bridge_info(True, "library")
     fake_bridge_info(False)
+
+    # An album says how much of it is yours, and marks the songs you have.
+    def album_said(want, label):
+        wait_for(lambda: (host.state()["albumLibrary"] or {}).get("text") == want, label)
+    host.call("type", "new day rising")
+    wait_for(lambda: host.state()["query"] == "new day rising" and not host.state()["searching"], "search new day rising")
+    cursor_to(host, "album:New Day Rising", failures)
+    host.call("press", "Right")
+    wait_for(lambda: host.state()["browse"] == "album:New Day Rising" and not host.state()["browseLoading"], "the album")
+    # The song the card added is marked if it's on this album (that depends on
+    # what Apple Music was left playing).
+    def row(title): return host.state()["rows"].index("track:" + title)
+    def heading(n): return f"󰄬 {n} of 3 in your library" if n else "󰐕 Add to library"
+    mine = [song["title"]] if song.get("albumId") == "c-al-2" else []
+    add = next(t for t in ("Celebrated Summer", "Girl Who Lives on Heaven Hill") if t not in mine)
+    album_said(heading(len(mine)), "the heading: " + heading(len(mine)))
+    s = host.state()
+    check(sorted(s["albumLibrary"]["owned"]) == sorted(row(t) for t in mine)
+          and s["albumLibrary"]["hover"] == ("󰐕 Add the album" if mine else ""),
+          "the songs you have are marked: " + json.dumps(s["albumLibrary"]), failures)
+    cursor_to(host, "track:" + add, failures)
+    host.call("press", "L")
+    wait_for(lambda: host.state()["notice"] == f"Added {add} to your Apple Music library", "L adds the song")
+    album_said(heading(len(mine) + 1), "the heading: " + heading(len(mine) + 1))
+    s = host.state()
+    check(sorted(s["albumLibrary"]["owned"]) == sorted(row(t) for t in mine + [add])
+          and s["albumLibrary"]["hover"] == "󰐕 Add the album",
+          "the song added is marked, and a click adds the album: " + json.dumps(s["albumLibrary"]), failures)
+    host.grab(output / "library-album.png")
+    # The info card on its Play row says the same.
+    fake_bridge_info(True)
+    cursor_to(host, "playalbum:Play the album", failures)
+    host.call("press", "i")
+    card = info_card(host, "the album's card")
+    check(card["statusKind"] == "some" and card["status"] == f"{len(mine) + 1} of 3 songs in your library"
+          and host.state()["infoAction"] == "Add to library (L)", "the album's info card: " + card["status"], failures)
+    host.call("press", "i")
+    wait_for(lambda: host.state()["info"] is None, "the card closed")
+    fake_bridge_info(False)
+    check(host.call("clickPanel", "albumLibrary") == "ok", "the heading's line can be clicked", failures)
+    album_said("󰄬 In your library", "the heading: In your library")
+    check(bridge_requests("/v1/library/add")[-1][2] == {"items": [{"kind": "album", "id": "c-al-2", "source": "catalog"}]},
+          "the click adds the album", failures)
+    s = host.state()
+    check(s["albumLibrary"]["owned"] == [] and not s["albumLibrary"]["active"], "no marks once it's all yours, nothing to click", failures)
+    cursor_to(host, "playalbum:Play the album", failures)
+    host.call("press", "L")
+    wait_for(lambda: host.state()["notice"] == "New Day Rising is in your library already", "L on its Play row: there already")
+    # Opened again, it's the bridge that says so.
+    host.call("press", "Left")
+    cursor_to(host, "album:New Day Rising", failures)
+    host.call("press", "Right")
+    wait_for(lambda: host.state()["browse"] == "album:New Day Rising" and not host.state()["browseLoading"], "the album again")
+    album_said("󰄬 In your library", "the bridge's inLibrary: In your library")
+    # An older bridge doesn't say: Add to library, as the card says.
+    fake_bridge_info(True, "bare")
+    host.call("type", "makes no sense")
+    wait_for(lambda: host.state()["query"] == "makes no sense" and not host.state()["searching"], "search makes no sense")
+    cursor_to(host, "album:Makes No Sense at All", failures)
+    host.call("press", "Right")
+    wait_for(lambda: host.state()["browse"] == "album:Makes No Sense at All" and not host.state()["browseLoading"],
+             "an album, from an older bridge")
+    album_said("󰐕 Add to library", "an older bridge: Add to library")
+    fake_bridge_info(False, "bare")
+    host.call("press", "Left")
     host.call("press", "Escape")
 
     # Spotify: add, then a click on In your library takes it out.
@@ -1860,9 +1926,128 @@ def library_scenario(host, output, socket_path, failures):
         check(asked and asked[-1][2] == item, "it asks omarock-spotify to " + ("take it out" if taking_out else "add it"), failures)
         wait_for(lambda: host.state()["notice"] == (f"Took {song['title']} out of your Spotify library" if taking_out
                                                     else f"Added {song['title']} to your Spotify library"), "says so")
+    # A Spotify album: saved apart from its songs, and taken out again.
+    host.call("press", "/")
+    host.call("typeKeys", "workbook")
+    wait_for(lambda: host.state()["query"] == "workbook" and not host.state()["searching"], "Spotify: search workbook")
+    cursor_to(host, "album:Workbook", failures)
+    host.call("press", "Right")
+    wait_for(lambda: host.state()["browse"] == "album:Workbook" and not host.state()["browseLoading"], "Spotify's album")
+    wait_for(lambda: (host.state()["albumLibrary"] or {}).get("text") == "󰐕 Add to library", "Spotify's album: Add to library")
+    cursor_to(host, "track:Sunspots", failures)
+    host.call("press", "L")
+    wait_for(lambda: (host.state()["albumLibrary"] or {}).get("text") == "󰄬 1 of 2 in your library", "Spotify: a liked song, 1 of 2")
+    host.call("clickPanel", "albumLibrary")
+    wait_for(lambda: (host.state()["albumLibrary"] or {}).get("text") == "󰄬 In your library", "Spotify: the album saved")
+    s = host.state()
+    check(s["albumLibrary"]["hover"] == "󰅖 Remove from library" and s["albumLibrary"]["active"]
+          and s["albumLibrary"]["owned"] == [s["rows"].index("track:Sunspots")],
+          "saved: a click takes it out, and the liked song is still marked: " + json.dumps(s["albumLibrary"]), failures)
+    host.call("clickPanel", "albumLibrary")
+    wait_for(lambda: (host.state()["albumLibrary"] or {}).get("text") == "󰄬 1 of 2 in your library", "Spotify: the album taken out")
+    check(spotify_requests("/v1/library/remove")[-1][2] == {"items": [{"kind": "album", "id": "c-al-3", "source": "catalog"}]},
+          "it asks omarock-spotify to take the album out", failures)
+    host.call("press", "Escape")
     spotify_post("/v1/fake/library", {"on": True})
     to_source(host, "local")
     BRIDGE["config"].unlink()
+
+
+def keep_state_scenario(host, output, failures):
+    """Closing the panel and opening it again leaves it as it was: the
+    search, where you'd browsed to, the cursor, the info card, the picker,
+    settings and the expanded view, with the keys back where they were. A
+    setting being typed is dropped, not saved."""
+    def reopen():
+        host.call("hide")
+        wait_for(lambda: not host.state()["opened"], "closed")
+        host.settle(.3)
+        host.call("open")
+        wait_for(lambda: host.state()["opened"], "open again")
+        host.settle(.5)
+
+    host.call("close")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.settle(.3)
+    # Typing a search: it's still there, and so are the keys.
+    host.call("press", "/")
+    host.call("typeKeys", "flug")
+    wait_for(lambda: host.state()["query"] == "flug" and not host.state()["searching"], "search flug")
+    rows = host.state()["rows"]
+    reopen()
+    s = host.state()
+    check(s["query"] == "flug" and s["rows"] == rows, "the search is still there", failures)
+    check(host.call("focusName") == "search", "typing goes on in the search box: " + host.call("focusName"), failures)
+    host.call("typeKeys", "el")
+    wait_for(lambda: host.state()["query"] == "flugel" and not host.state()["searching"], "typing goes on")
+
+    # Browsing: the level, the cursor, and the keys on the list.
+    cursor_to(host, "artist:Flügel Café", failures)
+    host.call("press", "Right")
+    wait_for(lambda: host.state()["browse"] == "artist:Flügel Café" and not host.state()["browseLoading"], "the artist")
+    host.call("press", "Down")
+    host.settle(.2)
+    before = host.state()
+    check(before["cursor"] >= 1, "the cursor moved down the artist: " + str(before["rows"]), failures)
+    reopen()
+    s = host.state()
+    check(s["browse"] == before["browse"] and s["cursor"] == before["cursor"] and s["query"] == "flugel",
+          f"still on the artist, cursor on row {s['cursor']} (was {before['cursor']})", failures)
+    check("PanelKeyCatcher" in host.call("focusName"), "the keys go to the list: " + host.call("focusName"), failures)
+    host.call("press", "Up")
+    wait_for(lambda: host.state()["cursor"] == before["cursor"] - 1, "↑ moves on from there")
+    host.grab(output / "keep-state.png")
+
+    # The info card stays open.
+    host.call("press", "i")
+    card = info_card(host, "the row's card")
+    reopen()
+    check((host.state()["info"] or {}).get("title") == card["title"], "the info card is still open", failures)
+    host.call("press", "i")
+    wait_for(lambda: host.state()["info"] is None, "i closes it")
+
+    # The playlist picker stays up, with the keys in its box.
+    host.call("press", "A")
+    wait_for(lambda: host.state()["pickerOpen"], "the picker")
+    reopen()
+    check(host.state()["pickerOpen"] and host.call("focusName") == "picker",
+          "the picker is still up, typing in it: " + host.call("focusName"), failures)
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["pickerOpen"], "Esc closes the picker")
+
+    # The expanded view's columns.
+    host.call("expand", "true")
+    wait_for(lambda: host.state()["columns"], "the columns")
+    reopen()
+    s = host.state()
+    check(s["expanded"] and s["columns"] and s["browse"] == "artist:Flügel Café", "still expanded, on the artist", failures)
+    host.call("expand", "false")
+
+    # Settings stay open, but a setting being typed is dropped, not saved.
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"], "settings")
+    s = host.state()
+    for _ in range(s["settingsRows"].index("radioState") - s["settingsCursor"]): host.call("press", "Down")
+    was = host.state()["settingValues"].get("radioState")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingsEditing"] == "radioState", "editing radioState")
+    host.call("typeKeys", "Nevad")
+    reopen()
+    s = host.state()
+    check(s["settingsOpen"] and s["settingsEditing"] == "" and s["settingValues"].get("radioState") == was
+          and settings_file().get("radioState") in (None, was),
+          "settings still open; the half-typed state wasn't saved: " + json.dumps([s["settingsOpen"], s["settingsEditing"], was,
+          s["settingValues"].get("radioState"), settings_file().get("radioState")]), failures)
+    host.call("press", ",")
+    wait_for(lambda: not host.state()["settingsOpen"], "settings closed")
+
+    # The harness's own close starts the next scenario fresh.
+    host.call("close")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    s = host.state()
+    check(s["query"] == "" and s["browse"] == "" and s["info"] is None, "close() in the harness starts fresh", failures)
 
 
 def lookup_scenario(host, output, socket_path, failures):
@@ -3477,6 +3662,7 @@ def main():
                             elif name == "now-playing": now_playing_scenario(host, output, socket_path, failures)
                             elif name == "lookup": lookup_scenario(host, output, socket_path, failures)
                             elif name == "library": library_scenario(host, output, socket_path, failures)
+                            elif name == "keep-state": keep_state_scenario(host, output, failures)
                             elif name == "teardown": teardown_scenario(host, socket_path, failures)
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
                             elif name == "late-config": late_config_scenario(host, failures)

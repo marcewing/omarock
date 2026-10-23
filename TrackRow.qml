@@ -18,6 +18,9 @@ CursorSurface {
   property bool actionsOnCursor: true
   // The file mpd is playing, to mark it in album views and search results.
   property string playingFile: ""
+  // A song of an Apple Music or Spotify album you have only some of, that
+  // is in your library: a check by its length.
+  property bool libraryMark: false
   // The album cover, for album rows that have one.
   property string coverUrl: ""
   property color dim: Qt.darker(foreground, 1.5)
@@ -105,7 +108,7 @@ CursorSurface {
       id: labels
       anchors.left: row.hasCover ? cover.right : lead.right
       anchors.leftMargin: Style.space(row.hasCover ? 10 : 8)
-      anchors.right: actions.visible ? actions.left : detail.left
+      anchors.right: actions.visible ? actions.left : mark.visible ? mark.left : detail.left
       anchors.rightMargin: Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(1)
@@ -145,6 +148,20 @@ CursorSurface {
       color: row.dim
       font.family: row.fontFamily
       font.pixelSize: row.opens ? Style.font.body : Style.font.caption
+    }
+
+    Text {
+      id: mark
+      objectName: "libraryMark"
+      textFormat: Text.PlainText
+      anchors.right: detail.left
+      anchors.rightMargin: Style.space(6)
+      anchors.verticalCenter: parent.verticalCenter
+      visible: row.libraryMark && !actions.visible
+      text: "󰄬"
+      color: Color.accent
+      font.family: row.fontFamily
+      font.pixelSize: Style.font.caption
     }
 
     Row {

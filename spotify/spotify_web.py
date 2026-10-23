@@ -28,6 +28,7 @@ import os
 import secrets
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -63,7 +64,9 @@ def config():
 
 
 def save_tokens(data):
-    tmp = TOKENS.with_suffix(".new")
+    # A name of its own: a sign-in (omarock-sp login) can save while the
+    # service renews.
+    tmp = TOKENS.with_name(f"{TOKENS.name}.{os.getpid()}-{threading.get_ident()}.new")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(data, f, indent=2)
@@ -157,17 +160,23 @@ def signed_in_at():
     except (OSError, ValueError): return None
 
 
+# One renewal at a time. Requests that arrive together (the panel opening)
+# would each renew, spending the refresh token, and race on the file.
+renewing = threading.Lock()
+
+
 def access_token():
-    if not TOKENS.exists():
-        raise NotSignedIn("Not signed in to Spotify")
-    tokens = json.loads(TOKENS.read_text())
-    if time.time() < tokens.get("expires_at", 0):
+    with renewing:
+        if not TOKENS.exists():
+            raise NotSignedIn("Not signed in to Spotify")
+        tokens = json.loads(TOKENS.read_text())
+        if time.time() < tokens.get("expires_at", 0):
+            return tokens["access_token"]
+        client_id, _ = config()
+        data = token_request({"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"], "client_id": client_id})
+        tokens = stored(data, tokens)
+        save_tokens(tokens)
         return tokens["access_token"]
-    client_id, _ = config()
-    data = token_request({"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"], "client_id": client_id})
-    tokens = stored(data, tokens)
-    save_tokens(tokens)
-    return tokens["access_token"]
 
 
 def call(method, path, body=None):

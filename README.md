@@ -196,6 +196,9 @@ stay until you remove them too (each guide says how, by hand).
   previous, play/pause, next, repeat) and volume, then search and the queue.
   **Expand** (`e`) makes it a bigger, two-column view in the same popup. It
   closes when the pointer leaves it, after a moment (the `closeOnLeave` setting).
+  Open it again and it's as you left it: the search, where you'd browsed to, the
+  cursor, an info card or the playlist picker, and the keys where they were (a
+  setting you were typing is dropped, not saved).
 - **The queue:** click a song to play it; × or `x` removes it.
 - **Search** finds genres, artists, albums, songs and playlists, ignoring case and
   accents ("husker" finds Hüsker Dü). A space also matches punctuation, so "ac dc"
@@ -218,7 +221,12 @@ stay until you remove them too (each guide says how, by hand).
   or (Apple Music) playlist under the cursor to your library, or, with no
   cursor, the song playing. In the info card it adds what the card shows. A
   song added on Apple Music reaches the Mac's library through iCloud, so it
-  can take a minute to show among your albums; omarock counts it in at once.
+  can take a while to show among your albums; omarock counts it in at once.
+- **An album's place in your library:** an Apple Music or Spotify album says,
+  beside its name, **In your library**, **4 of 12 in your library** (with a ✓ by
+  each song you have), or **Add to library**. A click adds the whole album; on
+  Spotify, where saving an album is apart from liking its songs, a click on In
+  your library takes the album out again.
 - **Heard it on the radio?** On SiriusXM or the radio, click the song's title or
   the artist (or `o`, `O`) to look it up in Apple Music or Spotify (the
   `lookup` setting picks), while the station plays on. Enter plays it there and

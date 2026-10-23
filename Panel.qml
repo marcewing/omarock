@@ -137,7 +137,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.6.1"
+  readonly property string version: "0.6.2"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -704,22 +704,33 @@ Panel {
     // Apple's genres need the catalog; fetch them again if they didn't come before.
     if (root.opened && root.appleMode && apple.genres.length === 0) apple.refreshGenres()
     root.cardResized()
+    // Closing keeps it all as it was: the search, where you'd browsed to,
+    // the cursor, the picker, the info card, Keys and settings, and where
+    // the keys went (returnFocus). Only a delete's confirmation doesn't
+    // wait, and a setting being typed is dropped, not saved half typed.
     if (root.opened) {
       root.rereadConfig()
-      root.cursorActive = false
-      root.keysOpen = false
-      root.settingsOpen = false
-      root.closeInfo()
       client.forgetMissingCovers()
       root.coverDirectory = ""
       root.updateCover()
       client.refreshStatus()
-      Qt.callLater(root.showCurrentSong)
+      if (!root.cursorActive) Qt.callLater(root.showCurrentSong)
     } else {
-      root.pickerItem = null
+      // The keys leave a moment later, so the search box still has them.
+      root.searchFocused = !!root.searchField && root.searchField.activeFocus
       root.confirmTarget = null
-      root.clearSearch()
+      settingsView.cancelEdit()
     }
+  }
+
+  // Whether the search box had the keys when the panel closed.
+  property bool searchFocused: false
+
+  // The panel opening gives the keys back to where they were.
+  function returnFocus() {
+    if (root.pickerOpen) playlistPicker.takeFocus()
+    else if (root.searchFocused && root.searchField) root.searchField.forceActiveFocus()
+    else keyCatcher.forceActiveFocus()
   }
 
   function launchTui() {
@@ -1028,10 +1039,26 @@ Panel {
     return known === false ? "no" : ""
   }
 
-  // The info card's answer, with what was added or removed here since.
+  // The info card's answer, with what was added or removed here since. For
+  // an album open in the list, what its heading says: all yours, or how
+  // many of its songs are (songsInLibrary).
   function withLibraryEdit(service, item, extra) {
     var edit = root.libraryEdits[root.libraryKey(service, item)]
-    return edit === undefined ? extra : Object.assign({}, extra, { inLibrary: edit, checking: false })
+    var out = edit === undefined ? extra : Object.assign({}, extra, { inLibrary: edit, checking: false })
+    var shown = item.kind === "album" ? root.shownAlbumLibrary(item) : null
+    if (shown && service === "apple" && shown.state === "yes")
+      out = Object.assign({}, out, { inLibrary: true, checking: false })
+    else if (shown && shown.have > 0 && out.inLibrary !== true)
+      out = Object.assign({}, out, { songsInLibrary: { have: shown.have, total: shown.total } })
+    return out
+  }
+
+  // root.albumLibrary for this album, if it's the one open or previewed.
+  function shownAlbumLibrary(item) {
+    function same(entry) {
+      return !!entry && !!entry.apple && entry.apple.kind === "album" && entry.apple.id === item.id && entry.apple.source === item.source
+    }
+    return same(root.browseTop) ? root.browseAlbumLibrary : same(root.previewEntry) ? root.previewAlbumLibrary : null
   }
 
   // The song playing on Apple Music or Spotify, as an item, and whether it's
@@ -1100,8 +1127,62 @@ Panel {
       root.say("L adds Apple Music and Spotify songs and albums to your library")
       return
     }
+    if (entry && item === entry.apple && item.kind === "album") {
+      root.libraryAlbum(entry, entry.rows)
+      return
+    }
     var title = item === (entry && entry.apple) ? entry.title : row.name || row.title || "It"
     root.toggleLibrary(root.browseBridge, item, root.inLibrary(root.browseBridge.serviceKey, item), title)
+  }
+
+  // How much of an Apple Music or Spotify album is in your library, for its
+  // heading and the marks on its songs; null for anything else.
+  // - text: "In your library", "4 of 31 in your library" or "Add to library";
+  //   hover: what a click does instead, where that differs; active: a click
+  //   can do something.
+  // - state: what L acts on. On Apple Music "yes" once every song is yours;
+  //   on Spotify, the album saved (its songs are liked one by one).
+  // - owned: the rows (by index) of the songs you have, when you have some.
+  // The songs' inLibrary come with the album (bridge 0.4.1, omarock-spotify
+  // 0.2.2); what was added or taken out here since counts too.
+  function albumLibrary(entry, rows) {
+    if (!entry || !entry.apple || entry.apple.kind !== "album" || !entry.loaded || !root.browseBridgeMode) return null
+    var bridge = root.browseBridge
+    var service = bridge.serviceKey
+    var album = entry.apple
+    var albumAdded = root.libraryEdits[root.libraryKey(service, album)] === true
+    var owned = {}
+    var have = 0
+    var total = 0
+    rows.forEach(function(row, i) {
+      if (row.kind !== "track" || !row.apple) return
+      total++
+      var known = row.item ? row.item.inLibrary : undefined
+      if ((service === "apple" && albumAdded) || root.inLibrary(service, row.apple, known) === "yes") {
+        owned[i] = true
+        have++
+      }
+    })
+    var saved = service === "apple" ? total > 0 && have === total
+      : root.inLibrary(service, album, entry.info && entry.info.item ? entry.info.item.inLibrary : undefined) === "yes"
+    var some = have > 0 && have < total
+    var out = { state: saved ? "yes" : "no", owned: some ? owned : ({}), active: !saved || bridge.canUnsave, have: have, total: total,
+      text: saved ? "󰄬 In your library" : some || have > 0 ? "󰄬 " + have + " of " + total + " in your library" : "󰐕 Add to library",
+      hover: saved ? (bridge.canUnsave ? "󰅖 Remove from library" : "") : have > 0 ? "󰐕 Add the album" : "" }
+    if (root.librarySaving === root.libraryKey(service, album)) {
+      out.text = saved ? "Removing…" : "Adding…"
+      out.hover = ""
+      out.active = false
+    }
+    return out
+  }
+  readonly property var browseAlbumLibrary: root.albumLibrary(root.browseTop, root.browseRows)
+  readonly property var previewAlbumLibrary: root.albumLibrary(root.previewEntry, root.previewRows)
+
+  // L on an album's Play row, or a click on its heading's line.
+  function libraryAlbum(entry, rows) {
+    var summary = root.albumLibrary(entry, rows)
+    if (summary) root.toggleLibrary(root.browseBridge, entry.apple, summary.state, entry.title)
   }
 
   // L in the info card: what it shows; then the card says so.
@@ -1125,7 +1206,7 @@ Panel {
     if (root.librarySaving === root.libraryKey(root.browseBridge.serviceKey, open.request.item)) return "Saving…"
     var kind = open.card.statusKind
     if (kind === "yes") return root.browseBridge.canUnsave ? "Remove from library (L)" : ""
-    return kind === "no" || kind === "unknown" ? "Add to library (L)" : ""
+    return kind === "no" || kind === "some" || kind === "unknown" ? "Add to library (L)" : ""
   }
 
   // The card's Add to playlist: the picker, for the song playing.
@@ -2488,13 +2569,19 @@ Panel {
     bar: root.bar
     open: root.opened
     centerOnBar: false
-    focusTarget: keyCatcher
+    focusTarget: focusReturn
     contentWidth: panel.fittedContentWidth(Style.space(root.expanded ? 1120 : 430))
     contentHeight: root.expanded
       ? panel.fittedContentHeight(Style.space(740))
       : panel.fittedContentHeight(layout.item ? layout.item.implicitHeight : Style.space(400))
     onContentWidthChanged: root.cardResized()
     onContentHeightChanged: root.cardResized()
+
+    // What the panel focuses as it opens; it passes the keys on (returnFocus).
+    Item {
+      id: focusReturn
+      onActiveFocusChanged: if (activeFocus) root.returnFocus()
+    }
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -2626,6 +2713,7 @@ Panel {
 
       PlaylistPicker {
         id: playlistPicker
+        objectName: "playlistPicker"
         anchors.fill: parent
         z: 10
         open: root.pickerOpen
@@ -2838,6 +2926,9 @@ Panel {
     property bool registers: true
     property var model: root.rows
     property int markIndex: root.cursorActive ? root.cursorIndex : -1
+    // An album's root.albumLibrary, to mark the songs you have.
+    property var album: listRoot.role === "current" && root.browsing ? root.browseAlbumLibrary
+      : listRoot.role === "preview" ? root.previewAlbumLibrary : null
     // The list it shows; "" for the columns that only follow along, which
     // start at the top whenever their rows change.
     property string listKey: listRoot.role === "current" ? root.listKey : ""
@@ -2943,6 +3034,7 @@ Panel {
           cursor: listRoot.markIndex === entryColumn.index
           actionsOnCursor: listRoot.role === "current"
           playingFile: root.playingFile
+          libraryMark: !!listRoot.album && listRoot.album.owned[entryColumn.index] === true
           coverUrl: root.rowCoverUrl(entryColumn.modelData)
           foreground: root.foreground
           fontFamily: root.fontFamily
@@ -2978,6 +3070,8 @@ Panel {
     id: heading
     property string title: ""
     property string subtitle: ""
+    // An album's root.albumLibrary, for the line under its title.
+    property var library: null
     property string cover: ""
     property bool showBack: false
     implicitHeight: Math.max(Style.space(44), headingBack.implicitHeight, headingLabels.implicitHeight)
@@ -3031,15 +3125,58 @@ Panel {
         elide: Text.ElideRight
       }
 
-      Text {
-        textFormat: Text.PlainText
+      SubtitleLine {
         width: parent.width
-        visible: text !== ""
         text: heading.subtitle
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
+        library: heading.library
+      }
+    }
+  }
+
+  // A heading's second line, and on an album, how much of it is in your
+  // library at the right (root.albumLibrary), a link while a click can act.
+  component SubtitleLine: Item {
+    id: line
+    property string text: ""
+    property var library: null
+    visible: line.text !== "" || !!line.library
+    implicitHeight: Math.max(subtitleText.implicitHeight, libraryLink.implicitHeight)
+
+    Text {
+      id: subtitleText
+      textFormat: Text.PlainText
+      anchors.left: parent.left
+      anchors.right: libraryLink.visible ? libraryLink.left : parent.right
+      anchors.rightMargin: libraryLink.visible ? Style.space(10) : 0
+      anchors.verticalCenter: parent.verticalCenter
+      text: line.text
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
+    }
+
+    Text {
+      id: libraryLink
+      objectName: "albumLibrary"
+      textFormat: Text.PlainText
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      visible: !!line.library
+      readonly property bool hot: libraryMouse.containsMouse && !!line.library && line.library.active
+      text: !line.library ? "" : libraryLink.hot && line.library.hover ? line.library.hover : line.library.text
+      color: line.library && line.library.state === "yes" && !libraryLink.hot ? Color.accent : root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.underline: libraryLink.hot
+
+      MouseArea {
+        id: libraryMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: line.library && line.library.active ? Qt.PointingHandCursor : Qt.ArrowCursor
+        onClicked: if (line.library && line.library.active) root.libraryAlbum(root.browsing ? root.browseTop : root.previewEntry,
+          root.browsing ? root.browseRows : root.previewRows)
       }
     }
   }
@@ -3097,15 +3234,10 @@ Panel {
         elide: Text.ElideRight
       }
 
-      Text {
-        textFormat: Text.PlainText
+      SubtitleLine {
         width: parent.width
-        visible: text !== ""
         text: root.infoSubtitle(root.browseInfo)
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
+        library: root.browseAlbumLibrary
       }
     }
   }
@@ -3457,6 +3589,7 @@ Panel {
           width: columnsArea.columnWidth
           title: root.browsing ? (root.browseInfo.title || "") : (root.previewInfo.title || "")
           subtitle: root.infoSubtitle(root.browsing ? root.browseInfo : root.previewInfo)
+          library: root.browsing ? root.browseAlbumLibrary : root.previewAlbumLibrary
           cover: root.infoCover(root.browsing ? root.browseInfo : root.previewInfo)
         }
 

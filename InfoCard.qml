@@ -122,7 +122,7 @@ Rectangle {
             objectName: "infoStatus"
             textFormat: Text.PlainText
             anchors.centerIn: parent
-            text: (statusChip.kind === "yes" ? "󰄬  " : statusChip.kind === "no" ? "󰅖  " : "")
+            text: (statusChip.kind === "yes" || statusChip.kind === "some" ? "󰄬  " : statusChip.kind === "no" ? "󰅖  " : "")
               + (root.info ? root.info.status : "")
             color: statusChip.kind === "yes" ? root.foreground : root.dim
             font.family: root.fontFamily

@@ -117,7 +117,33 @@ ShellRoot {
       return !!host.panel && !!popup() && host.panel.connected === true
     }
     function open(): void { host.panel.open() }
-    function close(): void { host.panel.close() }
+    // A scenario's end: closed, and fresh for the next one, as the panel was
+    // before closing kept its state. hide() closes it as the bar does.
+    function close(): void {
+      var p = host.panel
+      p.close()
+      p.pickerItem = null
+      p.clearSearch()
+      p.closeInfo()
+      p.keysOpen = false
+      p.settingsOpen = false
+      p.cursorActive = false
+      p.searchFocused = false
+    }
+    function hide(): void { host.panel.close() }
+    // Where the keys are: the search box, the picker's box, or the panel's keys.
+    function focusName(): string {
+      var popupWindow = popup()
+      if (!popupWindow) return "No popup"
+      var probe = Qt.createQmlObject('import QtQuick; Item { readonly property var item: Window.activeFocusItem }',
+        popupWindow.contentItem[0], "probe")
+      var item = probe.item
+      probe.destroy()
+      if (!item) return "none"
+      if (item === host.panel.searchField) return "search"
+      for (var at = item; at; at = at.parent) if (at.objectName === "playlistPicker") return "picker"
+      return item.objectName || String(item)
+    }
     function expand(on: bool): void { host.panel.expanded = on }
     function keys(on: bool): void { host.panel.keysOpen = on }
     function type(text: string): void {
@@ -195,6 +221,10 @@ ShellRoot {
         lookup: p.lookupService, accounts: p.accounts,
         playingLibrary: p.playingLibraryText, canAddPlayingToPlaylist: p.canAddPlayingToPlaylist,
         infoAction: p.infoLibraryAction,
+        albumLibrary: p.browseAlbumLibrary ? { text: p.browseAlbumLibrary.text, hover: p.browseAlbumLibrary.hover,
+          state: p.browseAlbumLibrary.state, active: p.browseAlbumLibrary.active,
+          owned: Object.keys(p.browseAlbumLibrary.owned).map(Number) } : null,
+        previewLibrary: p.previewAlbumLibrary ? p.previewAlbumLibrary.text : "",
         confirmFolder: p.confirmTarget && p.confirmTarget.folder ? p.confirmTarget.folder : "",
         info: p.infoCard ? { service: p.infoCard.card.serviceName, kind: p.infoCard.card.kindName,
           status: p.infoCard.card.status, statusKind: p.infoCard.card.statusKind, title: p.infoCard.card.title,

@@ -126,8 +126,9 @@ class Bridge:
         self.shuffle, self.repeat = False, "off"
         # GET /v1/info, which older bridges lack (POST /v1/fake/info turns it on).
         self.info_route = False
-        # The status's songs without albumId, artistId and inLibrary, as an
-        # older bridge sends them (POST /v1/fake/bare).
+        # The status's songs without albumId, artistId and inLibrary, and an
+        # album's songs without inLibrary, as an older bridge sends them
+        # (POST /v1/fake/bare).
         self.bare = False
         # POST /v1/library/add, which older bridges lack (POST /v1/fake/library
         # takes it away); what it added, and what Spotify's remove took out.
@@ -472,6 +473,13 @@ class Handler(BaseHTTPRequestHandler):
                     return b.info(parts[1], parts[2], parts[3])
                 if parts[0] == "albums":
                     album, tracks = b.album(parts[1], parts[2])
+                    if parts[1] == "catalog" and not b.bare:
+                        # inLibrary, as bridge 0.4.1 and omarock-spotify 0.2.2 give it.
+                        # An album added to Apple Music brings its songs; Spotify
+                        # saves the album apart from the songs.
+                        whole = not b.spotify and b.owns("album", parts[2])
+                        tracks = [dict(t, inLibrary=whole or b.owns("song", t["id"])) for t in tracks]
+                        if b.spotify: album = dict(album, inLibrary=b.owns("album", parts[2]))
                     return {"album": album, "tracks": tracks}
                 if parts[0] == "artists" and parts[1] == "library":
                     artist = next(a for a in b.library_artists if a["id"] == parts[2])

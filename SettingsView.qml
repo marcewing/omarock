@@ -68,6 +68,12 @@ Rectangle {
     return out
   }
 
+  // The panel closing mid-edit: nothing is saved, as with Esc.
+  function cancelEdit() {
+    var item = repeater.itemAt(root.cursor)
+    if (root.editing !== "" && item) item.cancelEditor()
+  }
+
   // Opening: at the top, nothing being edited.
   function reset() {
     root.editing = ""
@@ -235,6 +241,11 @@ Rectangle {
               editor.forceActiveFocus()
               editor.selectAll()
             }
+          }
+
+          function cancelEditor() {
+            editor.text = editor.shown
+            root.finishEdit(rowItem.row.key, editor.shown, false)
           }
 
           PanelSectionHeader {

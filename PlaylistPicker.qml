@@ -51,6 +51,11 @@ Item {
     else if (choice && choice.isNew) field.forceActiveFocus()
   }
 
+  // The panel opening again with the picker still up.
+  function takeFocus() {
+    field.forceActiveFocus()
+  }
+
   function subtitleOf(choice) {
     if (choice.isNew && choice.name === "") return "Type its name above"
     if (choice.isNew) return choice.valid ? "New playlist" : "A playlist name can't contain /"
