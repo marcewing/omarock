@@ -93,7 +93,7 @@ All paths start with `/v1`.
 | `POST /queue/remove` | `{ "index": 4 }`. |
 | `POST /shuffle`, `/repeat` | `{ "on": true }`; `{ "mode": "off" \| "one" \| "all" }`. |
 | `GET /search?q=husker&scope=all&limit=8` | `{ "library": { "songs": […], "albums": […], "artists": […], "playlists": […] }, "catalog": { …same… } }`. `scope` is `all`, `library` or `catalog`. Case- and accent-insensitive as far as Apple allows. If the catalog half fails, the library half still comes back, with `"catalogError": "…"`. |
-| `GET /albums/{source}/{id}` | `{ "album": Album, "tracks": [Song] }`, in disc and track order. |
+| `GET /albums/{source}/{id}` | `{ "album": Album, "tracks": [Song] }`, in disc and track order. A catalog album's tracks carry `inLibrary`, as status songs do (see **Status**); library albums' leave it out. |
 | `GET /artists/{source}/{id}` | `{ "artist": Artist, "albums": [Album], "topSongs": [Song] }`. Albums by year; for the catalog, also `"appearsOn": [Album]` where Apple gives it. |
 | `GET /playlists/{source}/{id}` | `{ "playlist": Playlist, "tracks": [Song] }`. |
 | `GET /library/playlists` | `[Playlist]`, by name. |

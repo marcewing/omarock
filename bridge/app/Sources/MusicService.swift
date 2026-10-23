@@ -148,8 +148,23 @@ final class MusicService {
         }
         let album = try await self.album(id, source).with([.tracks, .artists], preferredSource: preferred(source))
         let songs = Self.songs(album.tracks).sorted { ($0.discNumber ?? 1, $0.trackNumber ?? 0) < ($1.discNumber ?? 1, $1.trackNumber ?? 0) }
-        return ["album": Normalize.album(album, source: source),
-                "tracks": songs.map { Normalize.song($0, source: source, albumId: album.id.rawValue) }]
+        var tracks = songs.map { Normalize.song($0, source: source, albumId: album.id.rawValue) }
+        if source == .catalog {
+            // inLibrary per song, as status songs have it: Apple's relation to the library
+            // in one request per 100 songs (left unknown if that fails), the index, adds.
+            var links: [String: SongLinks] = [:]
+            for start in stride(from: 0, to: songs.count, by: 100) {
+                let ids = songs[start..<min(start + 100, songs.count)].map(\.id.rawValue)
+                guard let found = try? await Self.songLinks(ids) else { break }
+                links.merge(found) { a, _ in a }
+            }
+            for (i, song) in songs.enumerated() {
+                tracks[i]["inLibrary"] = LibraryIndex.shared.holds(
+                    song: song.id.rawValue, album: album.id.rawValue, related: links[song.id.rawValue]?.related,
+                    title: song.title, artist: song.artistName, duration: song.duration)
+            }
+        }
+        return ["album": Normalize.album(album, source: source), "tracks": tracks]
     }
 
     func artistDetail(_ id: MusicItemID, _ source: Source) async throws -> [String: Any] {
