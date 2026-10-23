@@ -259,6 +259,7 @@ final class Player {
     private func check() {
         _ = position()  // keeps lastPosition at most a second old
         guard settling == 0 else { return }
+        checkLibrary()
         let now = currentFingerprint()
         if now != fingerprint || changed {
             fingerprint = now
@@ -320,15 +321,20 @@ final class Player {
         if Source.guess(song.id) == .library { return Normalize.librarySong(song) }
         var o = Normalize.song(song)
         addLinks(&o)
+        addInLibrary(&o, song)
         return o
     }
 
-    // MARK: Catalog songs' album and artist ids
+    /// After an add through the bridge: the songs added show inLibrary at once.
+    func libraryChanged() { check() }
+
+    // MARK: Catalog songs' album and artist ids, and whether they're in the library
 
     /// Queue entries' songs come without relationships, so with no albumId or artistId.
-    /// Those are fetched in the background, a batch at a time, and kept by song id; seq
-    /// goes up when they land, so the long poll delivers them.
-    private var links: [String: (album: String?, artist: String?)] = [:]
+    /// Those are fetched in the background, a batch at a time, with Apple's relation to
+    /// the library, and kept by song id; seq goes up when they land, so the long poll
+    /// delivers them.
+    private var links: [String: MusicService.SongLinks] = [:]
     private var linksWanted: Set<String> = []
     private var linksFetching = false
     private var linksRetry = Date.distantPast
@@ -358,8 +364,9 @@ final class Player {
                 let found = try await MusicService.songLinks(batch)
                 if links.count > 5000 { links.removeAll() }
                 // Songs Apple has no answer for are kept too, as empty, so they aren't asked again.
-                for id in batch { links[id] = found[id] ?? (nil, nil) }
-                if found.values.contains(where: { $0.album != nil || $0.artist != nil }) { changed = true }
+                for id in batch { links[id] = found[id] ?? MusicService.SongLinks() }
+                // New ids, or now an inLibrary.
+                changed = true
             } catch {
                 Log.error("player: catalog songs' album and artist ids: \(error); trying again in 30 s")
                 linksWanted.removeAll()
@@ -367,6 +374,38 @@ final class Player {
             }
         }
         check()
+    }
+
+    /// inLibrary, by catalog song id, for the library as it was at `libraryGeneration`.
+    /// Kept only once Apple's relation is in; until then it's worked out each time.
+    private var inLibrary: [String: Bool] = [:]
+    private var libraryGeneration = -1
+
+    private func addInLibrary(_ o: inout [String: Any], _ song: Song) {
+        let id = song.id.rawValue
+        if let known = inLibrary[id] {
+            o["inLibrary"] = known
+            return
+        }
+        let link = links[id]
+        guard let value = LibraryIndex.shared.holds(song: id, album: o["albumId"] as? String, related: link?.related,
+                                                    title: song.title, artist: song.artistName, duration: song.duration)
+        else { return }
+        if link != nil { inLibrary[id] = value }
+        o["inLibrary"] = value
+    }
+
+    /// When the library changes (a reload, an add), the songs shown are looked at again,
+    /// and seq goes up if any of them changed.
+    private func checkLibrary() {
+        let generation = LibraryIndex.shared.generation
+        guard generation != libraryGeneration else { return }
+        libraryGeneration = generation
+        guard !inLibrary.isEmpty else { return }
+        let before = inLibrary
+        inLibrary = [:]
+        _ = snapshot()
+        if inLibrary.contains(where: { id, now in before[id].map { $0 != now } ?? false }) { changed = true }
     }
 
     /// The songs the bridge queued, in queue order, and which entry each went to.

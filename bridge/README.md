@@ -214,10 +214,12 @@ rm -rf ~/Library/Application\ Support/omarock-bridge
 
 ## Limits
 
-- Apple's API can add songs to your playlists and create playlists, but can't remove
-  songs or delete playlists. Smart playlists are read-only.
+- Apple's API can add to your library and your playlists, and create playlists, but
+  can't take anything out of the library, remove songs or delete playlists. Smart
+  playlists are read-only.
 - One Mac plays for one omarock at a time: the Mac has one Apple Music queue.
-- Library lists come from the Mac's music library, read every 5 minutes.
+- Library lists come from the Mac's music library, read every 5 minutes, and again a
+  few times in the minutes after an add (Music gets adds from iCloud a little later).
 
 ## The code
 

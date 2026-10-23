@@ -7,7 +7,8 @@ import MusicKit
 ///
 /// Whether a catalog item is in the library comes from Apple's relate=library and from
 /// the ITLib index (title, artist and length). Apple's relation alone misses songs ripped
-/// from CD and uploaded: they relate to nothing.
+/// from CD and uploaded: they relate to nothing. Items added through the bridge count at
+/// once, before Music has synced them.
 extension MusicService {
     func info(kind: String, id: MusicItemID, source: Source) async throws -> [String: Any] {
         switch (kind, source) {
@@ -52,8 +53,10 @@ extension MusicService {
         item["artistId"] = item["artistId"] ?? Self.firstID(relationships, "artists")
         var info: [String: Any] = ["item": item,
                                    "catalog": Self.link(song.id, song.url)]
+        let added = LibraryIndex.shared.wasAdded("song", id.rawValue)
+            || (item["albumId"] as? String).map { LibraryIndex.shared.wasAdded("album", $0) } == true
         guard LibraryIndex.shared.isLoaded else {
-            if related != nil { info["inLibrary"] = true }
+            if related != nil || added { info["inLibrary"] = true }
             return info
         }
         // The copy on the same album first (a song can also be on a compilation), else the
@@ -63,7 +66,7 @@ extension MusicService {
         let copies = LibraryIndex.shared.songs(like: song.title, artist: song.artistName, duration: song.duration)
         var copy = copies.first { LibraryIndex.fold($0.album.title ?? "") == album } ?? copies.first
         if copy == nil, let related { copy = await libraryItem(forCloudID: related) }
-        info["inLibrary"] = related != nil || copy != nil
+        info["inLibrary"] = related != nil || copy != nil || added
         if let copy { info["library"] = Self.details(copy) }
         return info
     }
@@ -100,12 +103,13 @@ extension MusicService {
         item["artistId"] = item["artistId"] ?? Self.firstID(relationships, "artists")
         var info: [String: Any] = ["item": item,
                                    "catalog": Self.link(album.id, album.url)]
+        let added = LibraryIndex.shared.wasAdded("album", id.rawValue)
         guard LibraryIndex.shared.isLoaded else {
-            if related != nil { info["inLibrary"] = true }
+            if related != nil || added { info["inLibrary"] = true }
             return info
         }
         let copy = LibraryIndex.shared.albums(like: album.title, artist: album.artistName).first
-        info["inLibrary"] = related != nil || copy != nil
+        info["inLibrary"] = related != nil || copy != nil || added
         if let copy { info["library"] = Self.summary(copy) }
         return info
     }
@@ -173,20 +177,28 @@ extension MusicService {
     /// newer than the id asked for: a library song's playParams can give an old id that
     /// Apple now redirects to another.
     /// The id of the first item in one of a raw resource's relationships.
-    /// Catalog songs' album and artist ids, by song id: one request for up to 100 songs.
-    /// Songs Apple doesn't answer for (or answers under a newer id) are left out.
-    static func songLinks(_ ids: [String]) async throws -> [String: (album: String?, artist: String?)] {
+    /// Catalog songs' album and artist ids, and whether Apple relates them to a library
+    /// song, by song id: one request for up to 100 songs. Songs Apple doesn't answer for
+    /// (or answers under a newer id) are left out.
+    static func songLinks(_ ids: [String]) async throws -> [String: SongLinks] {
         let storefront = try await MusicDataRequest.currentCountryCode
-        let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/songs?ids=\(ids.joined(separator: ","))")!
+        let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/songs?ids=\(ids.joined(separator: ","))&relate=library")!
         let data = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response().data
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        var links: [String: (album: String?, artist: String?)] = [:]
+        var links: [String: SongLinks] = [:]
         for song in json?["data"] as? [[String: Any]] ?? [] {
             guard let id = song["id"] as? String else { continue }
             let relationships = song["relationships"] as? [String: Any] ?? [:]
-            links[id] = (firstID(relationships, "albums"), firstID(relationships, "artists"))
+            links[id] = SongLinks(album: firstID(relationships, "albums"), artist: firstID(relationships, "artists"),
+                                  related: firstID(relationships, "library") != nil)
         }
         return links
+    }
+
+    struct SongLinks {
+        var album: String?
+        var artist: String?
+        var related = false
     }
 
     private static func firstID(_ relationships: [String: Any], _ name: String) -> String? {

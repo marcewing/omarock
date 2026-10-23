@@ -440,6 +440,51 @@ final class MusicService {
         return Normalize.playlist(listing: row)
     }
 
+    // MARK: Adding to the library
+
+    /// POST /v1/library/add: catalog songs, albums and playlists, through Apple Music's
+    /// "Add a Resource to a Library". Library items are there already, and are skipped.
+    /// Apple accepts the add at once and Music syncs it a little later, so the index
+    /// remembers what was added (and looks again sooner).
+    func addToLibrary(_ items: [ItemRef]) async throws -> [String: Any] {
+        let types = ["song": "songs", "album": "albums", "playlist": "playlists"]
+        var ids: [String: [String]] = [:]
+        for item in items {
+            guard let type = types[item.kind], let id = item.id?.rawValue else {
+                throw APIError.badRequest("kind is song, album or playlist.")
+            }
+            guard id.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil else {
+                throw APIError.badRequest("\(id) isn't a catalog id.")
+            }
+            if item.source == .catalog, !(ids[type]?.contains(id) ?? false) { ids[type, default: []].append(id) }
+        }
+        let count = ids.values.reduce(0) { $0 + $1.count }
+        guard count > 0 else { return ["ok": true, "added": 0] }
+        guard count <= 100 else { throw APIError.badRequest("At most 100 items at a time.") }
+        let query = ids.keys.sorted().map { "ids%5B\($0)%5D=\(ids[$0]!.joined(separator: ","))" }.joined(separator: "&")
+        do {
+            _ = try await meRequest("POST", "/v1/me/library?\(query)", nil)
+        } catch let error as MusicDataRequest.Error {
+            Log.error("library: adding \(query): \(error)")
+            let reason = error.detailText.isEmpty ? error.title : error.detailText
+            throw APIError(status: 502, message: "Apple Music didn't add \(count == 1 ? "it" : "them"): \(reason)")
+        }
+        Log.info("library: added \(query)")
+        let index = LibraryIndex.shared
+        for (kind, type) in types { index.noteAdded(kind, ids[type] ?? []) }
+        index.refreshSoon()
+        // An album's songs too, so they show as added wherever they are (another album's
+        // copy of a song has its own id). After answering: it's another request to Apple.
+        let albums = ids["albums"] ?? []
+        Task { @MainActor in
+            for id in albums {
+                guard let album = try? await self.album(MusicItemID(id), .catalog).with([.tracks]) else { continue }
+                index.noteAdded("song", Self.songs(album.tracks).map(\.id.rawValue))
+            }
+        }
+        return ["ok": true, "added": count]
+    }
+
     /// Apple's web API knows library playlists by their iCloud id (p.…); the lists give
     /// ITLib ids, paired with iCloud twins in LibraryIndex.playlistListings.
     func cloudPlaylistID(_ id: MusicItemID) async throws -> MusicItemID {

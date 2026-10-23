@@ -56,6 +56,8 @@ final class LibraryIndex {
         var items: [String: ITLibMediaItem] = [:]
         /// Songs by title|artist|seconds, to recognise MusicKit's copies of them.
         var itemsByKey: [String: ITLibMediaItem] = [:]
+        /// Songs by their bare title (core), to match catalog songs quickly.
+        var itemsByCore: [String: [ITLibMediaItem]] = [:]
         /// Song ids in the Music app's Favorite Songs (once Loved Songs); nil if it has none.
         var favorites: Set<String>?
         var library: ITLibrary?
@@ -82,6 +84,11 @@ final class LibraryIndex {
     }
 
     var isLoaded: Bool { read { $0.library != nil } }
+
+    /// Goes up whenever what's in the library may have changed: a reload, new member
+    /// lists, or an add through the bridge.
+    var generation: Int { read { _ in changes } }
+    private var changes = 0
 
     /// By artist (unknown last), then year, then title.
     var albums: [AlbumEntry] {
@@ -113,15 +120,7 @@ final class LibraryIndex {
         membershipStarted = true
         Task { @MainActor in
             while true {
-                if let ids = await Self.ids(of: Album.self) { setMembers(albums: ids) }
-                if let ids = await Self.ids(of: Playlist.self) { setMembers(playlists: ids) }
-                if let cloud = await Self.fetchCloudPlaylists() {
-                    setCloud(cloud)
-                    await countCloudOnlyPlaylists()
-                }
-                let (a, p) = read { _ in (memberAlbums?.count ?? -1, memberPlaylists?.count ?? -1) }
-                let c = read { _ in cloudPlaylists?.count ?? -1 }
-                Log.info("library index: MusicKit lists \(a) albums, \(p) playlists; iCloud has \(c) playlists")
+                await refreshMembers()
                 try? await Task.sleep(nanoseconds: 300_000_000_000)
             }
         }
@@ -129,10 +128,37 @@ final class LibraryIndex {
 
     private var membershipStarted = false
 
+    @MainActor
+    private func refreshMembers() async {
+        if let ids = await Self.ids(of: Album.self) { setMembers(albums: ids) }
+        if let ids = await Self.ids(of: Playlist.self) { setMembers(playlists: ids) }
+        if let cloud = await Self.fetchCloudPlaylists() {
+            setCloud(cloud)
+            await countCloudOnlyPlaylists()
+        }
+        let (a, p) = read { _ in (memberAlbums?.count ?? -1, memberPlaylists?.count ?? -1) }
+        let c = read { _ in cloudPlaylists?.count ?? -1 }
+        Log.info("library index: MusicKit lists \(a) albums, \(p) playlists; iCloud has \(c) playlists")
+    }
+
+    /// After an add: Music gets it from iCloud a little later, so look again sooner than
+    /// every 5 minutes (the index, and MusicKit's lists of what's in the library).
+    @MainActor
+    func refreshSoon() {
+        guard timer != nil else { return }
+        for delay in [30.0, 90, 240] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
+                queue.async { [self] in reload() }
+                Task { @MainActor in await refreshMembers() }
+            }
+        }
+    }
+
     private func setMembers(albums: Set<String>? = nil, playlists: Set<String>? = nil) {
         os_unfair_lock_lock(&lock)
         if let albums { memberAlbums = albums }
         if let playlists { memberPlaylists = playlists }
+        changes += 1
         os_unfair_lock_unlock(&lock)
     }
 
@@ -181,19 +207,46 @@ final class LibraryIndex {
     /// and artist, ignoring case, accents and a trailing "(Remastered)" or the like, and
     /// within a few seconds of its length. Exact titles first.
     func songs(like title: String, artist: String, duration: Double?) -> [ITLibMediaItem] {
-        let memberAlbums = Set(albums.map(\.id))
         let (t, core, a) = (Self.fold(title), Self.core(title), Self.fold(artist))
-        let candidates = read { snapshot in
-            snapshot.items.values.filter { item in
-                guard memberAlbums.contains(Self.key(item.album.persistentID)),
-                      Self.sameArtist(Self.fold(item.artist?.name ?? ""), a) else { return false }
-                let it = Self.fold(item.title)
-                guard it == t || Self.core(item.title) == core else { return false }
-                guard let duration, item.totalTime > 0 else { return true }
-                return abs(Double(item.totalTime) / 1000 - duration) <= (it == t ? 3 : 6)
-            }
+        os_unfair_lock_lock(&lock)
+        // The same title folded means the same core, so the core finds them all.
+        let candidates = (snapshot.itemsByCore[core] ?? []).filter { item in
+            guard memberAlbums?.contains(Self.key(item.album.persistentID)) ?? true,
+                  Self.sameArtist(Self.fold(item.artist?.name ?? ""), a) else { return false }
+            guard let duration, item.totalTime > 0 else { return true }
+            return abs(Double(item.totalTime) / 1000 - duration) <= (Self.fold(item.title) == t ? 3 : 6)
         }
+        os_unfair_lock_unlock(&lock)
         return candidates.sorted { (Self.fold($0.title) == t ? 0 : 1) < (Self.fold($1.title) == t ? 0 : 1) }
+    }
+
+    // MARK: Adds through the bridge
+
+    /// Catalog ids added through the bridge ("song:…", "album:…", "playlist:…"), so they
+    /// count as in the library while Music syncs them (kept until the bridge quits).
+    private var added: Set<String> = []
+
+    func noteAdded(_ kind: String, _ ids: [String]) {
+        os_unfair_lock_lock(&lock)
+        added.formUnion(ids.map { "\(kind):\($0)" })
+        changes += 1
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func wasAdded(_ kind: String, _ id: String) -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return added.contains("\(kind):\(id)")
+    }
+
+    /// Whether a catalog song is in the library: added through the bridge (or its album
+    /// was), related to a library song by Apple (`related`), or like one in the index.
+    /// nil while that can't be told yet: Apple's relation unknown and the index not loaded.
+    func holds(song id: String, album: String?, related: Bool?, title: String, artist: String, duration: Double?) -> Bool? {
+        if wasAdded("song", id) || album.map({ wasAdded("album", $0) }) == true || related == true { return true }
+        guard isLoaded else { return nil }
+        if !songs(like: title, artist: artist, duration: duration).isEmpty { return true }
+        return related == nil ? nil : false
     }
 
     /// Library albums that look like this album: the same title (ignoring an edition in
@@ -519,6 +572,7 @@ final class LibraryIndex {
             let id = Self.key(item.persistentID)
             next.items[id] = item
             next.itemsByKey[Self.matchKey(item.title, item.artist?.name ?? "", Double(item.totalTime) / 1000)] = item
+            next.itemsByCore[Self.core(item.title), default: []].append(item)
             tracks[Self.key(item.album.persistentID), default: []].append(item)
             if let artist = item.artist, let name = artist.name, !name.isEmpty {
                 artists[Self.key(artist.persistentID)] = name
@@ -569,6 +623,7 @@ final class LibraryIndex {
 
         os_unfair_lock_lock(&lock)
         snapshot = next
+        changes += 1
         os_unfair_lock_unlock(&lock)
         Log.info("library index: \(next.items.count) songs, \(next.albums.count) albums, \(next.artists.count) artists, "
             + "\(next.playlists.count) playlists in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")

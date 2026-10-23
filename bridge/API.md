@@ -105,6 +105,7 @@ All paths start with `/v1`.
 | `GET /artwork/{source}/{kind}/{id}?w=&h=&k=` | `image/jpeg` for artwork only MusicKit can open (see Objects). Authorized by `k`, not the bearer token. |
 | `POST /library/playlists` | `{ "name": "…", "items": [ {kind, id, source} ] }` → the new Playlist. (MusicKit can't create or edit playlists on macOS, so the bridge uses Apple Music's REST API through MusicDataRequest.) |
 | `POST /library/playlists/{id}/tracks` | `{ "items": [ … ] }`: append, the items expanded to songs. Returns the Playlist. Apple's API can't remove tracks or delete playlists; those come later through AppleScript on the Mac. |
+| `POST /library/add` | `{ "items": [ {kind, id, source} ] }`: adds catalog songs, albums and playlists to the library. Returns `{ "ok": true, "added": 2 }` (the catalog items sent to Apple). See **Adding to the library** below. |
 | `GET /info/{source}/{kind}/{id}` | Everything known about one song or album (`kind` is `song` or `album`), for omarock's info card (`i`). See **Info** below. |
 
 ### Info
@@ -161,6 +162,27 @@ How the bridge fills it in:
 omarock asks this route first. If the route answers "No such endpoint." (an older
 bridge), omarock searches the library by title and matches on artist itself.
 
+### Adding to the library
+
+`POST /library/add` goes through Apple Music API's "Add a Resource to a Library"
+(`POST /v1/me/library?ids[songs]=…&ids[albums]=…&ids[playlists]=…`).
+- Each item's `kind` is `song`, `album` or `playlist`. Library items (`source:
+  "library"`) are in the library already: they're skipped, still with 200.
+- Errors:
+  - 400 for another kind, an id that isn't a catalog id, or more than 100 items.
+  - 502 with Apple's message if Apple refuses.
+- Apple accepts the add at once, but Music gets it from iCloud a little later. Apple
+  also ignores ids it can't add, and still accepts the rest.
+- Until Music has it, the bridge remembers what it added, until the bridge quits:
+  - `/info` answers `inLibrary: true` for an added song or album, and for a song on
+    an added album. `library` is omitted until ITLib has the item.
+  - Status songs show `inLibrary: true` at once, with a new `seq`.
+- The library index behind search, an artist's albums and `/library/…` is read every 5
+  minutes, and again 30 s, 90 s and 4 minutes after an add.
+
+`POST /library/remove` (omarock-spotify only): the same body; takes items out of the
+library. Apple Music's API can't remove, so the bridge has no such route.
+
 ### Items
 
 Wherever a request takes `items`, each is `{ kind, id, source }` and the
@@ -189,6 +211,11 @@ the position out from `position`, `positionAt` and `state`.
 Songs in `song` and `queue` carry `albumId` and `artistId`, which open with
 `GET /albums/{source}/{albumId}` and `GET /artists/{source}/{artistId}` (the song's
 `source`). A catalog song's can arrive a moment after the song does, with a new `seq`.
+
+Catalog songs also carry `inLibrary`, true or false as `/info` would answer it. It's
+omitted while the bridge can't tell yet, and can arrive a moment after the song. When it
+lands or changes (an add, or the library index reloading), `seq` goes up. Library songs
+leave it out: they're in the library.
 
 ## Behaviour
 

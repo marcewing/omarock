@@ -191,7 +191,13 @@ final class API {
         case ("GET", ["genres"]):
             return respond(.json(200, try await library.genres()))
 
-        // Library playlists
+        // The library
+        case ("POST", ["library", "add"]):
+            let items = try (body["items"] as? [Any] ?? []).map(ItemRef.init)
+            guard !items.isEmpty else { throw APIError.badRequest("items is empty.") }
+            let result = try await library.addToLibrary(items)
+            player.libraryChanged()
+            return respond(.json(200, result))
         case ("POST", ["library", "playlists"]):
             guard let name = body["name"] as? String, !name.isEmpty else { throw APIError.badRequest("name is required.") }
             let items = try (body["items"] as? [Any] ?? []).map(ItemRef.init)
