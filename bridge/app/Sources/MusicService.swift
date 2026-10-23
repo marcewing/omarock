@@ -179,7 +179,20 @@ final class MusicService {
                 result["appearsOn"] = appearsOn.map { Normalize.album($0, source: .catalog) }
             }
         case .library:
-            let artist = try await self.artist(id, .library).with([.albums], preferredSource: .library)
+            let found: Artist
+            do {
+                found = try await self.artist(id, .library)
+            } catch let error as APIError where error.status == 404 {
+                // Only on songs outside the library's albums (a playlist added to the
+                // library): MusicKit doesn't know the artist, but those songs carry its id.
+                let index = LibraryIndex.shared
+                guard let entry = index.artist(id.rawValue) else { throw error }
+                return ["artist": Normalize.artist(entry: entry),
+                        "albums": index.albums(byArtist: id.rawValue, anywhere: true)
+                            .sorted { ($0.year ?? 0, $0.title) < ($1.year ?? 0, $1.title) }.map(Normalize.album(entry:)),
+                        "topSongs": index.songs(byArtist: id.rawValue, anywhere: true).prefix(25).map(Normalize.song(item:))]
+            }
+            let artist = try await found.with([.albums], preferredSource: .library)
             result["artist"] = Normalize.artist(artist, source: .library)
             result["albums"] = Self.byYear(artist.albums.map(Array.init) ?? []).map { Normalize.album($0, source: .library) }
             // From the index, as the library lists are: its ids open, and MusicKit's

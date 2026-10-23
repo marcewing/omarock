@@ -94,7 +94,7 @@ All paths start with `/v1`.
 | `POST /shuffle`, `/repeat` | `{ "on": true }`; `{ "mode": "off" \| "one" \| "all" }`. |
 | `GET /search?q=husker&scope=all&limit=8` | `{ "library": { "songs": […], "albums": […], "artists": […], "playlists": […] }, "catalog": { …same… } }`. `scope` is `all`, `library` or `catalog`. Case- and accent-insensitive as far as Apple allows. If the catalog half fails, the library half still comes back, with `"catalogError": "…"`. |
 | `GET /albums/{source}/{id}` | `{ "album": Album, "tracks": [Song] }`, in disc and track order. A catalog album's tracks carry `inLibrary`, as status songs do (see **Status**); library albums' leave it out. |
-| `GET /artists/{source}/{id}` | `{ "artist": Artist, "albums": [Album], "topSongs": [Song] }`. Albums by year; for the catalog, also `"appearsOn": [Album]` where Apple gives it. |
+| `GET /artists/{source}/{id}` | `{ "artist": Artist, "albums": [Album], "topSongs": [Song] }`. Albums by year; for the catalog, also `"appearsOn": [Album]` where Apple gives it. Every library `artistId` the bridge hands out opens, also an artist only on songs of a playlist added to the library (MusicKit doesn't know those): then the albums and songs are the ones those songs are on. |
 | `GET /playlists/{source}/{id}` | `{ "playlist": Playlist, "tracks": [Song] }`. |
 | `GET /library/playlists` | `[Playlist]`, by name. |
 | `GET /library/albums?offset=0&limit=100` | `{ "items": [Album], "total": 812 }`, by artist then year. |
@@ -145,6 +145,11 @@ How the bridge fills it in:
   Apple relates it, the bridge follows Apple's library song to the ITLib copy. A
   catalog album Apple relates but the index can't match gives `inLibrary` true and no
   `library` object.
+- **`inLibrary`** for a library item is true, except for one that's only on a playlist
+  added to the library: Music keeps those songs, but its Songs and Albums don't list
+  them, Apple doesn't count them, and library search leaves them out. Those answer
+  false (with `library` all the same), until added; adding the `catalog` item puts them
+  in the library.
 - **`loved`**: ITLib has no flag, so it's membership of the Music app's Favorite Songs
   playlist (once Loved Songs): true or false whenever that playlist exists.
 - **`purchased`**: ITLib's isPurchased can read false for "Purchased AAC audio file"
@@ -215,7 +220,7 @@ Songs in `song` and `queue` carry `albumId` and `artistId`, which open with
 Catalog songs also carry `inLibrary`, true or false as `/info` would answer it. It's
 omitted while the bridge can't tell yet, and can arrive a moment after the song. When it
 lands or changes (an add, or the library index reloading), `seq` goes up. Library songs
-leave it out: they're in the library.
+leave it out (`/info` tells one that's only on a playlist added to the library).
 
 ## Behaviour
 

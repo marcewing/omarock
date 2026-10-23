@@ -26,7 +26,10 @@ extension MusicService {
         guard let item = LibraryIndex.shared.item(forMusicKitID: id.rawValue) else {
             throw APIError.notFound("No library song with id \(id.rawValue).")
         }
-        var info: [String: Any] = ["item": Normalize.song(item: item), "inLibrary": true,
+        // On a playlist added to the library only, it isn't in the library (see
+        // LibraryIndex.isMember), unless added through the bridge since.
+        let member = LibraryIndex.shared.isMember(album: Self.itlibID(item.album.persistentID)) ?? true
+        var info: [String: Any] = ["item": Normalize.song(item: item), "inLibrary": member,
                                    "library": Self.details(item)]
         // The catalog copy MusicKit plays it as, else the catalog song that looks like it.
         let itlibID = Self.itlibID(item.persistentID)
@@ -39,7 +42,10 @@ extension MusicService {
             catalog = await catalogSong(like: item.title, artist: item.artist?.name ?? "",
                                         duration: item.totalTime > 0 ? Double(item.totalTime) / 1000 : nil)
         }
-        if let catalog { info["catalog"] = Self.link(catalog.id, catalog.url) }
+        if let catalog {
+            info["catalog"] = Self.link(catalog.id, catalog.url)
+            if !member, LibraryIndex.shared.wasAdded("song", catalog.id.rawValue) { info["inLibrary"] = true }
+        }
         return info
     }
 
@@ -77,7 +83,8 @@ extension MusicService {
         guard let entry = LibraryIndex.shared.album(id.rawValue) else {
             throw APIError.notFound("No library album with id \(id.rawValue).")
         }
-        var info: [String: Any] = ["item": Normalize.album(entry: entry), "inLibrary": true,
+        let member = LibraryIndex.shared.isMember(album: entry.id) ?? true
+        var info: [String: Any] = ["item": Normalize.album(entry: entry), "inLibrary": member,
                                    "library": Self.summary(entry)]
         // Through a track's catalog copy, else the catalog album that looks like it.
         var catalog: Album?
@@ -91,7 +98,10 @@ extension MusicService {
         if catalog == nil, let artist = entry.artist {
             catalog = await catalogAlbum(like: entry.title, artist: artist)
         }
-        if let catalog { info["catalog"] = Self.link(catalog.id, catalog.url) }
+        if let catalog {
+            info["catalog"] = Self.link(catalog.id, catalog.url)
+            if !member, LibraryIndex.shared.wasAdded("album", catalog.id.rawValue) { info["inLibrary"] = true }
+        }
         return info
     }
 

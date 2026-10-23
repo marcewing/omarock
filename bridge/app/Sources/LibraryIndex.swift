@@ -188,9 +188,23 @@ final class LibraryIndex {
 
     func album(_ id: String) -> AlbumEntry? { read { $0.albumsByID[id] } }
 
-    /// An artist's songs on the library's albums, most played first.
-    func songs(byArtist id: String) -> [ITLibMediaItem] {
-        let ids = albums.filter { $0.artistIDs.contains(id) }.flatMap(\.trackIDs)
+    /// Whether an album is one of the library's albums; nil until MusicKit's list is in.
+    /// Not for the songs of a playlist added to the library: Music keeps them, but its
+    /// Songs and Albums don't list them, and Apple doesn't count them as in the library.
+    func isMember(album id: String) -> Bool? { read { _ in memberAlbums?.contains(id) } }
+
+    /// Any artist a song names, also one only on songs outside the library's albums
+    /// (MusicKit doesn't know those).
+    func artist(_ id: String) -> ArtistEntry? { read { $0.artists.first { $0.id == id } } }
+
+    /// The albums an artist has songs on: the library's, or every one the index has (`anywhere`).
+    func albums(byArtist id: String, anywhere: Bool = false) -> [AlbumEntry] {
+        (anywhere ? read { $0.albums } : albums).filter { $0.artistIDs.contains(id) }
+    }
+
+    /// An artist's songs on the library's albums (or on any, `anywhere`), most played first.
+    func songs(byArtist id: String, anywhere: Bool = false) -> [ITLibMediaItem] {
+        let ids = albums(byArtist: id, anywhere: anywhere).flatMap(\.trackIDs)
         return read { s in ids.compactMap { s.items[$0] } }
             .filter { $0.artist.map { Self.key($0.persistentID) } == id }
             .sorted { $0.playCount > $1.playCount }
