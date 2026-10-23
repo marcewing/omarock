@@ -61,7 +61,7 @@ has a switch too, on until you turn it off.
 - **mpd-mpris**, for the media keys.
 - **Album covers:** an image in each album folder, such as `cover.jpg`. Art embedded
   in the files isn't shown.
-- **Optional:** `ncmpcpp`, for the TUI button (or set `tuiCommand`).
+- **Optional:** `ncmpcpp`, the terminal player `t` opens (or set `tuiCommand`).
 
 omarock is young. It's used every day on one Omarchy desktop, and setting up the
 optional sources is still hands-on (see each folder's README).
@@ -252,7 +252,8 @@ stay until you remove them too (each guide says how, by hand).
   - **The keys page (`?`)** starts with RIGHT NOW: all of those keys, in full.
     Its **Window** button (or `w`) keeps the keys open in a window of their own,
     beside the panel. Right now there follows the panel as you move, and Esc
-    or `q` closes the window. Hyprland floats it, because its size is fixed.
+    or `q` closes the window. Hyprland floats it, and you can resize it (on
+    Omarchy, Super and a right-drag); it opens again at the size you left it.
 - **From a key binding:** `qs ipc -p /usr/share/omarchy/shell call mre.omarock toggle`
   opens the panel.
 
@@ -317,7 +318,7 @@ A change saves at once.
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |
 | `lookup` | Apple Music | Where a click on the radio's song looks it up: `Apple Music` or `Spotify` (the other one if that one is off) |
 | `socket` | `$XDG_RUNTIME_DIR/mpd/socket` | mpd's unix socket |
-| `tuiCommand` | `ncmpcpp` | The terminal player `t` and **TUI** open |
+| `tuiCommand` | `ncmpcpp` | The terminal player `t` opens |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |
 | `maxLabelWidth` | 300 | How wide the song gets on the bar, in pixels |
 | `appleBridge`, `appleStream` | from `~/.config/omarock/apple.json` | The Apple Music bridge's address, and its stream's |

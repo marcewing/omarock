@@ -184,8 +184,9 @@ opened; `--only fresh-start` checks that.
 - A property whose name starts with `on` and a capital is taken for a signal
   handler's name, and silently never works.
 - Hyprland floats a Quickshell `FloatingWindow` whose minimum and maximum
-  sizes are the same, and centres it. Without a fixed size it tiles. (The keys
-  window; seen on Hyprland 0.56.2.)
+  sizes are the same, and centres it. Without a fixed size it tiles. It decides
+  as the window maps, so the keys window maps at a fixed size, then lets go of
+  it after its first frame, and can be resized. (Seen on Hyprland 0.56.2.)
 - A reply that lands while a plugin reload tears a client down can find the
   client there but its functions gone; the HTTP clients check for both.
 - **Quickshell 0.3.2's `Socket` crashes the whole shell** if an `onError` handler

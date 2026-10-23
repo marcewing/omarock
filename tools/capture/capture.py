@@ -2076,8 +2076,9 @@ def hints_scenario(host, output, failures):
     doesn't grow: hints that don't fit are left out, and a long notice is cut
     short. The keys page's RIGHT NOW lists the keys that do something where
     the panel is, all of them. w, or its Window button, keeps the keys open in
-    a window of their own, fixed in size so Hyprland floats it, and RIGHT NOW
-    there follows the panel."""
+    a window of their own: fixed in size as it maps, so Hyprland floats it,
+    then free to resize, and RIGHT NOW there follows the panel. The expanded
+    header has no Keys or TUI buttons (? and t are keys)."""
     long_notice = "A notice far too long for the line: " + "it goes on and on, " * 12 + "and ends here."
 
     def line(label):
@@ -2113,6 +2114,11 @@ def hints_scenario(host, output, failures):
         s, h = line(mode + ": the queue")
         height, card = h.get("height"), s["cardHeight"]
         check(height and height > 0, mode + ": the hint line is there", failures)
+        if expanded:
+            # ? and t are keys, and on the hint line; the header doesn't repeat them.
+            buttons = s["headerButtons"] or []
+            check("Compact" in buttons and not any("Keys" in b or "TUI" in b for b in buttons),
+                  "the expanded header has no Keys or TUI buttons: " + json.dumps(buttons), failures)
         host.call("press", "Down")
         host.settle(.3)
         steady(mode + ": a song in the queue", lines, height, card)
@@ -2177,8 +2183,10 @@ def hints_scenario(host, output, failures):
     s = host.state()
     w = s["keysWindow"]
     check(not s["keysOpen"] and s["opened"], "the panel stays open, its keys page closed", failures)
-    check(w["fixed"] and w["width"] > 0, "the window has a fixed size, so Hyprland floats it: " + json.dumps(w), failures)
+    # It maps at a fixed size, so Hyprland floats it, then lets go of it.
+    check(w["resizable"] and w["width"] > 0, "after its first frame the window can be resized: " + json.dumps(w), failures)
     check(w["here"] == s["keysHere"], "the window's RIGHT NOW is the panel's: " + json.dumps(w["here"]), failures)
+    first = (w["width"], w["height"])
     path = output / "keys-window.png"
     path.unlink(missing_ok=True)
     check(host.call("grabKeysWindow", str(path)) == "ok", "the window can be captured", failures)
@@ -2194,6 +2202,13 @@ def hints_scenario(host, output, failures):
     wait_for(lambda: "Enter Play from this song" in host.state()["keysWindow"]["here"],
              "the window's RIGHT NOW follows the cursor onto a song")
     check(host.state()["keysWindow"]["here"] == host.state()["keysHere"], "and agrees with the panel", failures)
+
+    # Resized, the keys fill it.
+    check(host.call("resizeKeysWindow", 700, 500) == "ok", "the window is resized", failures)
+    host.settle(.3)
+    w = host.state()["keysWindow"]
+    check((w["width"], w["height"]) == (700, 500) and 0 < 700 - w["viewWidth"] < 100,
+          "a resized window keeps its size, and the keys fill it: " + json.dumps(w), failures)
 
     # Its own keys: Esc closes it.
     check(host.call("activateKeysWindow") == "ok", "the window takes the keys", failures)
@@ -2213,6 +2228,10 @@ def hints_scenario(host, output, failures):
     host.call("mouse", "keysWindowButton", "release", .5)
     check(pressed == "ok", "a click on the keys page's Window button: " + pressed, failures)
     wait_for(lambda: host.state()["keysWindow"]["open"], "the Window button opens the keys window")
+    host.settle(.3)
+    w = host.state()["keysWindow"]
+    check((w["width"], w["height"]) == (700, 500) and w["resizable"] and first != (700, 500),
+          "it opens again at the size it was left, and can be resized again: " + json.dumps(w), failures)
     host.call("close")
     check(not host.state()["keysWindow"]["open"], "the harness's close closes it too", failures)
 

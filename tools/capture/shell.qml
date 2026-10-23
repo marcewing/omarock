@@ -55,6 +55,22 @@ ShellRoot {
       lines: text.lineCount, truncated: text.truncated } : null
   }
 
+  // The expanded header's buttons, by their text (the gear's is "").
+  function headerButtons() {
+    var p = popup()
+    var row = p ? host.findNamed(p.contentItem[0].parent.parent, "headerButtons") : null
+    if (!row) return null
+    var texts = []
+    for (var i = 0; i < row.children.length; i++)
+      if (row.children[i].visible && row.children[i].text !== undefined) texts.push(row.children[i].text)
+    return texts
+  }
+
+  function keysWindowView() {
+    var w = host.panel.keysWindow
+    return w.visible ? host.findNamed(w.contentItem, "keysWindow") : null
+  }
+
   // RIGHT NOW in the keys window, as shown.
   function keysWindowHere() {
     var w = host.panel.keysWindow
@@ -220,11 +236,12 @@ ShellRoot {
         sections: p.rows.map(function(r) { return r.section || "" }),
         cursor: p.cursorActive ? p.cursorIndex : -1, notice: p.notice,
         hint: p.hintParts.map(function(h) { return h.key + " " + h.what }).join(" · "),
-        hintLine: host.hintLine(), cardHeight: popup() ? Math.round(popup().contentItem[0].parent.parent.height) : 0,
+        hintLine: host.hintLine(), headerButtons: host.headerButtons(), cardHeight: popup() ? Math.round(popup().contentItem[0].parent.parent.height) : 0,
         keysOpen: p.keysOpen, keysHere: p.hereKeys.map(function(r) { return r[0] + " " + r[1] }),
         keysWindow: { open: p.keysWindow.visible, width: p.keysWindow.width, height: p.keysWindow.height,
-          fixed: p.keysWindow.minimumSize.width > 0 && p.keysWindow.minimumSize.width === p.keysWindow.maximumSize.width
-            && p.keysWindow.minimumSize.height === p.keysWindow.maximumSize.height,
+          resizable: p.keysWindow.minimumSize.width < p.keysWindow.maximumSize.width
+            && p.keysWindow.minimumSize.height < p.keysWindow.maximumSize.height,
+          viewWidth: host.keysWindowView() ? host.keysWindowView().width : 0,
           here: host.keysWindowHere() },
         browse: p.browseTop ? p.browseTop.kind + ":" + p.browseTop.title : "",
         browseLoading: p.browseLoading, browseInfo: p.browseInfo,
@@ -287,15 +304,21 @@ ShellRoot {
     }
     // The keys window takes the keys, as when it's clicked.
     function activateKeysWindow(): string {
-      var w = host.panel.keysWindow
-      var view = w.visible ? host.findNamed(w.contentItem, "keysWindow") : null
+      var view = host.keysWindowView()
       if (!view || !view.Window.window) return "No keys window"
       view.Window.window.requestActivate()
       return "ok"
     }
+    // The keys window resized, as the compositor does when it's dragged.
+    function resizeKeysWindow(width: int, height: int): string {
+      var view = host.keysWindowView()
+      if (!view || !view.Window.window) return "No keys window"
+      view.Window.window.width = width
+      view.Window.window.height = height
+      return "ok"
+    }
     function grabKeysWindow(path: string): string {
-      var w = host.panel.keysWindow
-      var view = w.visible ? host.findNamed(w.contentItem, "keysWindow") : null
+      var view = host.keysWindowView()
       if (!view) return "No keys window"
       return view.grabToImage(function(result) { result.saveToFile(path) }) ? "ok" : "Capture failed"
     }

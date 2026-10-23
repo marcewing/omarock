@@ -138,7 +138,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.6.3"
+  readonly property string version: "0.6.4"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -3354,11 +3354,15 @@ Panel {
   function captionWidth(text) { return captionMetrics.advanceWidth(text) }
 
   // The keys in a window of their own (the keys page's Window, or w), to
-  // keep beside the panel; RIGHT NOW follows the panel. A fixed size makes
-  // Hyprland float it, centred, rather than tile it.
+  // keep beside the panel; RIGHT NOW follows the panel. Hyprland floats a
+  // window whose size is fixed as it maps, centred, rather than tile it. So
+  // it maps at a fixed size, then lets go of it after its first frame: it
+  // can be resized, and opens again at the size it was.
   readonly property alias keysWindow: keysFloat
   function openKeysWindow() {
     root.keysOpen = false
+    if (keysFloat.visible) return
+    keysFloat.resizable = false
     keysFloat.visible = true
   }
   function closeKeysWindow() { keysFloat.visible = false }
@@ -3368,17 +3372,33 @@ Panel {
     title: "omarock keys"
     visible: false
     color: Color.popups.background
-    readonly property size fixedSize: Qt.size(Style.space(520),
-      Math.min(Style.space(720), screen ? screen.height - Style.space(80) : Style.space(720)))
-    implicitWidth: fixedSize.width
-    implicitHeight: fixedSize.height
-    minimumSize: fixedSize
-    maximumSize: fixedSize
+    property size lastSize: Qt.size(Style.space(520), Style.space(720))
+    property bool resizable: false
+    readonly property size openSize: Qt.size(
+      Math.min(lastSize.width, screen ? screen.width - Style.space(80) : lastSize.width),
+      Math.min(lastSize.height, screen ? screen.height - Style.space(80) : lastSize.height))
+    implicitWidth: openSize.width
+    implicitHeight: openSize.height
+    // Qt's own "no maximum" (QWINDOWSIZE_MAX), which it tells Wayland as none.
+    minimumSize: resizable ? Qt.size(Style.space(320), Style.space(240)) : openSize
+    maximumSize: resizable ? Qt.size(16777215, 16777215) : openSize
+    onVisibleChanged: if (!visible) {
+      keysFloat.lastSize = Qt.size(keysFloat.width, keysFloat.height)
+      keysFloat.resizable = false
+    }
     // Closed by Hyprland (Super+W): it's gone, but still visible to QML,
     // and w couldn't bring it back.
     onClosed: keysFloat.visible = false
 
+    // The first frame is the map, which Hyprland has seen by the time
+    // anything sent after it arrives.
+    Connections {
+      target: keysFloat.visible && !keysFloat.resizable ? keysWindowView.Window.window : null
+      function onFrameSwapped() { keysFloat.resizable = true }
+    }
+
     KeysHelp {
+      id: keysWindowView
       objectName: "keysWindow"
       anchors.fill: parent
       anchors.margins: Style.space(16)
@@ -3537,6 +3557,7 @@ Panel {
 
         Row {
           id: headerButtons
+          objectName: "headerButtons"
           anchors.right: parent.right
           anchors.verticalCenter: expandedIcon.verticalCenter
           spacing: Style.space(10)
@@ -3548,7 +3569,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             iconText: "󰒓"
             iconSize: fontSize
-            implicitHeight: keysButton.implicitHeight
+            implicitHeight: compactButton.implicitHeight
             bordered: true
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -3558,36 +3579,11 @@ Panel {
           }
 
           Button {
-            id: keysButton
-            anchors.verticalCenter: parent.verticalCenter
-            text: "? Keys"
-            bordered: true
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            onClicked: root.keysOpen = true
-          }
-
-          Button {
-            anchors.verticalCenter: parent.verticalCenter
-            text: "TUI"
-            iconText: "󰆍"
-            iconSize: fontSize
-            implicitHeight: keysButton.implicitHeight
-            bordered: true
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            tooltipText: "Open " + root.tuiCommand + " in a terminal (t)"
-            onClicked: root.launchTui()
-          }
-
-          Button {
+            id: compactButton
             anchors.verticalCenter: parent.verticalCenter
             text: "Compact"
             iconText: "󰊔"
             iconSize: fontSize
-            implicitHeight: keysButton.implicitHeight
             bordered: true
             foreground: root.foreground
             fontFamily: root.fontFamily
