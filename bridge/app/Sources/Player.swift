@@ -260,8 +260,9 @@ final class Player {
         _ = position()  // keeps lastPosition at most a second old
         guard settling == 0 else { return }
         let now = currentFingerprint()
-        if now != fingerprint {
+        if now != fingerprint || changed {
             fingerprint = now
+            changed = false
             seq += 1
             let pending = waiters
             waiters.removeAll()
@@ -317,7 +318,55 @@ final class Player {
     private func normalize(_ song: Song) -> [String: Any] {
         let song = Source.guess(song.id) == .catalog ? librarySongs[Self.matchKey(song)] ?? song : song
         if Source.guess(song.id) == .library { return Normalize.librarySong(song) }
-        return Normalize.song(song)
+        var o = Normalize.song(song)
+        addLinks(&o)
+        return o
+    }
+
+    // MARK: Catalog songs' album and artist ids
+
+    /// Queue entries' songs come without relationships, so with no albumId or artistId.
+    /// Those are fetched in the background, a batch at a time, and kept by song id; seq
+    /// goes up when they land, so the long poll delivers them.
+    private var links: [String: (album: String?, artist: String?)] = [:]
+    private var linksWanted: Set<String> = []
+    private var linksFetching = false
+    private var linksRetry = Date.distantPast
+    /// A change to report once play has settled.
+    private var changed = false
+
+    private func addLinks(_ o: inout [String: Any]) {
+        guard o["albumId"] == nil || o["artistId"] == nil, let id = o["id"] as? String else { return }
+        if let link = links[id] {
+            if o["albumId"] == nil { o["albumId"] = link.album }
+            if o["artistId"] == nil { o["artistId"] = link.artist }
+            return
+        }
+        guard Date() >= linksRetry else { return }
+        linksWanted.insert(id)
+        guard !linksFetching else { return }
+        linksFetching = true
+        Task { await fetchLinks() }
+    }
+
+    private func fetchLinks() async {
+        defer { linksFetching = false }
+        while !linksWanted.isEmpty {
+            let batch = Array(linksWanted.prefix(100))
+            linksWanted.subtract(batch)
+            do {
+                let found = try await MusicService.songLinks(batch)
+                if links.count > 5000 { links.removeAll() }
+                // Songs Apple has no answer for are kept too, as empty, so they aren't asked again.
+                for id in batch { links[id] = found[id] ?? (nil, nil) }
+                if found.values.contains(where: { $0.album != nil || $0.artist != nil }) { changed = true }
+            } catch {
+                Log.error("player: catalog songs' album and artist ids: \(error); trying again in 30 s")
+                linksWanted.removeAll()
+                linksRetry = Date() + 30
+            }
+        }
+        check()
     }
 
     /// The songs the bridge queued, in queue order, and which entry each went to.

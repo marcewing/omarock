@@ -167,7 +167,12 @@ final class MusicService {
             let artist = try await self.artist(id, .library).with([.albums], preferredSource: .library)
             result["artist"] = Normalize.artist(artist, source: .library)
             result["albums"] = Self.byYear(artist.albums.map(Array.init) ?? []).map { Normalize.album($0, source: .library) }
-            result["topSongs"] = try await librarySongs(by: artist).prefix(25).map { Normalize.song($0, source: .library) }
+            // From the index, as the library lists are: its ids open, and MusicKit's
+            // artistName filter finds nothing for some names ("10,000 Maniacs").
+            let indexed = LibraryIndex.shared.songs(byArtist: id.rawValue)
+            result["topSongs"] = indexed.isEmpty
+                ? try await librarySongs(by: artist).prefix(25).map { Normalize.song($0, source: .library) }
+                : indexed.prefix(25).map(Normalize.song(item:))
         }
         return result
     }

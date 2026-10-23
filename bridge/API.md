@@ -186,6 +186,10 @@ skipped, and later detail responses mark them `"playable": false`.
 queue, shuffle or repeat. It does not change for position alone; omarock works
 the position out from `position`, `positionAt` and `state`.
 
+Songs in `song` and `queue` carry `albumId` and `artistId`, which open with
+`GET /albums/{source}/{albumId}` and `GET /artists/{source}/{artistId}` (the song's
+`source`). A catalog song's can arrive a moment after the song does, with a new `seq`.
+
 ## Behaviour
 
 - **Nobody listening, nothing playing.** When the Icecast mount has had no

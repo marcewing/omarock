@@ -161,6 +161,14 @@ final class LibraryIndex {
     func albumArtist(_ albumID: String) -> String? { read { $0.albumsByID[albumID]?.artist } }
 
     func album(_ id: String) -> AlbumEntry? { read { $0.albumsByID[id] } }
+
+    /// An artist's songs on the library's albums, most played first.
+    func songs(byArtist id: String) -> [ITLibMediaItem] {
+        let ids = albums.filter { $0.artistIDs.contains(id) }.flatMap(\.trackIDs)
+        return read { s in ids.compactMap { s.items[$0] } }
+            .filter { $0.artist.map { Self.key($0.persistentID) } == id }
+            .sorted { $0.playCount > $1.playCount }
+    }
     func playlist(_ id: String) -> PlaylistEntry? { listing(id)?.entry }
     func item(_ id: String) -> ITLibMediaItem? { read { $0.items[id] } }
 

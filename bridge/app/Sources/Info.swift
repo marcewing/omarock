@@ -173,6 +173,22 @@ extension MusicService {
     /// newer than the id asked for: a library song's playParams can give an old id that
     /// Apple now redirects to another.
     /// The id of the first item in one of a raw resource's relationships.
+    /// Catalog songs' album and artist ids, by song id: one request for up to 100 songs.
+    /// Songs Apple doesn't answer for (or answers under a newer id) are left out.
+    static func songLinks(_ ids: [String]) async throws -> [String: (album: String?, artist: String?)] {
+        let storefront = try await MusicDataRequest.currentCountryCode
+        let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/songs?ids=\(ids.joined(separator: ","))")!
+        let data = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response().data
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        var links: [String: (album: String?, artist: String?)] = [:]
+        for song in json?["data"] as? [[String: Any]] ?? [] {
+            guard let id = song["id"] as? String else { continue }
+            let relationships = song["relationships"] as? [String: Any] ?? [:]
+            links[id] = (firstID(relationships, "albums"), firstID(relationships, "artists"))
+        }
+        return links
+    }
+
     private static func firstID(_ relationships: [String: Any], _ name: String) -> String? {
         ((relationships[name] as? [String: Any])?["data"] as? [[String: Any]])?.first?["id"] as? String
     }
