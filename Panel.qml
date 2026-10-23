@@ -138,7 +138,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.6.5"
+  readonly property string version: "0.6.6"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1134,8 +1134,10 @@ Panel {
 
   // L, or the card's Add to library: add the item to target's library, or
   // take it out again where the service can (Spotify). state is what
-  // inLibrary says; after runs once it's done.
-  function toggleLibrary(target, item, state, title, after) {
+  // inLibrary says; after runs once it's done. A library item that isn't in
+  // the library (only on a playlist added to it) is added as its catalog
+  // copy, catalogId: the bridge adds catalog items only.
+  function toggleLibrary(target, item, state, title, after, catalogId) {
     if (root.libraryKinds(target).indexOf(item.kind) < 0) {
       root.say("Your " + target.service + " library takes " + (target.serviceKey === "apple" ? "songs, albums and playlists" : "songs and albums"))
       return
@@ -1144,12 +1146,21 @@ Panel {
       root.say(title + " is in your library already")
       return
     }
+    var save = state !== "yes"
+    var ref = { kind: item.kind, id: item.id, source: item.source }
+    if (save && target.serviceKey === "apple" && item.source === "library" && item.kind !== "playlist") {
+      if (!catalogId) {
+        root.say(target.service + " has no copy of " + title + " to add to your library")
+        return
+      }
+      ref = { kind: item.kind, id: catalogId, source: "catalog" }
+    }
     var key = root.libraryKey(target.serviceKey, item)
     if (root.librarySaving === key) return
-    var save = state !== "yes"
     root.librarySaving = key
-    target.saveToLibrary([{ kind: item.kind, id: item.id, source: item.source }], save, function(error) {
+    target.saveToLibrary([ref], save, function(error, reply) {
       if (root.librarySaving === key) root.librarySaving = ""
+      if (error === "" && reply && reply.added === 0) error = target.service + " added nothing"
       if (error !== "") { root.say(error); return }
       var edits = Object.assign({}, root.libraryEdits)
       edits[key] = save
@@ -1162,8 +1173,12 @@ Panel {
 
   function libraryPlaying() {
     var item = root.playingItem
-    if (!item) root.say("L adds the Apple Music or Spotify song playing to your library")
-    else root.toggleLibrary(root.bridge, item, root.playingLibrary, item.title)
+    if (!item) {
+      root.say("L adds the Apple Music or Spotify song playing to your library")
+      return
+    }
+    var asked = root.bridge.songLinks[Apple.songKey(root.bridge.bridgeStatus.song)] || ({})
+    root.toggleLibrary(root.bridge, item, root.playingLibrary, item.title, null, asked.catalogId)
   }
 
   function libraryKinds(target) {
@@ -1262,7 +1277,7 @@ Panel {
     root.toggleLibrary(root.browseBridge, item, kind === "yes" ? "yes" : kind === "no" ? "no" : "",
       open.card.title || item.title || "It", function() {
         if (root.infoCard === open) root.openInfo(open.request)
-      })
+      }, open.catalogId)
   }
   // The info card's link for it ("" for none).
   readonly property string infoLibraryAction: {
@@ -2349,7 +2364,7 @@ Panel {
       bridge.info(item, function(extra) {
         var full = extra.item || item
         show(Info.appleItem(full, root.withLibraryEdit(bridge.serviceKey, item, extra), bridge.serviceKey),
-          { coverUrl: Apple.artUrl(full.artwork, 160) }, false)
+          { coverUrl: Apple.artUrl(full.artwork, 160), catalogId: (extra.catalog && extra.catalog.id) || full.catalogId || "" }, false)
       })
     } else if (request.type === "station") {
       var station = radio.stations[request.uuid]

@@ -1756,7 +1756,10 @@ def now_playing_scenario(host, output, socket_path, failures):
     fake_bridge_info(False, "bare")
     fake_bridge_info(False)
     # A library song whose artist id the bridge can't open (its album isn't
-    # one MusicKit lists): the same name in the catalog opens instead.
+    # one MusicKit lists): the same name in the catalog opens instead. (With
+    # /v1/info, as any bridge that sends these has: the panel asks it once a
+    # song, and keeps the answer.)
+    fake_bridge_info(True)
     fake_bridge_info(True, "orphan")
     wait_for(lambda: (host.state()["bridgeSong"] or {}).get("artistId") == "l-ar-gone", "a song with an artist id that won't open")
     host.settle(.3)
@@ -1769,6 +1772,7 @@ def now_playing_scenario(host, output, socket_path, failures):
           "it opens the catalog's artist of that name: " + json.dumps([paths, s["rows"]]), failures)
     back("← from it comes back to the queue")
     fake_bridge_info(False, "orphan")
+    fake_bridge_info(False)
     to_source(host, "local")
     BRIDGE["config"].unlink()
 
@@ -1942,6 +1946,32 @@ def library_scenario(host, output, socket_path, failures):
     fake_bridge_info(False, "bare")
     host.call("press", "Left")
     host.call("press", "Escape")
+
+    # A library song only on a playlist added to the library (bridge 0.4.2):
+    # /v1/info says it isn't in the library, and Add to library adds its
+    # catalog copy, since the bridge adds catalog items only.
+    fake_bridge_info(True, "library")
+    fake_bridge_info(True)
+    fake_bridge_info(True, "orphan")
+    reopen_panel()
+    wait_for(lambda: (host.state()["bridgeSong"] or {}).get("source") == "library", "a library song only on a playlist")
+    song = host.state()["bridgeSong"]
+    library_said("󰐕 Add to library", "the card offers Add to library, though it plays from the library")
+    host.call("press", "i")
+    card = info_card(host, "its info card")
+    check(card["statusKind"] == "no" and host.state()["infoAction"] == "Add to library (L)",
+          "its info card: " + card["status"] + ", " + host.state()["infoAction"], failures)
+    before = len(bridge_requests("/v1/library/add"))
+    host.call("press", "L")
+    wait_for(lambda: (host.state()["info"] or {}).get("statusKind") == "yes" and not host.state()["info"]["loading"],
+             "the info card says it's in your library now")
+    adds = [body for _, _, body in bridge_requests("/v1/library/add")[before:]]
+    check(adds == [{"items": [{"kind": "song", "id": song["id"][2:], "source": "catalog"}]}],
+          "L adds its catalog copy: " + json.dumps(adds), failures)
+    host.call("press", "i")
+    library_said("󰄬 In your library", "and the card says so")
+    fake_bridge_info(False, "orphan")
+    fake_bridge_info(False)
 
     # Spotify: add, then a click on In your library takes it out.
     host.call("setSource", "spotify")

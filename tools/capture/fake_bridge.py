@@ -130,9 +130,11 @@ class Bridge:
         # album's songs without inLibrary, as an older bridge sends them
         # (POST /v1/fake/bare).
         self.bare = False
-        # The status's song from the library, with an artist id the library's
-        # artist route can't find, as the bridge gives a song whose album
-        # MusicKit doesn't list (POST /v1/fake/orphan).
+        # The status's song from the library, but only on a playlist added to
+        # it, as bridge 0.4.2 tells it: its artist id doesn't open on the
+        # library's artist route (MusicKit doesn't list its album; bridges
+        # before 0.4.2), and /v1/info says it isn't in the library until its
+        # catalog copy is added (POST /v1/fake/orphan).
         self.orphan = False
         # POST /v1/library/add, which older bridges lack (POST /v1/fake/library
         # takes it away); what it added, and what Spotify's remove took out.
@@ -158,10 +160,13 @@ class Bridge:
         }
 
     def owns(self, kind, cid):
-        """Whether the library has it: Zen Arcade, and whatever was added."""
+        """Whether the library has it: Zen Arcade, and whatever was added;
+        not the orphan song playing until it's added."""
         if (kind, cid) in self.unsaved: return False
+        if (kind, cid) in self.saved: return True
+        if self.orphan and kind == "song" and self.queue and cid == self.queue[self.index]["catalogId"]: return False
         zen = CATALOG_ALBUMS["c-al-1"]
-        return (kind, cid) in self.saved or (cid in zen["tracks"] if kind == "song" else cid == "c-al-1")
+        return cid in zen["tracks"] if kind == "song" else cid == "c-al-1"
 
     def changed(self):
         self.seq += 1
@@ -235,7 +240,9 @@ class Bridge:
         if self.bare and "song" in out:
             out["song"] = {k: v for k, v in out["song"].items() if k not in ("albumId", "artistId", "inLibrary")}
         if self.orphan and "song" in out:
-            out["song"] = dict(out["song"], source="library", artistId="l-ar-gone")
+            # As the bridge sends a library song: no catalogId, no inLibrary.
+            song = {k: v for k, v in out["song"].items() if k not in ("inLibrary", "catalogId")}
+            out["song"] = dict(song, id="l-" + out["song"]["catalogId"], source="library", artistId="l-ar-gone")
         return out
 
     def play_at(self, index, state="playing"):
@@ -294,7 +301,7 @@ class Bridge:
             raise ValueError("info is for songs and albums")
         out = {"item": item, "inLibrary": mine,
                "catalog": {"id": cid, "url": f"https://music.apple.com/us/{kind}/{cid}"}}
-        if mine: out["library"] = library
+        if mine or source == "library": out["library"] = library
         return out
 
     def search(self, q, scope, limit):
@@ -391,13 +398,17 @@ class Handler(BaseHTTPRequestHandler):
                 if path in ("library/add", "library/remove"):
                     if not b.library_route or (path == "library/remove" and not b.spotify): raise NoEndpoint()
                     kinds = ("song", "album") if b.spotify else ("song", "album", "playlist")
+                    added = 0
                     for item in body["items"]:
                         if item["kind"] not in kinds: raise ValueError("can't add a " + item["kind"])
+                        # Apple Music's bridge adds catalog items only, and counts them.
+                        if not b.spotify and path == "library/add" and item.get("source") == "library": continue
                         key = (item["kind"], item["id"][2:] if item["id"].startswith("l-") else item["id"])
                         (b.saved if path == "library/add" else b.unsaved).add(key)
                         (b.unsaved if path == "library/add" else b.saved).discard(key)
+                        added += 1
                     b.changed()
-                    return {"ok": True}
+                    return {"ok": True} if b.spotify else {"ok": True, "added": added}
                 if path in ("fake/bare", "fake/orphan"):
                     setattr(b, path[5:], bool(body["on"]))
                     b.changed()

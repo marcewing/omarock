@@ -184,16 +184,16 @@ Item {
 
   // The playing song's album and artist ids, and whether it's in your library,
   // by song key, for the songs whose status doesn't say (MusicKit's queue
-  // entries often lack the ids; older bridges never say inLibrary): asked of
-  // /v1/info once a song, { albumId, artistId, source, inLibrary }, or null
-  // while asking.
+  // entries often lack the ids; older bridges never say inLibrary, nor any
+  // bridge for a library song, which may be only on a playlist added to the
+  // library): asked of /v1/info once a song, { albumId, artistId, source,
+  // inLibrary, catalogId }, or null while asking.
   property var songLinks: ({})
 
   function fillSongLinks() {
     var song = root.song
     if (!song || !song.id) return
-    var known = song.source === "library" || song.inLibrary !== undefined
-    if (song.albumId && song.artistId && known) return
+    if (song.albumId && song.artistId && song.inLibrary !== undefined) return
     var key = Apple.songKey(song)
     if (root.songLinks[key] !== undefined) return
     var asking = Object.assign({}, root.songLinks)
@@ -203,16 +203,16 @@ Item {
       var item = data && data.item ? data.item : {}
       var links = Object.assign({}, root.songLinks)
       links[key] = { albumId: item.albumId || "", artistId: item.artistId || "", source: item.source || song.source,
-        inLibrary: data ? data.inLibrary : undefined }
+        inLibrary: data ? data.inLibrary : undefined, catalogId: data && data.catalog ? data.catalog.id || "" : "" }
       root.songLinks = links
     })
   }
 
   // Add to your library (songs, albums, and Apple Music's playlists), or,
-  // where canUnsave, take out of it. callback(error), "" when done.
+  // where canUnsave, take out of it. callback(error, reply), "" when done.
   function saveToLibrary(items, save, callback) {
     root.request("POST", save ? "/v1/library/add" : "/v1/library/remove", { items: items }, function(data, error) {
-      if (callback) callback(error === "No such endpoint." ? root.libraryUpdateText : error)
+      if (callback) callback(error === "No such endpoint." ? root.libraryUpdateText : error, data)
     }, 30000)
   }
 
