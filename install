@@ -290,10 +290,12 @@ welcome() {
 
 choose_sources() {
   local now=() picked
+  # Ticked: the sources switched on, and those set up but not finished (a
+  # SiriusXM login that didn't work, say), so running this again carries on.
   [[ $(setting radio true) == true ]] && now+=(radio)
-  [[ $(setting spotify false) == true ]] && now+=(spotify)
-  [[ $(setting appleMusic false) == true ]] && now+=(apple)
-  [[ $(setting siriusXM false) == true ]] && now+=(sxm)
+  [[ $(setting spotify false) == true || -f $share/spotify/INSTALLED ]] && now+=(spotify)
+  [[ $(setting appleMusic false) == true || -f $config/apple.json ]] && now+=(apple)
+  [[ $(setting siriusXM false) == true || -f $share/sxm/INSTALLED ]] && now+=(sxm)
   [[ -f $share/audio/omarock-bus.conf ]] && now+=(bus)
   picked=$(IFS=,; choose_many "Sources (and the optional audio bus)" "${now[*]}" \
     radio "Internet radio: thousands of stations with nothing to set up" \
@@ -387,7 +389,9 @@ step_mpd() {
     mpd_socket=$other
     pending[socket]=$(jq -cn --arg s "$other" '$s')
   elif [[ -z $other ]] && ! mpd_answers; then
-    lines+=("" "# omarock: a unix socket (Omarchy's bar can't use TCP)")
+    # A blank line after what this adds above it (an existing file gets one anyway).
+    ((${#lines[@]})) && lines+=("")
+    lines+=("# omarock: a unix socket (Omarchy's bar can't use TCP)")
     lines+=("bind_to_address     \"$mpd_socket\"")
     grep -qE '^[[:space:]]*bind_to_address' "$conf" 2>/dev/null || lines+=("bind_to_address     \"localhost\"")
   fi
@@ -922,6 +926,8 @@ step_switches() {
   for src in radio spotify apple sxm; do
     case $src in radio) key=radio ;; spotify) key=spotify ;; apple) key=appleMusic ;; sxm) key=siriusXM ;; esac
     if [[ $(setting "$key" "$([[ $key == radio ]] && echo true || echo false)") == true ]]; then ok "$key is on"
+    elif [[ $src == sxm ]] && wants sxm && sxm_account_set; then
+      note "siriusXM is off: it isn't signed in. Switch it on in omarock's settings and fix the login there, or run ./install again"
     elif wants "$src"; then note "$key is off: its setup didn't finish (run ./install again)"
     fi
   done
