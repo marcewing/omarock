@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The bar: the current song's cover and "Artist — Song", in the style of
@@ -40,7 +41,7 @@ BarWidget {
   // omarock's settings file first, as the panel reads it.
   readonly property int maxLabelWidth: Math.max(80, Number(panel ? panel.setting("maxLabelWidth", 300) : setting("maxLabelWidth", 300)))
   readonly property int artSize: Math.min(18, Math.max(12, barSize - Style.space(6)))
-  readonly property color barForeground: bar ? bar.barForeground : Color.foreground
+  readonly property color barForeground: bar ? bar.barForeground : Commons.Color.foreground
   readonly property string barFont: bar ? bar.fontFamily : Style.font.family
   readonly property string tooltipText: !connected ? "Music · mpd not connected"
     : hasSong ? songText + (album !== "" ? "\n" + album : "") + "\nClick: omarock · Middle-click: play/pause"
@@ -119,7 +120,7 @@ BarWidget {
         Rectangle {
           anchors.fill: parent
           radius: Style.space(3)
-          color: Style.normalFillFor(root.barForeground, Color.accent)
+          color: Style.normalFillFor(root.barForeground, Commons.Color.accent)
         }
 
         Image {

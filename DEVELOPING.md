@@ -195,6 +195,12 @@ opened; `--only fresh-start` checks that.
   has already freed it. MpdClient sets it with `Qt.callLater` instead. Without
   that, every mpd restart crashed the shell on Omarchy 4.0.6; 0.3.1 doesn't have
   the bug.
+- **Qt 6.12's QtQuick has a `Color` singleton of its own** (`rgba`, `hsla`,
+  `fromString`). It takes the name from Omarchy's `Color` in `qs.Commons`: a
+  bare `Color.popups` reads as undefined. In the harness it happened partway
+  through the run, after which every colour came out undefined. So omarock
+  imports `qs.Commons as Commons` and writes `Commons.Color`, as Omarchy's own
+  files do since 4.5. `Style`, `Util` and `Border` don't clash.
 
 **PipeWire** (audio/)
 - A stream with `node.dont-fallback` whose target is missing needs `node.linger`.

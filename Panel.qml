@@ -3,6 +3,7 @@ import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Mpd.js" as Mpd
 import "Apple.js" as Apple
@@ -24,7 +25,7 @@ Panel {
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
 
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
@@ -139,7 +140,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.7.0"
+  readonly property string version: "0.7.1"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -2862,7 +2863,7 @@ Panel {
               : "It's empty.")
           : ""
         confirmText: root.confirmTarget && root.confirmTarget.folder ? "Change it" : "Delete"
-        background: Color.popups.background
+        background: Commons.Color.popups.background
         foreground: root.foreground
         fontFamily: root.fontFamily
         onCanceled: root.cancelConfirm()
@@ -2933,7 +2934,7 @@ Panel {
       textFormat: Text.PlainText
       width: parent.width
       text: (root.sources.length > 1 ? root.playStateText : root.stateText).toUpperCase()
-      color: root.connected ? root.dim : Color.urgent
+      color: root.connected ? root.dim : Commons.Color.urgent
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.bold: true
@@ -3287,7 +3288,7 @@ Panel {
       visible: !!line.library
       readonly property bool hot: libraryMouse.containsMouse && !!line.library && line.library.active
       text: !line.library ? "" : libraryLink.hot && line.library.hover ? line.library.hover : line.library.text
-      color: line.library && line.library.state === "yes" && !libraryLink.hot ? Color.accent : root.foreground
+      color: line.library && line.library.state === "yes" && !libraryLink.hot ? Commons.Color.accent : root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.underline: libraryLink.hot
@@ -3423,7 +3424,7 @@ Panel {
     id: keysFloat
     title: "omarock keys"
     visible: false
-    color: Color.popups.background
+    color: Commons.Color.popups.background
     property size lastSize: Qt.size(Style.space(520), Style.space(720))
     property bool resizable: false
     readonly property size openSize: Qt.size(
@@ -3820,8 +3821,8 @@ Panel {
         implicitHeight: footerRow.implicitHeight + Style.space(20)
         height: implicitHeight
         radius: Style.cornerRadius
-        color: Style.normalFillFor(root.foreground, Color.accent)
-        borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
+        color: Style.normalFillFor(root.foreground, Commons.Color.accent)
+        borderSpec: Border.controlSpec("normal", root.foreground, Commons.Color.accent)
 
         Item {
           id: footerRow

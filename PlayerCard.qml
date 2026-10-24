@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Mpd.js" as Mpd
 
@@ -20,7 +21,7 @@ Item {
   // Live radio (SiriusXM): no shuffle or repeat.
   property bool live: false
   property bool large: false
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
   // The artist, the album (its line, or the cover) and the genre open as links;
@@ -321,7 +322,7 @@ Item {
         maximum: Math.max(1, root.status.duration)
         value: root.mpd.elapsed
         step: 10
-        trackColor: Style.selectedFillFor(root.foreground, Color.accent)
+        trackColor: Style.selectedFillFor(root.foreground, Commons.Color.accent)
         fillColor: root.foreground
         knobColor: root.foreground
         onReleased: function(value) { root.mpd.seekTo(value) }
@@ -437,7 +438,7 @@ Item {
           step: 5
           integer: true
           value: volume.heldVolume >= 0 ? volume.heldVolume : Math.max(0, root.status.volume)
-          trackColor: Style.selectedFillFor(root.foreground, Color.accent)
+          trackColor: Style.selectedFillFor(root.foreground, Commons.Color.accent)
           fillColor: root.foreground
           knobColor: root.foreground
           onMoved: function(value) { volume.pendingVolume = value; volumeThrottle.start() }

@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Settings.js" as Settings
 
@@ -28,7 +29,7 @@ Rectangle {
   // The text setting being edited, or "".
   property string editing: ""
   property bool wide: false
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
 
@@ -175,7 +176,7 @@ Rectangle {
     root.editFinished()
   }
 
-  color: Color.popups.background
+  color: Commons.Color.popups.background
 
   Button {
     id: closeButton
@@ -261,7 +262,7 @@ Rectangle {
             width: parent.width
             height: Math.max(labels.implicitHeight, control.height) + Style.space(12)
             radius: Style.cornerRadius
-            color: rowItem.current ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+            color: rowItem.current ? Style.hoverFillFor(root.foreground, Commons.Color.accent) : "transparent"
 
             MouseArea {
               anchors.fill: parent
@@ -305,8 +306,8 @@ Rectangle {
                 textFormat: Text.PlainText
                 // ✓ and ✗ as well as the colour, which some themes make hard to tell apart.
                 text: !rowItem.note ? "" : (rowItem.note.kind === "ok" ? "✓ " : rowItem.note.kind === "bad" ? "✗ " : "") + rowItem.note.text
-                color: rowItem.note && rowItem.note.kind === "bad" ? Color.urgent
-                  : rowItem.note && rowItem.note.kind === "ok" ? Color.accent : root.dim
+                color: rowItem.note && rowItem.note.kind === "bad" ? Commons.Color.urgent
+                  : rowItem.note && rowItem.note.kind === "ok" ? Commons.Color.accent : root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.WordWrap

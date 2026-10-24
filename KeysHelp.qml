@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The full key list, over the panel (? or Esc closes it), or in a window of
@@ -8,7 +9,7 @@ import qs.Ui
 Rectangle {
   id: root
 
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
   property string tuiName: "ncmpcpp"
   property string version: ""
@@ -81,7 +82,7 @@ Rectangle {
   ]
 
   // Opaque, in the card's own colour, so the panel underneath doesn't show.
-  color: Color.popups.background
+  color: Commons.Color.popups.background
 
   MouseArea {
     anchors.fill: parent

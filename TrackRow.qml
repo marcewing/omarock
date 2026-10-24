@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // One row in the queue, the search results, or an artist, album, genre or
@@ -87,7 +88,7 @@ CursorSurface {
       visible: !row.hasCover
       horizontalAlignment: Text.AlignHCenter
       text: row.isPlaying ? "󰐊" : (row.entry.lead || "")
-      color: row.isPlaying ? Color.accent : row.dim
+      color: row.isPlaying ? Commons.Color.accent : row.dim
       font.family: row.fontFamily
       font.pixelSize: (row.isQueue || row.entry.kind === "track") && !row.isPlaying ? Style.font.caption : Style.font.body
     }
@@ -159,7 +160,7 @@ CursorSurface {
       anchors.verticalCenter: parent.verticalCenter
       visible: row.libraryMark && !actions.visible
       text: "󰄬"
-      color: Color.accent
+      color: Commons.Color.accent
       font.family: row.fontFamily
       font.pixelSize: Style.font.caption
     }

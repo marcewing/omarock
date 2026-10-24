@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The info card (i): everything known about a song, album, station or
@@ -13,7 +14,7 @@ Rectangle {
   property var info: null
   property string coverUrl: ""
   property bool loading: false
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
   // The expanded panel: a bigger cover, and the fields kept to a readable width.
@@ -32,7 +33,7 @@ Rectangle {
   onInfoChanged: if (!root.loading) flick.contentY = 0
 
   // Opaque, in the card's own colour, so the panel underneath doesn't show.
-  color: Color.popups.background
+  color: Commons.Color.popups.background
 
   MouseArea {
     anchors.fill: parent

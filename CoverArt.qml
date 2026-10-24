@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // Album cover, or a quiet music-note tile when the album has none (common
 // until beets has fetched it, and for compilations and bootlegs).
@@ -7,7 +8,7 @@ Item {
   id: root
 
   property string source: ""
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
 
   readonly property bool showingImage: image.status === Image.Ready && root.source !== ""

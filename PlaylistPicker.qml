@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Mpd.js" as Mpd
 
@@ -15,7 +16,7 @@ Item {
   // [{ name, modified }], and name -> { songs, seconds } once known.
   property var playlists: []
   property var counts: ({})
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
   property int index: 0
@@ -81,7 +82,7 @@ Item {
 
   Rectangle {
     anchors.fill: parent
-    color: Util.alpha(Color.popups.background, 0.7)
+    color: Util.alpha(Commons.Color.popups.background, 0.7)
 
     MouseArea {
       anchors.fill: parent
@@ -94,8 +95,8 @@ Item {
     width: Math.min(parent.width - Style.space(24), Style.space(440))
     height: Math.min(parent.height - Style.space(24), card.contentTopInset + card.contentBottomInset + body.implicitHeight)
     anchors.centerIn: parent
-    color: Color.popups.background
-    borderSpec: Border.flat(Color.accent, Style.normalBorderWidth)
+    color: Commons.Color.popups.background
+    borderSpec: Border.flat(Commons.Color.accent, Style.normalBorderWidth)
     padding: Style.space(16)
     radius: Style.cornerRadius
 
@@ -199,7 +200,7 @@ Item {
             width: Style.space(22)
             horizontalAlignment: Text.AlignHCenter
             text: choiceRow.modelData.isNew ? "󰐕" : "󰲸"
-            color: choiceRow.modelData.isNew ? Color.accent : root.dim
+            color: choiceRow.modelData.isNew ? Commons.Color.accent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
           }
