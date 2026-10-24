@@ -256,10 +256,22 @@ Rectangle {
             root.finishEdit(rowItem.row.key, editor.shown, false)
           }
 
+          // A rule between the sections.
+          Item {
+            visible: !!rowItem.row.section && rowItem.index > 0
+            width: parent.width
+            height: Style.space(14)
+
+            PanelSeparator {
+              anchors.verticalCenter: parent.verticalCenter
+              foreground: root.foreground
+            }
+          }
+
           PanelSectionHeader {
             visible: !!rowItem.row.section
             width: parent.width
-            topPadding: (rowItem.index > 0 ? Style.space(10) : 0) + Math.ceil(fontSize * 0.15)
+            topPadding: Math.ceil(fontSize * 0.15)
             text: rowItem.row.section || ""
             foreground: root.foreground
             fontFamily: root.fontFamily

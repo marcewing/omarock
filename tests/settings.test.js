@@ -13,7 +13,7 @@ test("a value comes from settings.json, else the widget's settings, else its def
 
 test("the file-only settings aren't on the screen, and still apply from the file", () => {
   const all = { local: { setUp: true }, spotify: { setUp: true }, sxm: { setUp: true }, apple: { setUp: true }, sound: { setUp: true } }
-  const fileOnly = ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile"]
+  const fileOnly = ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile", "appleBridge", "appleStream"]
   assert.ok(!keys(Settings.shown(all)).some(k => fileOnly.includes(k)))
   assert.ok(!Settings.groups.some(g => g.title === "ADVANCED"))
   assert.equal(Settings.value({ socket: "/run/mpd/socket" }, {}, "socket", ""), "/run/mpd/socket")
@@ -47,7 +47,7 @@ test("a source not set up: its Set up button, and none of its other rows", () =>
   assert.equal(spotify.button, "Set up…")
   assert.match(spotify.description, /Premium/)
   for (const key of ["spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove", "spotifyUpdate", "sxmPassword",
-    "appleBridge", "appleRemove", "soundRemove"])
+    "bridgeToken", "appleRemove", "soundRemove"])
     assert.ok(!keys(rows).includes(key), key)
   assert.equal(row(rows, "sound").button, "Set up…")
   assert.ok(keys(rows).includes("musicFolder") && keys(rows).includes("radio"))
@@ -71,7 +71,8 @@ test("Fix while something's wrong, else Update while one waits", () => {
   const update = row(Settings.shown({ spotify: { setUp: true, update: "Soloist stops working in 9 days" } }), "spotifyUpdate")
   assert.equal(update.button, "Update…")
   assert.equal(update.description, "Soloist stops working in 9 days")
-  assert.match(row(Settings.shown({ sound: { setUp: true, update: true } }), "soundUpdate").description, /newer version/)
+  assert.match(row(Settings.shown({ sound: { setUp: true, update: true } }), "soundUpdate").description, /sound output has changes to install/)
+  assert.match(row(Settings.shown({ spotify: { setUp: true, update: true } }), "spotifyUpdate").description, /Spotify service/)
   assert.ok(!keys(Settings.shown({ spotify: { setUp: false, update: true } })).includes("spotifyUpdate"))
 })
 

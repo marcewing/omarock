@@ -341,13 +341,15 @@ A change saves at once.
 | `tuiCommand` | `ncmpcpp` | The terminal player `t` opens |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |
 | `maxLabelWidth` | 300 | How wide the song gets on the bar, in pixels |
-| `appleBridge`, `appleStream` | from `~/.config/omarock/apple.json` | The Apple Music bridge's address, and its stream's |
 | `appleIdleStop` | 60 | Seconds the Mac is paused before mpd lets go of its stream (0: never) |
 | `appleRejoin` | on | Reconnect mpd to the Apple Music stream after each change; turn off with the patched libFLAC ([patches/README.md](patches/README.md)) |
 
-One more is in the file only: `socket`, mpd's unix socket (default
-`$XDG_RUNTIME_DIR/mpd/socket`). `./install` sets it when your mpd already listens
-somewhere else.
+A few are in the file only, for when you know you need them:
+- `socket`, mpd's unix socket (default `$XDG_RUNTIME_DIR/mpd/socket`).
+  `./install` sets it when your mpd already listens somewhere else.
+- `appleBridge` and `appleStream`, the Apple Music bridge's address and its
+  stream's, in place of `~/.config/omarock/apple.json`'s (`./install apple-music`
+  writes that).
 
 ## Troubleshooting
 
