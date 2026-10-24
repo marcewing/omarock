@@ -19,7 +19,7 @@ test("artUrl fills Apple's template at twice the size, within the original", () 
 test("searchRows lists the library first, then Apple Music, once each", () => {
   const rows = Apple.searchRows({
     library: { albums: [{ kind: "album", id: "l.1", source: "library", catalogId: "100", title: "Zen Arcade",
-      artist: "Hüsker Dü", year: 1984 }], playlists: [{ kind: "playlist", id: "p.1", source: "library", name: "PunkRock", trackCount: 2 }] },
+      artist: "Hüsker Dü", year: 1984, trackCount: 1 }], playlists: [{ kind: "playlist", id: "p.1", source: "library", name: "PunkRock", trackCount: 2 }] },
     catalog: { albums: [{ kind: "album", id: "100", source: "catalog", title: "Zen Arcade", artist: "Hüsker Dü" },
       { kind: "album", id: "101", source: "catalog", title: "New Day Rising", artist: "Hüsker Dü", year: 1985 }],
       songs: [song("200", "Diane", { explicit: true })] }
@@ -28,7 +28,8 @@ test("searchRows lists the library first, then Apple Music, once each", () => {
     "album:New Day Rising", "song:Diane 󰬌"])
   assert.deepEqual(rows.map(r => r.section), ["YOUR PLAYLISTS", "YOUR ALBUMS", "GENRES", "APPLE MUSIC · ALBUMS",
     "APPLE MUSIC · SONGS"])
-  assert.equal(rows[1].subtitle, "Hüsker Dü · 1984")
+  // The songs you have of it, so a one-song album shows before it's opened.
+  assert.equal(rows[1].subtitle, "Hüsker Dü · 1984 · 1 song")
   assert.deepEqual(rows[4].apple, { kind: "song", id: "200", source: "catalog" })
   assert.equal(rows[4].file, "apple:200")
   assert.equal(rows[2].noQueue, true)
@@ -125,15 +126,15 @@ test("an album you have only part of is in both lists, each saying how much", ()
       album("3", "catalog", "Twice", 2005, 9)] } }
   const view = Apple.mergedArtistView(mine, theirs)
   assert.deepEqual(view.rows.map(r => (r.section || "") + "|" + r.title + "|" + r.subtitle),
-    ["YOUR ALBUMS|Whole|2001", "|Part|2003 · 1 of 12 songs", "|Twice|2005 · 2 of 9 songs", "|TWICE|2005",
-     "ON APPLE MUSIC|Part|2003 · you have 1"])
+    ["YOUR ALBUMS|Whole|2001 · 10 songs", "|Part|2003 · 1 of 12 songs", "|Twice|2005 · 2 of 9 songs", "|TWICE|2005 · 9 songs",
+     "ON APPLE MUSIC|Part|2003 · 12 songs · you have 1"])
 
   const rows = Apple.searchRows({
     library: { albums: [album("l.2", "library", "Part", 2003, 1), album("l.1", "library", "Whole", 2001, 10)] },
     catalog: { albums: [album("2", "catalog", "Part", 2003, 12), album("1", "catalog", "Whole", 2001, 10)] }
   })
   assert.deepEqual(rows.map(r => r.section + "|" + r.title + "|" + r.subtitle),
-    ["YOUR ALBUMS|Part|F · 2003", "|Whole|F · 2001", "APPLE MUSIC · ALBUMS|Part|F · 2003 · you have 1"])
+    ["YOUR ALBUMS|Part|F · 2003 · 1 song", "|Whole|F · 2001 · 10 songs", "APPLE MUSIC · ALBUMS|Part|F · 2003 · 12 songs · you have 1"])
 })
 
 test("queueRows marks the playing entry by its index in the whole queue", () => {

@@ -562,17 +562,37 @@ Item {
     var filter = Mpd.tagFilter("genre", "==", genre)
     root.send(Mpd.commandListOk([
       Mpd.command("count", [filter]),
-      Mpd.command("list", ["album", filter, "group", "date", "group", "albumartist"])
+      Mpd.command("list", ["album", filter, "group", "date", "group", "albumartist"]),
+      Mpd.command("count", [filter, "group", "album"])
     ]), function(lines, error) {
       if (error !== "") { callback(null); return }
       var replies = Mpd.splitReplies(lines)
       var total = Mpd.parseObject(replies[0] || [])
+      var albums = Mpd.mergeAlbums(Mpd.parseRows(replies[1] || [], "album"))
+      var counts = {}
+      Mpd.parseCounts(replies[2] || [], "album").forEach(function(c) { counts[c.name] = c.songs })
+      albums.forEach(function(album) { album.songCount = counts[album.album] || 0 })
       callback({
         genre: genre,
         songs: parseInt(total.songs, 10) || 0,
         seconds: parseFloat(total.playtime) || 0,
-        albums: Mpd.sortGenreAlbums(Mpd.mergeAlbums(Mpd.parseRows(replies[1] || [], "album")))
+        albums: Mpd.sortGenreAlbums(albums)
       })
+    })
+  }
+
+  // Each album's number of songs, by name (as omarock knows an album):
+  // callback({ name: songs }), empty if mpd failed.
+  function albumCounts(names, callback) {
+    if (names.length === 0) { callback({}); return }
+    root.send(Mpd.commandListOk(names.map(function(name) {
+      return Mpd.command("count", [Mpd.tagFilter("album", "==", name)])
+    })), function(lines, error) {
+      var counts = {}
+      if (error === "") Mpd.splitReplies(lines).forEach(function(reply, i) {
+        counts[names[i]] = parseInt(Mpd.parseObject(reply).songs, 10) || 0
+      })
+      callback(counts)
     })
   }
 
@@ -679,12 +699,16 @@ Item {
         seen[all[i].album] = true
         albums.push(all[i])
       }
-      callback({
-        playlists: out.playlists,
-        genres: Mpd.sortByMatch(out.genres, query, function(g) { return g.name }).slice(0, 8),
-        artists: Mpd.sortByMatch(out.artists, query, function(a) { return a }).slice(0, 12),
-        albums: albums,
-        songs: out.songs
+      // How many songs each has, so a one-song album shows before it's opened.
+      root.albumCounts(albums.map(function(album) { return album.album }), function(counts) {
+        albums.forEach(function(album) { album.songCount = counts[album.album] || 0 })
+        callback({
+          playlists: out.playlists,
+          genres: Mpd.sortByMatch(out.genres, query, function(g) { return g.name }).slice(0, 8),
+          artists: Mpd.sortByMatch(out.artists, query, function(a) { return a }).slice(0, 12),
+          albums: albums,
+          songs: out.songs
+        })
       })
     }
     var named = Mpd.sortByMatch(root.playlists.filter(function(p) { return Mpd.nameMatches(p.name, query) }),

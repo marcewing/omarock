@@ -91,9 +91,13 @@ function songRow(song, section) {
     file: songKey(song), apple: ref(song), artwork: song.artwork, item: song }
 }
 
-function albumRow(album, section, showArtist) {
+// How many songs, so a one-song "album" shows before it's opened: the songs
+// you have of a library album, the whole album's of a catalog one. songs
+// replaces it ("1 of 12 songs").
+function albumRow(album, section, showArtist, songs) {
   return { kind: "album", section: section || "", lead: "󰀥", title: titleOf(album), name: nameOf(album),
-    subtitle: join([showArtist === false ? "" : album.artist, yearOf(album), releaseKind(album)]),
+    subtitle: join([showArtist === false ? "" : album.artist, yearOf(album), releaseKind(album),
+      songs !== undefined ? songs : album.trackCount > 0 ? countText(album.trackCount, "song") : ""]),
     apple: ref(album), artwork: album.artwork, item: album }
 }
 
@@ -337,10 +341,9 @@ function mergedArtistView(mine, theirs, service) {
     return row
   }
   yours.forEach(function(album, i) {
-    var row = albumRow(album, i === 0 ? "YOUR ALBUMS" : "", false)
     var of = Math.max(whole[album.catalogId] || 0, whole[albumKey(album)] || 0)
-    if (album.trackCount > 0 && of > album.trackCount) row.subtitle = join([row.subtitle, album.trackCount + " of " + of + " songs"])
-    rows.push(row)
+    rows.push(albumRow(album, i === 0 ? "YOUR ALBUMS" : "", false,
+      album.trackCount > 0 && of > album.trackCount ? album.trackCount + " of " + of + " songs" : undefined))
   })
   full.forEach(function(album, i) { rows.push(theirRow(album, i === 0 ? "ON " + service.toUpperCase() : "")) })
   singles.forEach(function(album, i) { rows.push(theirRow(album, i === 0 ? "SINGLES & EPS" : "")) })

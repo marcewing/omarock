@@ -1675,8 +1675,11 @@ def now_playing_scenario(host, output, socket_path, failures):
     back("← from O's artist comes back to the queue")
     host.call("clickPanel", "playingGenre")
     s = opens("a click on the genre", "genre:" + genre)
-    check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == "artist:" + albumartist,
-          "the genre opens on the artist playing (" + albumartist + ")", failures)
+    # A compilation's song (whatever was left playing) has no artist row of
+    # its own there: Compilations.
+    want = "artist:" + albumartist if "artist:" + albumartist in s["rows"] else "compilations:Compilations"
+    check(s["cursor"] >= 0 and s["rows"][s["cursor"]] == want,
+          "the genre opens on the artist playing, or Compilations (" + want + ")", failures)
     host.grab(output / "now-playing-genre.png")
     back("← from the genre comes back to the queue")
     host.call("press", "g")
@@ -2465,8 +2468,9 @@ def browse_scenario(host, output, command_log, failures):
     host.settle()
     s = host.state()
     albums = [(r, sub) for r, sub in zip(s["rows"], s["subtitles"]) if r.startswith("album:")]
-    check([a for a in albums if a[0] == "album:Signal Hill Sampler"] == [("album:Signal Hill Sampler", "3 artists")],
-          "one row per compilation: " + str(albums), failures)
+    # With its number of songs, so a one-song album shows before it's opened.
+    check([a for a in albums if a[0] == "album:Signal Hill Sampler"] == [("album:Signal Hill Sampler", "3 artists · 4 songs")],
+          "one row per compilation, with its songs: " + str(albums), failures)
 
     # A two-disc album has a heading per disc; Backspace goes back to the results.
     host.call("type", "basement")
@@ -2520,8 +2524,10 @@ def browse_scenario(host, output, command_log, failures):
     host.settle(.5)
     s = host.state()
     check(s["rows"] == ["album:Left Of The Signal", "album:Signal Hill Sampler"] and s["queueLength"] == queued
-          and s["browseInfo"]["subtitle"] == "Alternative & Punk · 2 albums",
-          "Compilations lists the genre's compilations: " + ", ".join(s["rows"]), failures)
+          and s["browseInfo"]["subtitle"] == "Alternative & Punk · 2 albums"
+          and s["subtitles"] == ["Various Artists · 1988 · 3 songs", "3 artists · 1990 · 4 songs"],
+          "Compilations lists the genre's compilations, with their songs: " + ", ".join(s["rows"])
+          + " | " + " / ".join(s["subtitles"]), failures)
     host.grab(output / "compact-compilations.png")
     host.call("press", "Left")
     host.settle(.3)

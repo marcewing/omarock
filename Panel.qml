@@ -138,7 +138,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.6.6"
+  readonly property string version: "0.6.7"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -921,7 +921,7 @@ Panel {
     })
     results.albums.forEach(function(album, i) {
       rows.push({ kind: "album", section: i === 0 ? "ALBUMS" : "", lead: "󰀥",
-        title: album.album, subtitle: album.albumartist !== "" ? album.albumartist : album.artists.length + " artists",
+        title: album.album, subtitle: root.albumSubtitle(album, false),
         artist: album.albumartist, album: album.album })
     })
     results.songs.forEach(function(song, i) {
@@ -1664,9 +1664,17 @@ Panel {
 
   // An album row in a genre's lists, known by name until its cover is found.
   function genreAlbumRow(album) {
-    var artist = album.albumartist !== "" ? album.albumartist : album.artists.length + " artists"
-    return { kind: "album", lead: "󰀥", title: album.album, subtitle: artist + (album.year !== "" ? " · " + album.year : ""),
+    return { kind: "album", lead: "󰀥", title: album.album, subtitle: root.albumSubtitle(album, true),
       artist: album.albumartist, album: album.album, cover: { album: album.album, artist: album.albumartist } }
+  }
+
+  // An album row's line from mpd's list (search, a genre): its artist (or
+  // how many), the year, and how many songs.
+  function albumSubtitle(album, withYear) {
+    var parts = [album.albumartist !== "" ? album.albumartist : album.artists.length + " artists"]
+    if (withYear && album.year !== "") parts.push(album.year)
+    if (album.songCount > 0) parts.push(root.countText(album.songCount, "song"))
+    return parts.join(" · ")
   }
 
   // A playlist in the search results or the Playlists view.
