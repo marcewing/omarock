@@ -171,14 +171,16 @@ chmod 600 ~/.config/omarock/bridge-token
 
 Then switch Apple Music on in omarock's settings (`,` in the panel), where the
 token can be pasted later too. If the Mac's address changes, **Fix…** there (or
-`./install apple-music`) asks again. omarock's other settings for it, there or in
+`./install apple-music`) asks again. Its other setting there, also in
 `~/.config/omarock/settings.json`:
-- `appleRejoin` (on by default): reconnects mpd to the stream after each change, so it
-  stays near live.
 - `appleIdleStop`: after the bridge has been paused this many seconds, mpd lets go of the
   stream.
-- `appleBridge` and `appleStream` (in the file only): the addresses, instead of
-  `apple.json`'s.
+
+And in the file only:
+- `appleRejoin` (on by default): reconnects mpd to the stream after each change, so it
+  stays near live with a stock libFLAC. `./install apple-music` turns it off when mpd
+  has the patched one.
+- `appleBridge` and `appleStream`: the addresses, instead of `apple.json`'s.
 
 For smooth playback on the Linux side (a patched libFLAC for mpd, and when `appleRejoin`
 is needed), see [patches/README.md](../patches/README.md). `tools/omarock-doctor` checks

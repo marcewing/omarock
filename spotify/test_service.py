@@ -91,6 +91,7 @@ def main():
     library()
     album_library()
     renewal()
+    sign_out()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
 
@@ -258,6 +259,31 @@ def renewal():
     check("renewing: the new tokens saved, nothing left behind",
           json.loads(web.TOKENS.read_text())["refresh_token"] == "r2" and sorted(p.name for p in folder.iterdir())
           == ["spotify-token.json", "spotify.json"], str(list(folder.iterdir())))
+
+
+def sign_out():
+    """POST /v1/logout forgets the Web API's sign-in, and what it fetched."""
+    import json
+    import tempfile
+    web = service.spotify_web
+    folder = Path(tempfile.mkdtemp())
+    web.TOKENS = folder / "spotify-token.json"
+    web.TOKENS.write_text(json.dumps({"access_token": "a", "refresh_token": "r", "expires_at": time.time() + 3600,
+                                      "signed_in_at": int(time.time())}))
+    service.WEB.me, service.WEB.library = {"id": "me"}, {"playlists": []}
+    fresh()
+    before = service.health()["web"]
+    reply = service.post("logout", ["logout"], {})
+    after = service.health()["web"]
+    check("sign out: the sign-in and what it fetched are gone",
+          before["signedIn"] and reply == {"ok": True} and not after["signedIn"] and not web.TOKENS.exists()
+          and service.WEB.me is None and service.WEB.library is None, f"{before} {after}")
+    try:
+        web.access_token()
+        check("sign out: requests then need a new sign-in", False)
+    except web.NotSignedIn:
+        check("sign out: requests then need a new sign-in", True)
+    check("sign out: twice is fine", service.post("logout", ["logout"], {}) == {"ok": True})
 
 
 if __name__ == "__main__":

@@ -3431,6 +3431,33 @@ def settings_scenario(host, output, failures):
     check(sorted(s["settingMasked"]) == sorted(k for k in secrets if s["settingValues"].get(k) is True)
           and "sxmPassword" in s["settingMasked"],
           "each secret that's set shows dots, and only those: " + ", ".join(s["settingMasked"]), failures)
+
+    # Marc, 10-24: signed in, the Spotify row offers Sign out (asking
+    # first), not Sign in again.
+    def login_row():
+        return next(k for k in host.state()["settingKinds"] if k.startswith("spotifyLogin:"))
+    check(login_row() == "spotifyLogin:action:Sign out" and s["settingNotes"]["spotifyLogin"]["text"].startswith("Until "),
+          "signed in to Spotify: Sign out, and until when: " + s["settingNotes"]["spotifyLogin"]["text"], failures)
+    settings_cursor_to(host, "spotifyLogin")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["confirmOpen"], "asked before signing out")
+    host.grab(output / "compact-settings-sign-out.png")
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["confirmOpen"], "kept")
+    check(not any(r[1] == "/v1/logout" for r in spotify_requests()), "Esc keeps the sign-in", failures)
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["confirmOpen"], "asked again")
+    host.call("press", "Return")
+    wait_for(lambda: login_row() == "spotifyLogin:action:Sign in", "signed out")
+    check(any(r[1] == "/v1/logout" for r in spotify_requests()) and host.state()["notice"] == "Signed out of Spotify"
+          and host.state()["settingNotes"]["spotifyLogin"]["text"] == "Not signed in yet",
+          "Enter signs out: the row is Sign in again: " + host.state()["notice"], failures)
+    spotify_post("/v1/fake/signin", {"on": True})
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["settingsOpen"], "closed")
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingKinds"]
+             and login_row() == "spotifyLogin:action:Sign out", "signed in again")
     host.grab(output / "compact-settings-accounts.png")
 
     # The music folder: asked about first, and Esc keeps it.

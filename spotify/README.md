@@ -95,8 +95,10 @@ By hand, run the tools from your omarock clone: the plugin's folder,
 
 - **Soloist builds expire after 90 days.** omarock's settings offer **Update…**
   ten days before, which fetches a new one; or run `tools/update-soloist`.
-- **The Web API sign-in lasts 6 months.** Then run `tools/omarock-sp login` again;
-  `tools/omarock-sp health` shows when it ends.
+- **The Web API sign-in lasts 6 months.** omarock's settings show when it ends,
+  under Spotify. Then **Sign in** there, or run `tools/omarock-sp login` again.
+  **Sign out** there forgets it (Spotify's player stays paired: **Remove…** takes
+  everything off).
 - **Logs:** `journalctl --user -u omarock-spotify -u omarock-soloist`.
 
 ## Secrets and the network

@@ -24,6 +24,7 @@ Also:
   until Spotify plays again, it offers nothing, so the keys act on mpd.
 - Spotify's sign-in ends after 6 months: GET /v1/login gives the page to open,
   and /callback takes Spotify's answer (this port is the app's redirect URI).
+  POST /v1/logout forgets it (Soloist stays paired).
 
     omarock-spotify.py [--port 8730]
 """
@@ -43,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 # omarock's sound output (audio/, ./install sound): Soloist plays into it
@@ -848,6 +849,12 @@ def web_play(body):
 
 def post(path, parts, body):
     seq = SOLOIST.seq
+    if path == "logout":
+        # The Web API's sign-in only: Soloist stays paired to the account.
+        spotify_web.sign_out()
+        with WEB.lock:
+            WEB.me, WEB.library, WEB.library_at = None, None, 0.0
+        return {"ok": True}
     if path == "play":
         items, mode, start = body.get("items") or [], body.get("mode", "play"), int(body.get("start", 0))
         if not items:

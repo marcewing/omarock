@@ -140,7 +140,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.8.3"
+  readonly property string version: "0.8.4"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -225,6 +225,7 @@ Panel {
         update: !sp || !sp.setUp ? false
           : days >= 80 ? "Soloist, Spotify's player, stops working " + (days >= 90 ? "now: its build is " + days + " days old" : "in " + (90 - days) + " days")
           : !sp.upToDate,
+        signedIn: !!spotify.health.web && spotify.health.web.signedIn === true,
         attention: !root.spotifyEnabled || !spotify.healthKnown ? ""
           : !spotify.reachable ? "Can't reach omarock-spotify"
           : soloist.loggedIn === false ? "Soloist isn't signed in to your account" : ""
@@ -302,7 +303,10 @@ Panel {
         note(output !== "" ? "Plays only into " + client.outputDescription(output) : "Plays only into the output it was set up with", "ok")),
       spotifyLogin: !root.spotifyEnabled ? note("")
         : !spotify.reachable ? note("omarock-spotify isn't running", "bad")
-        : spotify.healthAuthorized ? note("Signed in", "ok") : note("Not signed in yet", "bad"),
+        : !states.spotify.signedIn ? note("Not signed in yet", "bad")
+        : spotify.health.web.signInEndsAt ? note("Until " + new Date(spotify.health.web.signInEndsAt * 1000)
+          .toLocaleDateString(Qt.locale(), "MMMM d, yyyy") + ", when Spotify asks again", "ok")
+        : note("Signed in", "ok"),
       musicFolder: note(client.musicDirectory === "" ? "mpd doesn't say: it tells only clients on its unix socket" : "")
     }
   }
@@ -2244,6 +2248,10 @@ Panel {
     if (root.setupActions[key]) return root.runSetup(root.setupActions[key], false)
     if (root.removeActions[key]) return root.runSetup(root.removeActions[key], true)
     if (key !== "spotifyLogin") return
+    if (root.settingStates.spotify.signedIn) {
+      root.confirmTarget = { signOut: true }
+      return
+    }
     spotify.get("/v1/login", function(data, error) {
       if (data && data.url) {
         Qt.openUrlExternally(data.url)
@@ -2307,9 +2315,14 @@ Panel {
   function acceptConfirm() {
     var folder = root.confirmTarget ? root.confirmTarget.folder || "" : ""
     var name = root.confirmTarget ? root.confirmTarget.playlist || "" : ""
+    var signOut = !!root.confirmTarget && root.confirmTarget.signOut === true
     root.cancelConfirm()
     if (folder !== "") {
       root.saveAccount("musicFolder", folder)
+      return
+    }
+    if (signOut) {
+      root.signOutSpotify()
       return
     }
     if (name === "") return
@@ -2317,6 +2330,16 @@ Panel {
       if (error !== "") return
       root.say("Deleted the playlist " + name)
       if (root.browseTop && root.browseTop.kind === "playlist" && root.browseTop.playlist === name) root.goBack()
+    })
+  }
+
+  // Spotify's Sign out: omarock-spotify forgets the Web API's sign-in
+  // (Soloist stays paired).
+  function signOutSpotify() {
+    spotify.post("/v1/logout", {}, function(data, error) {
+      root.say(error === "No such endpoint." ? "To sign out, update omarock-spotify first: Update… under Spotify"
+        : error !== "" ? "Couldn't sign out: " + error : "Signed out of Spotify")
+      spotify.checkHealth()
     })
   }
 
@@ -2808,7 +2831,7 @@ Panel {
     streamed: false
     canRemove: false
     canUnsave: true
-    libraryUpdateText: "To add to your library, update omarock-spotify: tools/install-spotify"
+    libraryUpdateText: "To add to your library, update omarock-spotify: Update… under Spotify, in the settings"
     bridgeName: "omarock-spotify"
     unreachableText: "Can't reach omarock-spotify (systemctl --user status omarock-spotify)"
     unauthorizedText: "Spotify isn't signed in: run omarock-sp login"
@@ -3024,12 +3047,16 @@ Panel {
         message: root.confirmTarget && root.confirmTarget.folder
           ? "Play music from “" + root.confirmTarget.folder + "”? omarock keeps a copy of mpd.conf, changes only its "
             + "music_directory line, then restarts mpd (anything playing stops for a moment) and reads the new folder."
+          : root.confirmTarget && root.confirmTarget.signOut
+          ? "Sign omarock out of Spotify? Search and your library stop working here until you sign in again. "
+            + "Spotify's player stays paired to your account."
           : root.confirmTarget
           ? "Delete the playlist “" + root.confirmTarget.playlist + "”? "
             + (root.confirmTarget.songs > 0 ? "Its " + root.countText(root.confirmTarget.songs, "song") + " stay in the library."
               : "It's empty.")
           : ""
-        confirmText: root.confirmTarget && root.confirmTarget.folder ? "Change it" : "Delete"
+        confirmText: root.confirmTarget && root.confirmTarget.folder ? "Change it"
+          : root.confirmTarget && root.confirmTarget.signOut ? "Sign out" : "Delete"
         background: Commons.Color.popups.background
         foreground: root.foreground
         fontFamily: root.fontFamily

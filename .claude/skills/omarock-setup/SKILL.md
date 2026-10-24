@@ -142,7 +142,7 @@ There are two halves, and the Mac's is the user's to build. Follow
     there by the user.
 - **The stream's lag:** with the stock libFLAC, keep `appleRejoin` on (the default).
   For smooth starts, offer the patches in `patches/README.md`: the patched
-  libFLAC (then switch `appleRejoin` off) and mpd-mpris. Ask before changing
+  libFLAC (then `"appleRejoin": false` in settings.json) and mpd-mpris. Ask before changing
   mpd's or mpd-mpris's unit.
 - **Check:** `tools/omarock-doctor`'s Apple Music section is all green.
 - **Then the switch:** `appleMusic` on.

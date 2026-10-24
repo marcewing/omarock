@@ -11,9 +11,18 @@ test("a value comes from settings.json, else the widget's settings, else its def
   assert.equal(Settings.value({ appleIdleStop: 0 }, { appleIdleStop: 60 }, "appleIdleStop"), 0)
 })
 
+test("Spotify's sign-in row: Sign in, and once signed in, Sign out", () => {
+  const out = row(Settings.shown({ spotify: { setUp: true } }), "spotifyLogin")
+  assert.equal(out.button, "Sign in")
+  const signed = row(Settings.shown({ spotify: { setUp: true, signedIn: true } }), "spotifyLogin")
+  assert.equal(signed.button, "Sign out")
+  assert.equal(signed.label, "Signed in to Spotify")
+  assert.equal(signed.type, "action")
+})
+
 test("the file-only settings aren't on the screen, and still apply from the file", () => {
   const all = { local: { setUp: true }, spotify: { setUp: true }, sxm: { setUp: true }, apple: { setUp: true }, sound: { setUp: true } }
-  const fileOnly = ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile", "appleBridge", "appleStream"]
+  const fileOnly = ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile", "appleBridge", "appleStream", "appleRejoin"]
   assert.ok(!keys(Settings.shown(all)).some(k => fileOnly.includes(k)))
   assert.ok(!Settings.groups.some(g => g.title === "ADVANCED"))
   assert.equal(Settings.value({ socket: "/run/mpd/socket" }, {}, "socket", ""), "/run/mpd/socket")

@@ -14,7 +14,9 @@
 // A few settings are in the file only, never on the screen: `socket`
 // (mpd's, which ./install sets when mpd listens somewhere else);
 // `appleBridge` and `appleStream`, which override apple.json (./install
-// apple-music writes that); and the addresses the test harness points at
+// apple-music writes that); `appleRejoin` (default on: reconnect mpd to the
+// Apple Music stream after each change, for a stock libFLAC; ./install turns
+// it off when mpd has the patched one); and the addresses the test harness points at
 // its fakes, `spotifyService`, `sxmService`, `radioBrowser` and
 // `appleTokenFile`. Panel.qml gives each its default.
 //
@@ -49,7 +51,9 @@ var schema = [
   { key: "soloistKey", type: "secret", label: "The Soloist key", source: "spotify",
     description: "From the same dashboard, never shown. Saving it restarts Soloist." },
   { key: "spotifyLogin", type: "action", label: "Sign in to Spotify", button: "Sign in", source: "spotify",
-    description: "For search and your library: Spotify's sign-in, in your browser. It lasts six months." },
+    description: "For search and your library: Spotify's sign-in, in your browser. It lasts six months.",
+    signedIn: { label: "Signed in to Spotify", button: "Sign out",
+      description: "For search and your library. Signing out leaves Spotify's player paired to your account; Remove takes everything off." } },
   { key: "spotifyRemove", type: "action", label: "Remove Spotify", button: "Remove…", source: "spotify", remove: true,
     description: "Stops and deletes its services, with your app's Client ID, the Soloist key and the sign-ins. Set up brings it back." },
 
@@ -72,8 +76,6 @@ var schema = [
     description: "On the Mac: pbcopy < ~/Library/Application\\ Support/omarock-bridge/token, then paste it here. Never shown." },
   { key: "appleIdleStop", type: "integer", label: "Let go of the stream when the Mac is paused", source: "apple",
     min: 0, max: 3600, step: 10, defaultValue: 60, description: "After this many seconds (0: never)." },
-  { key: "appleRejoin", type: "boolean", label: "Reconnect after each change", defaultValue: true, source: "apple",
-    description: "Needed with a stock libFLAC, which falls behind on the Mac's quiet stream; it costs a short stutter 2 s into each song. Turn it off once mpd uses the patched libFLAC (patches/README.md)." },
   { key: "appleRemove", type: "action", label: "Remove Apple Music", button: "Remove…", source: "apple", remove: true,
     description: "Deletes the bridge's address and token here, and the patched builds for its stream. The bridge on your Mac stays." },
 
@@ -96,8 +98,7 @@ var groups = [
   { title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioState", "lookup"] },
   { title: "SPOTIFY", keys: ["spotify", "spotifyUpdate", "spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"] },
   { title: "SIRIUSXM", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
-  { title: "APPLE MUSIC", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop",
-    "appleRejoin", "appleRemove"] },
+  { title: "APPLE MUSIC", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },
   { title: "SOUND", keys: ["sound", "soundUpdate", "soundRemove"] },
   { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "tuiCommand"] }
 ]
@@ -178,7 +179,7 @@ function shown(states) {
         : copy(field, { label: "Update " + field.name, button: "Update…",
           description: st.update === true ? field.updateDescription : st.update }))
     } else if (!field.source || st.setUp) {
-      out.push(field)
+      out.push(field.signedIn && st.signedIn ? copy(field, field.signedIn) : field)
     }
   })
   return out

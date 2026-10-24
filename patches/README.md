@@ -28,12 +28,12 @@ systemctl --user daemon-reload && systemctl --user restart mpd
 
 Only mpd loads the patched library. Check:
 `grep omarock-flac /proc/$(systemctl --user show -p MainPID --value mpd)/maps`.
-Then switch off omarock's `appleRejoin` setting: it reconnects mpd after each
-change, which the patched library doesn't need, and the reconnect is a short
-stutter.
+Then set `"appleRejoin": false` in `~/.config/omarock/settings.json` (`./install apple-music` does
+this when it finds the patched library): it reconnects mpd after each change,
+which the patched library doesn't need, and the reconnect is a short stutter.
 
 **Remove:** delete the drop-in, `systemctl --user daemon-reload && systemctl --user
-restart mpd`, and switch `appleRejoin` back on. (`./install --uninstall` offers this.)
+restart mpd`, and take `appleRejoin` out of settings.json (it's on by default). (`./install --uninstall` offers this.)
 
 ## mpd-mpris
 

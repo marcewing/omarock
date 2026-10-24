@@ -151,6 +151,9 @@ class Bridge:
         # volume, in the status and set by POST /v1/volume (POST
         # /v1/fake/volume {on} switches it; off, as with the bus).
         self.volume = None
+        # omarock-spotify's Web API sign-in: POST /v1/logout forgets it, POST
+        # /v1/fake/signin {on} sets it (no browser here).
+        self.signed_in = True
         # The library: a copy of Zen Arcade, and two playlists of songs.
         zen = dict(public(CATALOG_ALBUMS["c-al-1"]), id="l-al-1", source="library", catalogId="c-al-1")
         self.library_albums = [zen]
@@ -378,8 +381,9 @@ class Handler(BaseHTTPRequestHandler):
             bridge.log.flush()
         if url.path == "/v1/health":
             if bridge.spotify:
-                return self.reply(200, {"ok": True, "version": "fake", "authorized": True, "canPlayCatalog": True,
-                                        "current": bridge.current, "stream": "", "storefront": "US"})
+                web = {"signedIn": True, "signInEndsAt": int(time.time()) + 180 * 86400} if bridge.signed_in else {"signedIn": False}
+                return self.reply(200, {"ok": True, "version": "fake", "authorized": bridge.signed_in, "canPlayCatalog": True,
+                                        "current": bridge.current, "stream": "", "storefront": "US", "web": web})
             return self.reply(200, {"ok": True, "version": "fake", "authorized": True, "canPlayCatalog": True,
                                     "stream": f"http://127.0.0.1:{PORT}/omarock.ogg", "storefront": "us"})
         if self.server.token and self.headers.get("Authorization") != "Bearer " + self.server.token:
@@ -429,6 +433,12 @@ class Handler(BaseHTTPRequestHandler):
                     b.volume = 40 if body["on"] else None
                     b.changed()
                     return b.status(client)
+                if path == "fake/signin":
+                    b.signed_in = body["on"]
+                    return {"ok": True}
+                if path == "logout" and b.spotify:
+                    b.signed_in = False
+                    return {"ok": True}
                 if path == "volume":
                     if b.volume is None:
                         raise Refused("omarock's sound output sets the volume, not Spotify")

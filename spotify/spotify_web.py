@@ -179,6 +179,12 @@ def access_token():
         return tokens["access_token"]
 
 
+def sign_out():
+    """Forget the sign-in: the next request is NotSignedIn until a new one."""
+    with renewing:
+        TOKENS.unlink(missing_ok=True)
+
+
 def call(method, path, body=None):
     """(status, JSON or text) for one Web API request; raises NotSignedIn."""
     url = path if path.startswith("http") else API + path

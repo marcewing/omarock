@@ -157,7 +157,7 @@ print("  " + ("\033[32m✓\033[0m the bridge answers, and may use Apple Music" i
   fi
   pid=$(systemctl --user show -p MainPID --value mpd 2>/dev/null)
   if [[ -n $pid && $pid != 0 ]] && grep -q omarock-flac "/proc/$pid/maps" 2>/dev/null; then
-    ok "mpd uses the patched libFLAC$([[ $(setting appleRejoin true) == true ]] && echo '; appleRejoin can be switched off')"
+    ok "mpd uses the patched libFLAC$([[ $(setting appleRejoin true) == true ]] && echo '; appleRejoin can be set false in settings.json')"
   else
     note "mpd uses the stock libFLAC: keep appleRejoin on (it is $(setting appleRejoin true)), or see patches/README.md for the patch"
   fi
