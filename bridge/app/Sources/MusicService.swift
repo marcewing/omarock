@@ -194,7 +194,7 @@ final class MusicService {
             }
             let artist = try await found.with([.albums], preferredSource: .library)
             result["artist"] = Normalize.artist(artist, source: .library)
-            result["albums"] = Self.byYear(artist.albums.map(Array.init) ?? []).map { Normalize.album($0, source: .library) }
+            result["albums"] = Self.byYear(artist.albums.map(Array.init) ?? []).compactMap(Self.libraryAlbum)
             // From the index, as the library lists are: its ids open, and MusicKit's
             // artistName filter finds nothing for some names ("10,000 Maniacs").
             let indexed = LibraryIndex.shared.songs(byArtist: id.rawValue)
@@ -203,6 +203,18 @@ final class MusicService {
                 : indexed.prefix(25).map(Normalize.song(item:))
         }
         return result
+    }
+
+    /// A MusicKit library album with the index's title, year, track count and artwork, as
+    /// the album's own route gives them: MusicKit's trackCount is 0 for some (singles, songs
+    /// with no album tag), its title can be empty. nil for one the index has no songs on,
+    /// which opens empty.
+    private static func libraryAlbum(_ album: Album) -> [String: Any]? {
+        var o = Normalize.album(album, source: .library)
+        guard LibraryIndex.shared.isLoaded else { return o }
+        guard let entry = LibraryIndex.shared.album(album.id.rawValue), entry.trackCount > 0 else { return nil }
+        o.merge(Normalize.album(entry: entry)) { kit, index in (index as? String) == "" ? kit : index }
+        return o
     }
 
     func playlistDetail(_ id: MusicItemID, _ source: Source) async throws -> [String: Any] {
