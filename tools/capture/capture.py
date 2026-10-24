@@ -3417,12 +3417,20 @@ def settings_scenario(host, output, failures):
     host.call("press", "Down")
     host.call("press", "Return")
     wait_for(lambda: host.state()["settingsEditing"] == "sxmPassword", "editing the password")
+    check("sxmPassword" not in host.state()["settingMasked"], "a secret being typed has no dots over it", failures)
     host.call("typeKeys", "hunter 2")
     host.call("press", "Return")
     wait_for(lambda: host.state()["accounts"].get("sxmPassword") is True, "the password saved")
     login = json.loads(sxm_login.read_text())
     check(login == {"username": "me@example.com", "password": "hunter 2"} and host.state()["settingValues"]["sxmPassword"] is True
           and "hunter" not in json.dumps(host.state()), "the password is saved as typed, and never shown", failures)
+    # Marc, 10-24: a set secret shows as dots, "standard for most password
+    # style fields"; one not set says so.
+    s = host.state()
+    secrets = [k for k in ("sxmPassword", "soloistKey", "bridgeToken") if k in s["settingsRows"]]
+    check(sorted(s["settingMasked"]) == sorted(k for k in secrets if s["settingValues"].get(k) is True)
+          and "sxmPassword" in s["settingMasked"],
+          "each secret that's set shows dots, and only those: " + ", ".join(s["settingMasked"]), failures)
     host.grab(output / "compact-settings-accounts.png")
 
     # The music folder: asked about first, and Esc keeps it.

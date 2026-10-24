@@ -10,7 +10,8 @@ import "Settings.js" as Settings
 // A change is saved at once, by the panel: a setting into omarock's settings
 // file (changeRequested); an account, a key or the music folder through
 // tools/omarock-account (accountRequested, folderRequested). A secret is
-// never shown: its field starts empty, and says whether one is set. ↑↓ move,
+// never shown: a set one shows a row of dots (the panel only knows that it's
+// set), and a new one is typed into an empty, masked field. ↑↓ move,
 // Space or Enter toggles, edits, presses or takes the next choice, ←→ change
 // a number or a choice, Esc closes (or drops an edit).
 Rectangle {
@@ -85,6 +86,11 @@ Rectangle {
 
   function valueOf(key) {
     return root.local[key] !== undefined ? root.local[key] : root.values[key]
+  }
+
+  // A secret that's set, and not being typed over: its dots show.
+  function masked(row) {
+    return row.type === "secret" && root.valueOf(row.key) === true && root.editing !== row.key
   }
 
   // Shown at once, until the panel hands the value back.
@@ -374,13 +380,14 @@ Rectangle {
               }
 
               // A text or number setting, an account, a secret or the music
-              // folder. It shows the value (a secret, only whether it's set),
-              // and edits on Enter or a click; Enter saves, Esc drops the edit.
+              // folder. It shows the value (a secret, dots if it's set), and
+              // edits on Enter or a click; Enter saves, Esc drops the edit.
               TextField {
                 id: editor
                 visible: rowItem.row.type !== "boolean" && rowItem.row.type !== "enum" && rowItem.row.type !== "action"
                   && rowItem.row.type !== "info"
                 password: rowItem.row.type === "secret"
+                passwordCharacter: "●"
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
@@ -388,8 +395,9 @@ Rectangle {
                 foreground: root.foreground
                 font.family: root.fontFamily
                 inputMethodHints: rowItem.row.type === "integer" ? Qt.ImhDigitsOnly : Qt.ImhNone
-                placeholderText: rowItem.row.type === "secret" ? (rowItem.value === true ? "Set · Enter to change it" : "Not set · Enter to set it")
-                  : root.placeholders[rowItem.row.key] || ""
+                placeholderText: rowItem.row.type !== "secret" ? root.placeholders[rowItem.row.key] || ""
+                  : root.editing === rowItem.row.key ? (rowItem.value === true ? "Type a new one · Esc keeps it" : "Type or paste it")
+                  : rowItem.value === true ? "" : "Not set · Enter to set it"
                 readonly property string shown: rowItem.row.type === "secret" || rowItem.value === undefined || rowItem.value === null ? ""
                   : String(rowItem.value)
                 text: shown
@@ -417,6 +425,18 @@ Rectangle {
                     root.finishEdit(rowItem.row.key, editor.shown, false)
                     event.accepted = true
                   }
+                }
+
+                // Drawn over the empty field, not put in it, so nothing
+                // stands in for the secret that a save could send.
+                Text {
+                  visible: root.masked(rowItem.row)
+                  x: editor.leftPadding
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "●".repeat(8)
+                  textFormat: Text.PlainText
+                  color: editor.color
+                  font: editor.font
                 }
               }
             }

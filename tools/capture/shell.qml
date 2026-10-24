@@ -264,6 +264,8 @@ ShellRoot {
         settingsRows: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key }) : [],
         // Each row's key, type and button: "spotify:action:Set up…".
         settingKinds: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key + ":" + r.type + (r.button ? ":" + r.button : "") }) : [],
+        // The secrets showing their dots.
+        settingMasked: p.settingsOpen ? host.settingsView().rows.filter(function(r) { return host.settingsView().masked(r) }).map(function(r) { return r.key }) : [],
         sourcesState: p.sourcesState, setupLaunched: p.setupLaunched,
         playerVolume: p.player.status.volume, ownVolume: p.player.ownVolume === true,
         settingValues: p.settingValues, settingNotes: p.settingNotes, widgetSettings: host.widget.settings,
