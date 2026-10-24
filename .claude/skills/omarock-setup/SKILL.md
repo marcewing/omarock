@@ -7,20 +7,30 @@ description: Set up omarock, the Omarchy bar music player in this repo, or any o
 
 omarock is a plugin for Omarchy's bar, and a client for mpd. Local music and
 internet radio need only mpd. Spotify, Apple Music and SiriusXM each need a
-service set up, then their switch turned on in omarock's settings. The guides
+service set up, which also switches them on in omarock's settings. The guides
 have the details: `README.md` (install), `audio/README.md`, `spotify/README.md`,
 `sxm/README.md`, `bridge/README.md`. Read the relevant one before a step; this
 skill is the order to go in, and what to watch out for.
 
 ## The installer first
 
-`./install` in the clone does all of this interactively: it asks which sources
-the user wants, then goes through each step below, checking first and asking
-before each change. It needs a real terminal (gum prompts), so suggest the user
-run it in one of their own; it can't run from Claude's shell. It can be run
-again any time, and `./install --uninstall` takes everything off again, asking
-before each piece. Then run `tools/omarock-doctor` and help with whatever is left,
-using the steps below.
+The installer is interactive, checking first and asking before each change. It
+needs a real terminal (gum prompts), so it can't run from Claude's shell:
+suggest the user run it in one of their own.
+- `./install` in the clone sets up local music and the radio: mpd, then the
+  plugin on the bar.
+- Each source then has its own: **Set up…** in omarock's settings (`,` in the
+  panel) runs it in a terminal, or the user runs `./install spotify`,
+  `./install siriusxm`, `./install apple-music` or `./install sound` (omarock's
+  sound output, the audio bus: optional).
+- Each can be run again any time, to finish or update. `./install --remove
+  PIECE` takes one off with its accounts and keys, and `./install --uninstall`
+  takes everything off, asking before each piece.
+- `tools/omarock-sources state` shows what's set up (JSON, never a secret), and
+  how the last run ended.
+
+Then run `tools/omarock-doctor` and help with whatever is left, using the steps
+below.
 
 ## Ground rules
 
@@ -76,7 +86,10 @@ using the steps below.
   shows a music note, or the song playing.
 - **"Waiting for mpd…"** means the socket: back to step 1.
 
-## 3. The audio bus (optional; Spotify needs it)
+## 3. The audio bus (optional: omarock's sound output)
+
+Without it, mpd plays where its config says and Soloist into the default output,
+each with its own volume. With it, everything goes into one pinned output.
 
 1. Show the outputs (`pactl list sinks short`), and ask which one omarock should
    use.
@@ -86,6 +99,8 @@ using the steps below.
    since mpd's own volume goes to full, then restart mpd.
 4. **Check:** `pw-link -l` shows `mpd.omarock → omarock`, and `omarock.output` going
    to the chosen output only.
+5. If Spotify is set up, restart Soloist (`systemctl --user restart omarock-soloist`):
+   it picks its output as it starts. `./install sound` does all of this.
 
 ## 4. Spotify
 

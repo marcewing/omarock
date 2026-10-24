@@ -69,8 +69,12 @@ Item {
   }
 
   // Whether the service runs and has an account; then its channels.
+  // Health has answered at least once (or failed to): the settings say
+  // something's wrong only then.
+  property bool healthKnown: false
   function checkHealth(callback) {
     root.request("GET", "/v1/health", null, function(data, error) {
+      root.healthKnown = true
       root.available = !!data && data.account === true
       root.lastError = !data ? error : data.account ? (data.error || "") : "No SiriusXM account set up"
       if (root.available && root.channels.length === 0) root.refreshChannels()

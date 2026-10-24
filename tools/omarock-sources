@@ -1,0 +1,112 @@
+#!/bin/bash
+# omarock-sources: what's set up of omarock's sources, for omarock's settings,
+# and switching one's services off and on. It reads files and asks systemd;
+# it never shows a key or a login.
+#
+#   omarock-sources state          JSON: each piece set up or not, its services
+#                                  on or off and up to date with this clone,
+#                                  and how the last ./install run went
+#   omarock-sources stop SOURCE    a source switched off: its services stop, and
+#                                  don't start with the session; its accounts
+#                                  and keys stay
+#   omarock-sources start SOURCE   switched on again: its services start
+#
+# SOURCE is spotify, siriusxm or apple-music (which has no services here).
+set -uo pipefail
+repo=$(cd "$(dirname "$0")/.." && pwd)
+config=$HOME/.config/omarock
+share=$HOME/.local/share/omarock
+units=$HOME/.config/systemd/user
+state=${XDG_STATE_HOME:-$HOME/.local/state}/omarock/setup.json
+
+services() {
+  case $1 in
+    spotify) echo omarock-soloist omarock-spotify ;;
+    siriusxm) echo omarock-sxm ;;
+    apple-music) ;;
+    *) echo "omarock-sources: no such source: $1 (spotify, siriusxm or apple-music)" >&2; exit 2 ;;
+  esac
+}
+
+# A service from this clone: installed, and the same as this clone has it?
+# Only the files the tools/install-* scripts install count (as ./install's
+# up_to_date), not a README or a test.
+installed() { [[ -f $share/$1/INSTALLED ]]; }
+installs() {  # DIR: its files that get installed
+  case $1 in
+    spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist.service omarock-spotify.service ;;
+    sxm) echo omarock-sxm.py omarock-sxm.service ;;
+    audio) echo omarock-bus.conf omarock-guard.py omarock-players.conf omarock-bus.service omarock-guard.service ;;
+  esac
+}
+up_to_date() {  # DIR (spotify, sxm, audio)
+  local c f paths=()
+  c=$(cat "$share/$1/INSTALLED" 2>/dev/null) || return 1
+  # Not a clone (or that commit unknown to it): nothing to compare with.
+  git -C "$repo" rev-parse -q --verify "$c^{commit}" >/dev/null 2>&1 || return 0
+  for f in $(installs "$1"); do paths+=("$1/$f"); done
+  git -C "$repo" diff --quiet "$c" HEAD -- "${paths[@]}" 2>/dev/null
+}
+enabled() { systemctl --user is-enabled --quiet "$1" 2>/dev/null; }
+bool() { if "$@" >/dev/null 2>&1; then echo true; else echo false; fi; }
+
+soloist_days() {  # days since the installed Soloist was built, or -1
+  local built
+  built=$("$HOME/.local/lib/omarock-soloist/soloist" --version 2>/dev/null | grep -oE '\(20[0-9]{6}\)' | tr -d '()')
+  if [[ -n $built ]]; then echo $((($(date +%s) - $(date -d "$built" +%s)) / 86400)); else echo -1; fi
+}
+
+apple_set_up() { [[ -s $config/apple.json || -s $config/bridge-token ]]; }
+bus_output() { grep -o 'target.object = "[^"]*"' "$share/audio/omarock-bus.conf" 2>/dev/null | cut -d'"' -f2; }
+
+# The last run, and whether a run still "running" really is (a terminal
+# killed outright leaves it so).
+flow() {
+  local pid
+  [[ -s $state ]] || { echo null; return; }
+  pid=$(jq -r 'select(.result == "running") | .pid // empty' "$state" 2>/dev/null)
+  if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then
+    jq -c '.result = "stopped"' "$state" 2>/dev/null || echo null
+  else
+    jq -c . "$state" 2>/dev/null || echo null
+  fi
+}
+
+case ${1:-} in
+  state)
+    jq -n \
+      --argjson mpd "$(bool command -v mpd)" \
+      --argjson spotify "$(bool installed spotify)" --argjson spotifyCurrent "$(bool up_to_date spotify)" \
+      --argjson spotifyOn "$(bool enabled omarock-spotify)" --argjson soloistDays "$(soloist_days)" \
+      --argjson sxm "$(bool installed sxm)" --argjson sxmCurrent "$(bool up_to_date sxm)" \
+      --argjson sxmOn "$(bool enabled omarock-sxm)" \
+      --argjson apple "$(bool apple_set_up)" \
+      --argjson bus "$(bool test -f "$share/audio/omarock-bus.conf")" --argjson busCurrent "$(bool up_to_date audio)" \
+      --arg output "$(bus_output)" \
+      --argjson flow "$(flow)" '{
+        local: { setUp: $mpd },
+        spotify: { setUp: $spotify, upToDate: $spotifyCurrent, running: $spotifyOn, soloistDays: $soloistDays },
+        siriusxm: { setUp: $sxm, upToDate: $sxmCurrent, running: $sxmOn },
+        "apple-music": { setUp: $apple },
+        sound: { setUp: $bus, upToDate: $busCurrent, output: $output },
+        flow: $flow }'
+    ;;
+  stop)
+    read -ra list <<<"$(services "${2:-}")"
+    ((${#list[@]} == 0)) && exit 0
+    present=()
+    for u in "${list[@]}"; do [[ -f $units/$u.service ]] && present+=("$u"); done
+    ((${#present[@]} == 0)) || systemctl --user disable --now "${present[@]}"
+    ;;
+  start)
+    read -ra list <<<"$(services "${2:-}")"
+    ((${#list[@]} == 0)) && exit 0
+    present=()
+    for u in "${list[@]}"; do [[ -f $units/$u.service ]] && present+=("$u"); done
+    ((${#present[@]} == 0)) || systemctl --user enable --now "${present[@]}"
+    ;;
+  *)
+    sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'
+    [[ ${1:-} == -h || ${1:-} == --help ]] || exit 2
+    ;;
+esac

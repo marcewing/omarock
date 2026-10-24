@@ -87,6 +87,7 @@ def main():
     check("mpd pausing changes nothing", s.yielded and s.ws.sent == [], str(s.ws.sent))
 
     elsewhere()
+    volume()
     library()
     album_library()
     renewal()
@@ -135,6 +136,39 @@ def elsewhere():
     time.sleep(0.1)
     check("moved here, it's Spotify starting here: current, mpd paused",
           out["current"] is True and service.mpd_paused == [False], f"{out['current']} {service.mpd_paused}")
+
+
+def volume():
+    """Without omarock's sound output, Soloist's volume is the volume: in the
+    status, set by POST /v1/volume, left where a phone puts it. With it,
+    Soloist's stays at 100 and the bus's is the volume."""
+    import tempfile
+    service.BUS_CONF = Path(tempfile.mkdtemp()) / "omarock-bus.conf"
+    s = fresh()
+    s.handle({"type": "playback_state", "status": "paused", "item": ITEM, "is_active": True, "volume": 40})
+    check("no bus: the status has Soloist's volume", s.status_json().get("volume") == 40, str(s.status_json().get("volume")))
+    seq = s.seq
+    s.handle({"type": "volume_changed", "volume": 65})
+    time.sleep(0.1)
+    check("no bus: a phone's change stays, and is reported", s.ws.sent == [] and s.status_json()["volume"] == 65 and s.seq != seq,
+          f"{s.ws.sent} {s.status_json().get('volume')}")
+    s.ws.command = lambda name, **args: s.ws.sent.append((name, args))
+    service.post("volume", ["volume"], {"volume": 30.4})
+    check("no bus: POST /v1/volume sets Soloist's", s.ws.sent == [("set_volume", {"volume": 30})], str(s.ws.sent))
+
+    service.BUS_CONF.write_text("")
+    s = fresh()
+    s.ws.command = lambda name, **args: s.ws.sent.append((name, args))
+    s.handle({"type": "playback_state", "status": "paused", "item": ITEM, "is_active": True, "volume": 100})
+    check("the bus: no volume in the status", "volume" not in s.status_json())
+    s.handle({"type": "volume_changed", "volume": 40})
+    time.sleep(0.1)
+    check("the bus: Soloist's goes back to 100", s.ws.sent == [("set_volume", {"volume": 100})], str(s.ws.sent))
+    try:
+        service.post("volume", ["volume"], {"volume": 30})
+        check("the bus: POST /v1/volume refused", False)
+    except RuntimeError as e:
+        check("the bus: POST /v1/volume refused", "sound output" in str(e), str(e))
 
 
 def library():

@@ -26,6 +26,10 @@ while mpd plays it. Whether that's acceptable is your call.
 
 ## Set it up
 
+The easy way: **Set up…** under SIRIUSXM in omarock's settings (`,` in the panel),
+or `./install siriusxm` from your clone. It asks for your login, signs in, and
+switches SiriusXM on. By hand:
+
 1. Install the service, from your omarock clone (the plugin's folder,
    `~/.config/omarchy/plugins/mre.omarock`, or a clone of your own):
    ```bash
@@ -63,8 +67,9 @@ sees the change too.
 
 ## Remove it
 
-`./install --uninstall` does this, asking first. By hand, switch SiriusXM off in
-omarock's settings, then:
+**Remove…** under SIRIUSXM in omarock's settings, or `./install --remove siriusxm`,
+does this, asking first, your login included; `./install --uninstall` too. By
+hand, switch SiriusXM off in omarock's settings, then:
 
 ```bash
 systemctl --user disable --now omarock-sxm

@@ -20,12 +20,12 @@
 | `AppleClient.qml`, `Apple.js` | A client for the bridge API (bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
 | `SxmClient.qml`, `Sxm.js` | SiriusXM, through omarock-sxm |
 | `RadioClient.qml`, `Radio.js` | Radio Browser: search, local stations, favourites (the mpd playlist "Radio"), ICY titles |
-| `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard |
+| `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard: "omarock's sound output" in the settings |
 | `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit, the Web API client, MPRIS |
 | `sxm/` | omarock-sxm, the SiriusXM relay |
 | `bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
 | `patches/` | libFLAC and mpd-mpris patches that make Apple Music's stream play well (see bridge/README.md) |
-| `tools/` | Installers (`install-audio`, `install-spotify`, `update-soloist`, `build-libflac`, `build-mpd-mpris`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`), and the test harness (`capture/`) |
+| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-libflac`, `build-mpd-mpris`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`), and the test harness (`capture/`) |
 | `tests/` | node tests for the pure helpers |
 
 ## How it works
@@ -69,7 +69,13 @@ everything else:
 - `fake_bridge.py` stands in for the Apple Music bridge, and, with `--spotify`,
   for omarock-spotify, watching the fake mpd as the real service watches mpd;
 - `fake_sxm.py` for omarock-sxm;
-- `fake_radio.py` for Radio Browser.
+- `fake_radio.py` for Radio Browser;
+- `fake-systemctl` and `fake-terminal`, first on the panel's PATH: a systemctl
+  that only logs and keeps the units "enabled" in the test HOME, and Omarchy's
+  terminal launcher, which plays a setup or removal out on the test HOME's
+  files (as `./install` would leave them) without a terminal or `./install`.
+  The test HOME starts with Spotify and SiriusXM "set up"; `--only setup` sets
+  pieces up and removes them through the settings.
 
 It drives the panel with real key presses (QtTest's event injector) and clicks,
 saves screenshots, and fails on any QML warning from the plugin, or if the panel
@@ -96,7 +102,12 @@ popup. Under Hyprland the open panel keeps them, as a run in the test VM showed.
 Nothing touches your mpd's queue or playlists, your PipeWire, or the live bar.
 
 **The installer** changes the system it runs on, so test it in a throwaway Omarchy
-VM, never on your own desktop. `OMAROCK_INSTALL_ANSWERS=FILE ./install` runs it
+VM, never on your own desktop. Each run (`./install`, `./install PIECE`,
+`./install --remove PIECE`) writes how it went to
+`~/.local/state/omarock/setup.json`: running (with its pid), then done, failed or
+stopped (Ctrl-C, or the terminal closed: exit 129, 130, 143); the settings
+follow it through `tools/omarock-sources state`.
+`OMAROCK_INSTALL_ANSWERS=FILE ./install` runs it
 without gum, answering each prompt from FILE: a line per prompt, `TEXT=ANSWER`,
 where TEXT is part of the prompt. Waits are cut to 20 s, and a prompt asked
 5 times (a retry its answer can't end) stops the run.

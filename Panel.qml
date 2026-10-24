@@ -140,7 +140,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.7.1"
+  readonly property string version: "0.8.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -202,8 +202,51 @@ Panel {
   function setting(name, fallback) {
     return Settings.value(root.fileSettings, root.settings, name, fallback)
   }
-  // The rows the settings screen shows: a source's accounts while it's on.
-  readonly property var settingsSchema: Settings.shown({ sxm: root.sxmEnabled, spotify: root.spotifyEnabled, apple: root.appleEnabled })
+  // The rows the settings screen shows, as each piece is set up or not.
+  readonly property var settingsSchema: Settings.shown(root.settingStates)
+  // What's set up here (tools/omarock-sources state): each piece, and the
+  // last ./install run. Read at start, when the settings open, after a
+  // switch, and while a setup this panel started is running.
+  property var sourcesState: null
+  readonly property string sourcesTool: decodeURIComponent(String(Qt.resolvedUrl("tools/omarock-sources")).replace(/^file:\/\//, ""))
+  readonly property string installPath: decodeURIComponent(String(Qt.resolvedUrl("install")).replace(/^file:\/\//, ""))
+  // Each piece as the settings show it (Settings.shown): set up or not, an
+  // update waiting, and what's wrong while it's switched on. Until
+  // omarock-sources answers, a source switched on counts as set up.
+  readonly property var settingStates: {
+    var s = root.sourcesState || {}
+    var sp = s.spotify, xm = s.siriusxm, am = s["apple-music"], so = s.sound
+    var days = sp ? sp.soloistDays : -1
+    var soloist = spotify.health.soloist || {}
+    return {
+      local: { setUp: client.ready },
+      spotify: {
+        setUp: sp ? sp.setUp : root.spotifyEnabled,
+        update: !sp || !sp.setUp ? false
+          : days >= 80 ? "Soloist, Spotify's player, stops working " + (days >= 90 ? "now: its build is " + days + " days old" : "in " + (90 - days) + " days")
+          : !sp.upToDate,
+        attention: !root.spotifyEnabled || !spotify.healthKnown ? ""
+          : !spotify.reachable ? "Can't reach omarock-spotify"
+          : soloist.loggedIn === false ? "Soloist isn't signed in to your account" : ""
+      },
+      sxm: {
+        setUp: xm ? xm.setUp : root.sxmEnabled,
+        update: !!xm && xm.setUp && !xm.upToDate,
+        attention: !root.sxmEnabled || !sxm.healthKnown ? ""
+          : !sxm.available || sxm.lastError !== "" ? (sxm.lastError || "Can't reach omarock-sxm") : ""
+      },
+      apple: {
+        setUp: am ? am.setUp : root.appleEnabled,
+        update: false,
+        attention: !root.appleEnabled ? ""
+          : !root.appleConfigured ? "The bridge's address isn't set"
+          : !apple.healthKnown ? ""
+          : !apple.reachable ? "Can't reach the bridge at " + root.appleBridge
+          : !apple.healthAuthorized ? "The bridge can't use Apple Music yet" : ""
+      },
+      sound: { setUp: !!so && so.setUp, update: !!so && so.setUp && !so.upToDate, attention: "" }
+    }
+  }
   // Accounts and keys as tools/omarock-account shows them: names, and
   // whether each secret is set, never a secret.
   property var accounts: ({})
@@ -227,26 +270,45 @@ Panel {
     sxmService: "http://127.0.0.1:8720",
     radioBrowser: "one of Radio Browser's servers"
   })
-  // Under each source's switch: how it's doing, or what it needs.
+  // Under each source: a setup running in a terminal (or one that didn't
+  // finish), else off, else what's wrong, else how it's doing.
   readonly property var settingNotes: {
     function note(text, kind) { return { text: text, kind: kind || "" } }
+    var states = root.settingStates
+    var flow = root.sourcesState ? root.sourcesState.flow : null
+    function flowNote(piece, setUp) {
+      if (!flow || flow.piece !== piece) return null
+      if (flow.result === "running") return note(flow.action === "remove" ? "Being removed, in a terminal…" : "Being set up, in a terminal…")
+      if (flow.action === "setup" && !setUp && (flow.result === "failed" || flow.result === "stopped"))
+        return note("Its setup didn't finish. Set up carries on where it stopped.", "bad")
+      return null
+    }
+    // flowNote, else for one set up: off, what's wrong, else how it's doing.
+    function sourceNote(piece, state, on, off, fine) {
+      return flowNote(piece, state.setUp) || (!state.setUp ? note("")
+        : !on ? note(off) : state.attention !== "" ? note(state.attention, "bad") : fine)
+    }
+    var output = root.sourcesState && root.sourcesState.sound ? root.sourcesState.sound.output : ""
     return {
+      localSetUp: flowNote("local", states.local.setUp) || note(""),
       radio: !root.radioEnabled ? note("Off")
         : radio.place !== "" ? note("Local stations from " + radio.place, "ok")
         : note("No state set (below): no local stations"),
-      spotify: !root.spotifyEnabled ? note("Off. It needs Spotify Premium and the omarock-spotify service: spotify/README.md")
-        : !spotify.reachable ? note("Can't reach omarock-spotify: systemctl --user status omarock-spotify", "bad")
-        : !spotify.healthAuthorized ? note("omarock-spotify runs, but isn't signed in: tools/omarock-sp health", "bad")
-        : note("omarock-spotify runs, and is signed in", "ok"),
-      appleMusic: !root.appleEnabled ? note("Off. It needs the omarock bridge on a Mac: bridge/README.md")
-        : !root.appleConfigured ? note("Set the bridge and stream below, or in ~/.config/omarock/apple.json", "bad")
-        : !apple.reachable ? note("Can't reach the bridge at " + root.appleBridge, "bad")
-        : !apple.healthAuthorized ? note("The bridge answers, but Apple Music access isn't allowed on the Mac yet", "bad")
-        : note("The bridge at " + root.appleBridge + " answers", "ok"),
-      siriusXM: !root.sxmEnabled ? note("Off. It needs a SiriusXM subscription and the omarock-sxm service: sxm/README.md")
-        : sxm.available ? note("omarock-sxm runs, and is signed in", "ok")
-        : note(sxm.lastError !== "" ? sxm.lastError : "Can't reach omarock-sxm: systemctl --user status omarock-sxm", "bad"),
-      spotifyLogin: !spotify.reachable ? note("omarock-spotify isn't running", "bad")
+      spotify: sourceNote("spotify", states.spotify, root.spotifyEnabled,
+        "Off: its services are stopped. Your accounts and keys are kept.",
+        !spotify.healthKnown ? note("Checking…")
+          : spotify.healthAuthorized ? note("Runs, and is signed in", "ok")
+          : note("Not signed in for search and your library: Sign in, below", "bad")),
+      siriusXM: sourceNote("siriusxm", states.sxm, root.sxmEnabled,
+        "Off: omarock-sxm is stopped. Your login is kept.",
+        !sxm.healthKnown ? note("Checking…") : note("omarock-sxm runs, and is signed in", "ok")),
+      appleMusic: sourceNote("apple-music", states.apple, root.appleEnabled,
+        "Off: it's gone from the panel. The bridge's address and token are kept.",
+        !apple.healthKnown ? note("Checking…") : note("The bridge at " + root.appleBridge + " answers", "ok")),
+      sound: sourceNote("sound", states.sound, true, "",
+        note(output !== "" ? "Plays only into " + client.outputDescription(output) : "Plays only into the output it was set up with", "ok")),
+      spotifyLogin: !root.spotifyEnabled ? note("")
+        : !spotify.reachable ? note("omarock-spotify isn't running", "bad")
         : spotify.healthAuthorized ? note("Signed in", "ok") : note("Not signed in yet", "bad"),
       musicFolder: note(client.musicDirectory === "" ? "mpd doesn't say: it tells only clients on its unix socket" : "")
     }
@@ -742,7 +804,10 @@ Panel {
     rearmDelay.restart()
   }
 
-  Component.onCompleted: console.info("omarock " + root.version + " loaded")
+  Component.onCompleted: {
+    console.info("omarock " + root.version + " loaded")
+    root.readSources()
+  }
 
   onOpenedChanged: {
     client.ticking = root.opened
@@ -2081,6 +2146,7 @@ Panel {
     settingsView.reset()
     root.settingsOpen = true
     accountReader.running = true
+    root.readSources()
     // How each switched-on source is doing, now.
     if (root.spotifyEnabled) spotify.checkHealth()
     if (root.sxmEnabled) sxm.checkHealth()
@@ -2099,6 +2165,57 @@ Panel {
     root.fileSettings = Settings.withValue(root.fileSettings, key, value)
     root.settingsUnsaved = true
     root.writeSettings()
+    // A source switched off stops its services (keeping its accounts and
+    // keys); switched on, they start again.
+    var piece = root.switchPieces[key]
+    if (piece) {
+      sourceSwitcher.queue = sourceSwitcher.queue.concat([[root.sourcesTool, value === true ? "start" : "stop", piece]])
+      root.switchSources()
+    }
+  }
+  readonly property var switchPieces: ({ spotify: "spotify", siriusXM: "siriusxm", appleMusic: "apple-music" })
+  function switchSources() {
+    if (sourceSwitcher.running || sourceSwitcher.queue.length === 0) return
+    sourceSwitcher.command = sourceSwitcher.queue[0]
+    sourceSwitcher.queue = sourceSwitcher.queue.slice(1)
+    sourceSwitcher.running = true
+  }
+
+  // A piece's setup or removal (./install PIECE, ./install --remove PIECE)
+  // in a terminal, as Omarchy runs its own installs. The panel closes, so
+  // the terminal has the keyboard, and follows the run in setup.json
+  // (tools/omarock-sources) until it ends.
+  readonly property string setupTerminal: "omarchy-launch-floating-terminal-with-presentation"
+  property var setupLaunched: null
+  function runSetup(piece, remove) {
+    if (root.setupLaunched) {
+      root.say("A setup is still running in its terminal")
+      return
+    }
+    var args = remove ? " --remove " + piece : piece !== "local" ? " " + piece : ""
+    root.setupLaunched = { piece: piece, action: remove ? "remove" : "setup", at: Date.now() / 1000 }
+    Quickshell.execDetached([root.setupTerminal, "'" + root.installPath.replace(/'/g, "'\\''") + "'" + args])
+    setupFollow.restart()
+    root.close()
+  }
+  function readSources() {
+    if (!sourcesReader.running) sourcesReader.running = true
+  }
+  // omarock-sources answered: if it's the end of the run this panel
+  // started, read everything that run may have changed.
+  function sourcesRead(state) {
+    root.sourcesState = state
+    var launched = root.setupLaunched
+    var flow = state ? state.flow : null
+    if (!launched || !flow || flow.piece !== launched.piece || flow.at < launched.at - 5 || flow.result === "running") return
+    root.setupLaunched = null
+    setupFollow.stop()
+    root.rereadConfig()
+    accountReader.running = true
+    serviceRecheck.restart()
+    if (root.spotifyEnabled) spotify.checkHealth()
+    if (root.sxmEnabled) sxm.checkHealth()
+    if (root.appleConfigured) apple.checkHealth()
   }
   function writeSettings() {
     if (!root.settingsUnsaved || settingWriter.running) return
@@ -2124,8 +2241,15 @@ Panel {
     accountWriter.running = true
     root.say(key === "musicFolder" ? "Changing the music folder: mpd restarts…" : "Saving…")
   }
-  // The settings screen's buttons.
+  // The settings screen's buttons: setting a piece up (again: Fix,
+  // Update), removing one, Spotify's sign-in.
+  readonly property var setupActions: ({ localSetUp: "local", spotify: "spotify", siriusXM: "siriusxm", appleMusic: "apple-music",
+    sound: "sound", spotifyUpdate: "spotify", sxmUpdate: "siriusxm", appleUpdate: "apple-music", soundUpdate: "sound" })
+  readonly property var removeActions: ({ spotifyRemove: "spotify", sxmRemove: "siriusxm", appleRemove: "apple-music",
+    soundRemove: "sound" })
   function settingAction(key) {
+    if (root.setupActions[key]) return root.runSetup(root.setupActions[key], false)
+    if (root.removeActions[key]) return root.runSetup(root.removeActions[key], true)
     if (key !== "spotifyLogin") return
     spotify.get("/v1/login", function(data, error) {
       if (data && data.url) {
@@ -2437,8 +2561,8 @@ Panel {
     if (t === "/" || t === "\u0006") root.focusSearch()
     else if (t === "n" || t === ">") player.next()
     else if (t === "p" || t === "<") player.previous()
-    else if (t === "+" || t === "=") client.nudgeVolume(5)
-    else if (t === "-" || t === "_") client.nudgeVolume(-5)
+    else if (t === "+" || t === "=") (player.ownVolume ? player : client).nudgeVolume(5)
+    else if (t === "-" || t === "_") (player.ownVolume ? player : client).nudgeVolume(-5)
     else if (t === "s") player.setRandom(!status.random)
     else if (t === "r") player.setRepeat(!status.repeat)
     else if (t === "m" && root.sources.length > 1) root.nextSourceKey()
@@ -2537,6 +2661,56 @@ Panel {
         serviceRecheck.restart()
       }
       accountReader.running = true
+    }
+  }
+
+  // What's set up (tools/omarock-sources state), for the settings screen.
+  Process {
+    id: sourcesReader
+    command: [root.sourcesTool, "state"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var state = null
+        try { state = JSON.parse(text) } catch (e) {}
+        if (state) root.sourcesRead(state)
+      }
+    }
+  }
+
+  // Stops or starts a source's services as its switch changes, one at a
+  // time, then reads what's set up again.
+  Process {
+    id: sourceSwitcher
+    property var queue: []
+    stderr: StdioCollector { id: sourceSwitcherErrors; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0)
+        root.say("Couldn't " + (sourceSwitcher.command[1] === "start" ? "start" : "stop") + " its services: "
+          + (String(sourceSwitcherErrors.text || "").trim().split("\n")[0] || "no reason given"))
+      root.readSources()
+      serviceRecheck.restart()
+      Qt.callLater(root.switchSources)
+    }
+  }
+
+  // A setup running in its terminal: setup.json, read every 1.5 s until the
+  // run ends. A terminal that never started the run is given up after 90 s.
+  Timer {
+    id: setupFollow
+    interval: 1500
+    repeat: true
+    onTriggered: {
+      var launched = root.setupLaunched
+      if (!launched) return stop()
+      var flow = root.sourcesState ? root.sourcesState.flow : null
+      var started = flow && flow.piece === launched.piece && flow.at >= launched.at - 5
+      if (!started && Date.now() / 1000 - launched.at > 90) {
+        root.setupLaunched = null
+        root.say("The setup's terminal didn't start: " + root.setupTerminal + " is Omarchy's")
+        return stop()
+      }
+      root.readSources()
     }
   }
 

@@ -5,7 +5,8 @@ import qs.Ui
 import "Settings.js" as Settings
 
 // The settings (the gear, or ,): omarock's settings (Settings.js), in
-// groups, each with its value and, for a source, how its service is doing.
+// groups, each with its value and, for a source, how its service is doing,
+// or the button that sets it up.
 // A change is saved at once, by the panel: a setting into omarock's settings
 // file (changeRequested); an account, a key or the music folder through
 // tools/omarock-account (accountRequested, folderRequested). A secret is
@@ -115,7 +116,7 @@ Rectangle {
     if (row.type === "boolean") root.change(row.key, !(root.valueOf(row.key) === true))
     else if (row.type === "enum") root.choose(row, 1)
     else if (row.type === "action") root.actionRequested(row.key)
-    else root.startEdit(row.key)
+    else if (row.type !== "info") root.startEdit(row.key)
   }
 
   // A choice: the next or previous of its options, going round.
@@ -319,10 +320,12 @@ Rectangle {
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
+              // A line ("info") has no control.
               width: rowItem.row.type === "boolean" ? toggle.implicitWidth : rowItem.row.type === "enum" ? choice.implicitWidth
-                : rowItem.row.type === "action" ? action.implicitWidth : Math.min(Style.space(320), parent.width * 0.5)
+                : rowItem.row.type === "action" ? action.implicitWidth : rowItem.row.type === "info" ? 0
+                : Math.min(Style.space(320), parent.width * 0.5)
               height: rowItem.row.type === "boolean" ? toggle.implicitHeight : rowItem.row.type === "enum" ? choice.implicitHeight
-                : rowItem.row.type === "action" ? action.implicitHeight : editor.implicitHeight
+                : rowItem.row.type === "action" ? action.implicitHeight : rowItem.row.type === "info" ? 0 : editor.implicitHeight
 
               ToggleSwitch {
                 id: toggle
@@ -376,6 +379,7 @@ Rectangle {
               TextField {
                 id: editor
                 visible: rowItem.row.type !== "boolean" && rowItem.row.type !== "enum" && rowItem.row.type !== "action"
+                  && rowItem.row.type !== "info"
                 password: rowItem.row.type === "secret"
                 anchors.left: parent.left
                 anchors.right: parent.right

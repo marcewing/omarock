@@ -426,7 +426,8 @@ function songAsMpd(song) {
     date: yearOf(song), genre: (song.genres || [])[0] || "" }
 }
 
-// The bridge's status, as mpd's status would have it. Volume is mpd's.
+// The bridge's status, as mpd's status would have it, with the volume given
+// (mpd's, or Spotify's own).
 // Playing on another machine (status.elsewhere) is paused here.
 function statusAsMpd(status, volume) {
   var state = status.state === "playing" && !status.elsewhere ? "play"

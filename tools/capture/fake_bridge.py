@@ -147,6 +147,10 @@ class Bridge:
         # takes it away); what it added, and what Spotify's remove took out.
         self.library_route = True
         self.saved, self.unsaved = set(), set()
+        # omarock-spotify 0.3 without omarock's sound output: Soloist's own
+        # volume, in the status and set by POST /v1/volume (POST
+        # /v1/fake/volume {on} switches it; off, as with the bus).
+        self.volume = None
         # The library: a copy of Zen Arcade, and two playlists of songs.
         zen = dict(public(CATALOG_ALBUMS["c-al-1"]), id="l-al-1", source="library", catalogId="c-al-1")
         self.library_albums = [zen]
@@ -245,6 +249,8 @@ class Bridge:
         out = {"seq": self.seq, "state": self.state, "current": self.current, "position": round(self.position(), 2),
                "positionAt": time.time(), "queue": self.queue, "queueIndex": self.index, "queueOffset": 0,
                "queueLength": len(self.queue), "shuffle": self.shuffle, "repeat": self.repeat}
+        if self.volume is not None:
+            out["volume"] = self.volume
         if self.elsewhere(client):
             out["elsewhere"] = self.owner
             if self.spotify: out["state"] = "paused"
@@ -419,6 +425,16 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "fake/info":
                     b.info_route = bool(body["on"])
                     return {"ok": True}
+                if path == "fake/volume":
+                    b.volume = 40 if body["on"] else None
+                    b.changed()
+                    return b.status(client)
+                if path == "volume":
+                    if b.volume is None:
+                        raise Refused("omarock's sound output sets the volume, not Spotify")
+                    b.volume = max(0, min(100, int(round(float(body["volume"])))))
+                    b.changed()
+                    return b.status(client)
                 if path == "fake/library":
                     # And forget what was added or taken out.
                     b.library_route = bool(body["on"])

@@ -262,6 +262,10 @@ ShellRoot {
         settingsOpen: p.settingsOpen, settingsEditing: p.settingsOpen ? host.settingsView().editing : "",
         settingsCursor: p.settingsOpen ? host.settingsView().cursor : -1,
         settingsRows: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key }) : [],
+        // Each row's key, type and button: "spotify:action:Set up…".
+        settingKinds: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key + ":" + r.type + (r.button ? ":" + r.button : "") }) : [],
+        sourcesState: p.sourcesState, setupLaunched: p.setupLaunched,
+        playerVolume: p.player.status.volume, ownVolume: p.player.ownVolume === true,
         settingValues: p.settingValues, settingNotes: p.settingNotes, widgetSettings: host.widget.settings,
         appleReady: p.player.ready === true && p.appleMode, appleSeq: p.appleMode ? (p.player.bridgeStatus.seq || 0) : -1,
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
@@ -363,7 +367,9 @@ ShellRoot {
     }
     function slider(name: string): string {
       var popupWindow = popup()
-      var item = popupWindow ? host.findNamed(popupWindow.contentItem[0], name) : null
+      // As mouse(): the panel's content, else the whole card.
+      var item = popupWindow ? host.findNamed(popupWindow.contentItem[0], name)
+        || host.findNamed(popupWindow.contentItem[0].parent.parent, name) : null
       return item ? JSON.stringify({ live: item.liveValue, value: item.value, dragging: item.dragging }) : "{}"
     }
     // A real click, or double click, on a row of the compact panel's list.

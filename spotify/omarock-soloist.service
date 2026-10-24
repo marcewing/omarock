@@ -1,6 +1,9 @@
-# Spotify's Soloist for omarock: a Spotify Connect speaker named after the machine (%H)
-# that plays into omarock's PipeWire bus (audio/), never straight to a sound
-# card. Its own volume stays at 100: the bus's volume is omarock's one volume.
+# Spotify's Soloist for omarock: a Spotify Connect speaker named after the machine (%H).
+# With omarock's sound output set up (the bus, audio/), it plays into that, never
+# straight to a sound card, and its own volume stays at 100: the bus's volume is
+# omarock's one volume. Without it, it plays into the default output, and its
+# own volume is the volume. It picks as it starts: ./install sound and
+# ./install --remove sound restart it.
 # Its WebSocket API (no authentication) listens on this machine only.
 # Installed by tools/install-spotify from a commit; the binary by
 # tools/update-soloist (Spotify's builds expire after 90 days: an expired one
@@ -10,12 +13,12 @@
 # session started before the network (a boot) stayed logged out. A user unit
 # can't wait for network-online.target, which is the system's.
 [Unit]
-Description=Spotify's Soloist for omarock (a Connect speaker playing into the omarock bus)
+Description=Spotify's Soloist for omarock (a Spotify Connect speaker)
 After=pipewire.service omarock-bus.service
 Wants=omarock-bus.service
 
 [Service]
-ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; until getent hosts apresolve.spotify.com >/dev/null; do [ -n "$$waiting" ] || echo "omarock-soloist: waiting for the network" >&2; waiting=1; sleep 2; done; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key "$$(cat "$$key")" --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 --pipewire-device omarock --initial-volume 100 --ws 127.0.0.1:8731'
+ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; until getent hosts apresolve.spotify.com >/dev/null; do [ -n "$$waiting" ] || echo "omarock-soloist: waiting for the network" >&2; waiting=1; sleep 2; done; if [ -e %h/.local/share/omarock/audio/omarock-bus.conf ]; then set -- --pipewire-device omarock --initial-volume 100; else set -- --initial-volume 40; fi; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key "$$(cat "$$key")" --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 "$$@" --ws 127.0.0.1:8731'
 Restart=on-failure
 RestartSec=5
 RestartPreventExitStatus=10 78

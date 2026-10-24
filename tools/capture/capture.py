@@ -40,7 +40,7 @@ TOOLS = Path(__file__).resolve().parent
 PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Info.js", "InfoCard.qml",
-                "Settings.js", "Hints.js", "tools/omarock-account"]
+                "Settings.js", "Hints.js", "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
 # The fake Apple Music bridge, when one runs: { port, log }.
@@ -72,7 +72,13 @@ def prepare(work):
     theme = home / ".local/state/omarchy/current/next-theme"
     theme.mkdir(parents=True)
     shutil.copy(THEME, theme / "colors.toml")
-    env = dict(HOME=str(home), PATH="/usr/bin:/bin", LANG="C.UTF-8",
+    # Stand-ins first on the panel's PATH: a systemctl that reaches no real
+    # services, and a terminal that plays a setup out without ./install.
+    fakes = work / "bin"
+    fakes.mkdir()
+    (fakes / "systemctl").symlink_to(TOOLS / "fake-systemctl")
+    (fakes / "omarchy-launch-floating-terminal-with-presentation").symlink_to(TOOLS / "fake-terminal")
+    env = dict(HOME=str(home), PATH=f"{fakes}:/usr/bin:/bin", LANG="C.UTF-8",
                XDG_RUNTIME_DIR=str(runtime), OMARCHY_PATH="/usr/share/omarchy")
     subprocess.run(["omarchy-theme-set-templates"], env=env, check=True, stdout=subprocess.DEVNULL)
     shutil.copytree(theme, theme.with_name("theme"))
@@ -256,6 +262,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     now_playing_scenario(host, output, socket_path, failures)
     lookup_scenario(host, output, socket_path, failures)
     spotify_scenario(host, output, socket_path, failures)
+    spotify_volume_scenario(host, socket_path, failures)
     sxm_scenario(host, output, socket_path, failures)
     radio_scenario(host, output, socket_path, failures)
     radio_tuning_scenario(host, socket_path, failures)
@@ -272,6 +279,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     host.call("close")
     # Last, as it unloads the widget.
     settings_scenario(host, output, failures)
+    setup_scenario(host, output, failures)
     sources_switch_scenario(host, socket_path, failures)
     fresh_start_scenario(host, socket_path, failures)
     late_config_scenario(host, failures)
@@ -1190,6 +1198,34 @@ def volume_scenario(host, socket_path, failures):
     mpd_client(socket_path, "fake_setvol_delay 0")
     to_source(host, "local")
     BRIDGE["config"].unlink()
+    host.call("close")
+
+
+def spotify_volume_scenario(host, socket_path, failures):
+    """Spotify without omarock's sound output (the bus): Soloist's own volume
+    is the volume (omarock-spotify 0.3's status has it). The knob shows it,
+    + and - and a drag set it (POST /v1/volume, one at a time), and mpd's
+    is left alone."""
+    spotify_post("/v1/fake/volume", {"on": True})
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    to_source(host, "spotify")
+    wait_for(lambda: host.state()["spotifyMode"], "Spotify")
+    wait_for(lambda: json.loads(host.call("slider", "volumeSlider")).get("value") == 40, "Spotify's volume on the knob")
+    check(True, "the knob shows Spotify's own volume (40)", failures)
+    setvol_before = command_count(socket_path, "setvol")
+    host.call("press", "+")
+    wait_for(lambda: ("POST", "/v1/volume", {"volume": 45}) in spotify_requests("/v1/volume"), "+ sets it")
+    wait_for(lambda: json.loads(host.call("slider", "volumeSlider")).get("value") == 45, "the knob follows")
+    check(True, "+ asks omarock-spotify for 45", failures)
+    sent_before = len(spotify_requests("/v1/volume"))
+    _, backwards = drag_volume(host, "spotify")
+    sent = len(spotify_requests("/v1/volume")) - sent_before
+    wait_for(lambda: json.loads(host.call("slider", "volumeSlider")).get("value") == 90, "ends where let go")
+    check(backwards == 0 and 0 < sent <= 15 and command_count(socket_path, "setvol") == setvol_before,
+          f"a drag sets Spotify's volume ({sent} requests, the knob never backwards), and mpd's isn't touched", failures)
+    spotify_post("/v1/fake/volume", {"on": False})
+    to_source(host, "local")
     host.call("close")
 
 
@@ -3305,30 +3341,42 @@ def settings_scenario(host, output, failures):
     wait_for(lambda: host.state()["opened"], "open")
     host.call("press", ",")
     wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "settings open")
+    wait_for(lambda: host.state()["sourcesState"], "what's set up, read")
     s = host.state()
-    check(s["settingsRows"][:5] == ["radio", "radioState", "spotify", "appleMusic", "siriusXM"],
-          ", opens the settings, the sources first: " + ", ".join(s["settingsRows"][:6]), failures)
-    check(all(k in s["settingsRows"] for k in ("musicFolder", "sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
-                                               "spotifyLogin", "bridgeToken")),
-          "with the music folder, and each source's account and keys", failures)
+    check(s["settingsRows"][:5] == ["musicFolder", "radio", "radioState", "lookup", "spotify"],
+          ", opens the settings, your music and the radio first: " + ", ".join(s["settingsRows"][:6]), failures)
+    check(all(k in s["settingsRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
+                                               "spotifyLogin", "bridgeToken", "spotifyRemove", "sxmRemove", "appleRemove")),
+          "each source set up here has its account and keys, and Remove", failures)
+    kinds = s["settingKinds"]
+    check("spotify:boolean" in kinds and "siriusXM:boolean" in kinds and "sound:action:Set up…" in kinds
+          and "localSetUp" not in s["settingsRows"],
+          "a source set up has its switch; the sound output, not set up, its Set up button", failures)
     notes = s["settingNotes"]
+    wait_for(lambda: host.state()["settingNotes"]["spotify"]["kind"] == "ok", "Spotify's health")
+    notes = host.state()["settingNotes"]
     check(notes["spotify"]["kind"] == "ok" and notes["siriusXM"]["kind"] == "ok" and notes["radio"]["text"].endswith("Washington")
-          and (notes["appleMusic"]["kind"] == "ok" or "apple.json" in notes["appleMusic"]["text"]),
+          and (notes["appleMusic"]["kind"] == "ok" or "address" in notes["appleMusic"]["text"]),
           "each source says how it's doing: " + " | ".join(n["text"] for n in notes.values()), failures)
     host.grab(output / "compact-settings.png")
 
-    # Space on Spotify's switch: off, into the settings file, and back.
-    host.call("press", "Down")
-    host.call("press", "Down")
+    # Space on Spotify's switch: off, into the settings file, its services
+    # stopped (omarock-sources stop); and back on, started again.
+    systemctl_log = BRIDGE["config"].parents[2] / "systemctl.log"
+    settings_cursor_to(host, "spotify")
     host.call("press", "Space")
     wait_for(lambda: settings_file().get("spotify") is False and host.state()["settingValues"]["spotify"] is False, "Spotify off")
-    check("spotify" not in host.state()["sources"], "Space switches Spotify off, saved in settings.json", failures)
+    wait_for(lambda: "disable --now omarock-soloist omarock-spotify" in systemctl_log.read_text(), "its services stopped")
+    check("spotify" not in host.state()["sources"] and host.state()["settingNotes"]["spotify"]["text"].startswith("Off"),
+          "Space switches Spotify off, saved in settings.json, and stops its services: "
+          + host.state()["settingNotes"]["spotify"]["text"], failures)
     host.call("press", "Space")
     wait_for(lambda: host.state()["settingValues"]["spotify"] is True, "Spotify on")
-    check("spotify" in host.state()["sources"], "and on again", failures)
+    wait_for(lambda: "enable --now omarock-soloist omarock-spotify" in systemctl_log.read_text(), "its services started")
+    check("spotify" in host.state()["sources"], "and on again, its services started", failures)
 
     # Enter on the radio's state: type it, Enter saves it as text.
-    host.call("press", "Up")
+    settings_cursor_to(host, "radioState")
     host.call("press", "Return")
     wait_for(lambda: host.state()["settingsEditing"] == "radioState", "editing")
     host.call("typeKeys", "Oregon")
@@ -3458,6 +3506,129 @@ def sources_switch_scenario(host, socket_path, failures):
     wait_for(lambda: host.state()["source"] == "local", "local")
     host.call("settings", "{}")
     host.call("close")
+
+
+def setup_scenario(host, output, failures):
+    """Marc, 10-24: each source "has a button to setup and configure. Pressing
+    the button launches a terminal running the install flow for that piece,
+    just like Omarchy does for package installs. When done the section ...
+    will then have a switch ... and the additional relevant settings fields",
+    and a button that "removes the relevant bits, and returns the panel to the
+    original single button". The terminal is a stand-in (fake-terminal) that
+    plays the run out on the test HOME's files, never the real ./install."""
+    home = BRIDGE["config"].parents[2]
+    terminal_log = home / "terminal.log"
+    result_file = home / ".fake-flow-result"
+
+    def open_settings():
+        host.call("open")
+        wait_for(lambda: host.state()["opened"], "open")
+        if not host.state()["settingsOpen"]:
+            host.call("press", ",")
+        wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "settings open")
+
+    def press_row(key):
+        settings_cursor_to(host, key)
+        host.call("press", "Return")
+
+    def launched():
+        return terminal_log.read_text().splitlines()[-1] if terminal_log.exists() else ""
+
+    def finished():
+        """The run the panel started has ended, and the panel has read it."""
+        wait_for(lambda: host.state()["setupLaunched"] is None, "the run ended", timeout=15)
+
+    host.call("settings", "{}")
+    open_settings()
+    wait_for(lambda: host.state()["sourcesState"], "what's set up, read")
+
+    # Remove Spotify: the terminal runs ./install --remove spotify; the panel
+    # closes, so the terminal has the keyboard.
+    press_row("spotifyRemove")
+    wait_for(lambda: "--remove spotify" in launched(), "the terminal")
+    check(launched().endswith("/install' --remove spotify") and not host.state()["opened"],
+          "Remove… runs ./install --remove spotify in a terminal, and the panel closes: " + launched(), failures)
+    open_settings()
+    wait_for(lambda: "Being removed" in host.state()["settingNotes"]["spotify"]["text"], "being removed")
+    check(True, "while it runs, the section says so: " + host.state()["settingNotes"]["spotify"]["text"], failures)
+    finished()
+    wait_for(lambda: "spotify:action:Set up…" in host.state()["settingKinds"], "back to Set up")
+    s = host.state()
+    check(not any(k in s["settingsRows"] for k in ("spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"))
+          and "spotify" not in s["sources"],
+          "removed: the section is its Set up button again, and Spotify is gone from the panel", failures)
+    host.grab(output / "compact-settings-removed.png")
+
+    # Set up: ./install spotify, then the switch (on) and its settings.
+    press_row("spotify")
+    wait_for(lambda: launched().endswith("/install' spotify"), "the setup's terminal")
+    open_settings()
+    finished()
+    wait_for(lambda: "spotify:boolean" in host.state()["settingKinds"], "its switch")
+    s = host.state()
+    check(all(k in s["settingsRows"] for k in ("spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"))
+          and s["settingValues"]["spotify"] is True and "spotify" in s["sources"],
+          "Set up… runs ./install spotify; done, the section has its switch, on, and its settings", failures)
+
+    # A setup that doesn't finish: the Set up button stays, and says so.
+    press_row("sxmRemove")
+    open_settings()
+    finished()
+    wait_for(lambda: "siriusXM:action:Set up…" in host.state()["settingKinds"], "SiriusXM removed")
+    result_file.write_text("failed")
+    press_row("siriusXM")
+    open_settings()
+    finished()
+    note = host.state()["settingNotes"]["siriusXM"]
+    check(note["kind"] == "bad" and "didn't finish" in note["text"] and "siriusXM:action:Set up…" in host.state()["settingKinds"],
+          "a setup that fails leaves Set up…, which says it didn't finish: " + note["text"], failures)
+    result_file.unlink()
+    press_row("siriusXM")
+    open_settings()
+    finished()
+    wait_for(lambda: "siriusXM:boolean" in host.state()["settingKinds"], "SiriusXM set up")
+    check(host.state()["settingNotes"]["siriusXM"]["kind"] != "bad", "set up again, it carries on", failures)
+
+    # The sound output: a line saying where it plays, then removed again.
+    press_row("sound")
+    wait_for(lambda: launched().endswith("/install' sound"), "the sound output's setup")
+    open_settings()
+    finished()
+    wait_for(lambda: "sound:info" in host.state()["settingKinds"], "its line")
+    check("alsa_output.test-speakers" in host.state()["settingNotes"]["sound"]["text"] and "soundRemove" in host.state()["settingsRows"],
+          "the sound output set up: a line saying where it plays, and Remove: " + host.state()["settingNotes"]["sound"]["text"], failures)
+    host.grab(output / "compact-settings-sound.png")
+    press_row("soundRemove")
+    open_settings()
+    finished()
+    wait_for(lambda: "sound:action:Set up…" in host.state()["settingKinds"], "sound removed")
+
+    # Update: a Soloist build 85 days old (they stop at 90).
+    soloist = home / ".local/lib/omarock-soloist/soloist"
+    soloist.parent.mkdir(parents=True, exist_ok=True)
+    built = time.strftime("%Y%m%d", time.localtime(time.time() - 85 * 86400))
+    soloist.write_text(f"#!/bin/sh\necho 'soloist 1.3.10 ({built})'\n")
+    soloist.chmod(0o755)
+    host.call("press", "Escape")
+    host.call("press", ",")
+    wait_for(lambda: "spotifyUpdate:action:Update…" in host.state()["settingKinds"], "Update", timeout=10)
+    update = next(r for r in host.state()["settingKinds"] if r.startswith("spotifyUpdate"))
+    check(True, "an old Soloist: Spotify's section offers Update… (" + update + ")", failures)
+    soloist.unlink()
+
+    # Fix: omarock-spotify can't be reached.
+    host.call("settings", json.dumps({"spotifyService": "http://127.0.0.1:9"}))
+    host.call("press", "Escape")
+    host.call("press", ",")
+    wait_for(lambda: "spotifyUpdate:action:Fix…" in host.state()["settingKinds"], "Fix", timeout=10)
+    check("Can't reach" in host.state()["settingNotes"]["spotify"]["text"],
+          "something wrong: Fix…, and what's wrong: " + host.state()["settingNotes"]["spotify"]["text"], failures)
+    host.grab(output / "compact-settings-fix.png")
+    host.call("settings", "{}")
+    host.call("close")
+    # The setups switched their sources on in the settings file, which would
+    # outrank the widget settings the scenarios after this one set.
+    (BRIDGE["config"].parent / "settings.json").unlink(missing_ok=True)
 
 
 def late_config_scenario(host, failures):
@@ -3938,6 +4109,18 @@ def main():
                                        stdout=subprocess.PIPE, text=True)
             assert spotify.stdout.readline().strip() == "fake spotify ready"
             env["OMAROCK_SPOTIFY"] = BRIDGE["spotify"] = f"http://127.0.0.1:{int((work / 'spotify.port').read_text())}"
+        # As if Spotify and SiriusXM had been set up here (./install spotify,
+        # ./install siriusxm), as tools/omarock-sources finds them, so their
+        # settings show; Apple Music's is the token above.
+        home = Path(env["HOME"])
+        for piece, unit_names in (("spotify", ["omarock-spotify", "omarock-soloist"]), ("sxm", ["omarock-sxm"])):
+            (home / ".local/share/omarock" / piece).mkdir(parents=True, exist_ok=True)
+            (home / ".local/share/omarock" / piece / "INSTALLED").write_text("harness\n")
+            for name in unit_names:
+                (home / ".config/systemd/user").mkdir(parents=True, exist_ok=True)
+                (home / ".config/systemd/user" / (name + ".service")).touch()
+                (home / ".fake-systemd").mkdir(exist_ok=True)
+                (home / ".fake-systemd" / name).touch()
         log = work / "qs.log"
         BRIDGE["qs_log"] = log
         # --bus: a private PipeWire with omarock's bus, for Quickshell to find.
@@ -3960,6 +4143,7 @@ def main():
                             elif name == "spotify": spotify_scenario(host, output, socket_path, failures)
                             elif name == "real-apple": real_apple_scenario(host, output, socket_path, failures)
                             elif name == "volume": volume_scenario(host, socket_path, failures)
+                            elif name == "spotify-volume": spotify_volume_scenario(host, socket_path, failures)
                             elif name == "expanded-keys": expanded_keys_scenario(host, failures)
                             elif name == "sxm": sxm_scenario(host, output, socket_path, failures)
                             elif name == "real-sxm": real_sxm_scenario(host, output, socket_path, failures)
@@ -3977,6 +4161,7 @@ def main():
                             elif name == "late-config": late_config_scenario(host, failures)
                             elif name == "sources-switch": sources_switch_scenario(host, socket_path, failures)
                             elif name == "settings": settings_scenario(host, output, failures)
+                            elif name == "setup": setup_scenario(host, output, failures)
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)

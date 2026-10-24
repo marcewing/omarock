@@ -1,8 +1,9 @@
 # omarock's audio bus
 
 An optional PipeWire output, **omarock**, that all of omarock's sound goes into:
-mpd's, and Spotify's (Soloist). The bus plays into one output you choose, and
-nowhere else. It gives you:
+mpd's, and Spotify's (Soloist). omarock's settings call it **omarock's sound
+output**. The bus plays into one output you choose, and nowhere else. It gives
+you:
 - **One volume for every source,** omarock's knob, whatever is playing.
 - **One pinned output.** omarock's sound never falls back to another output when
   yours goes away, and nothing can move it. That matters on a machine with
@@ -10,8 +11,8 @@ nowhere else. It gives you:
   interface, or a TV's HDMI input in another room. If your output goes away, the
   bus waits, silent.
 
-Spotify needs it (Soloist plays into the bus). For the other sources it's optional:
-without it, omarock uses mpd's own volume, and mpd plays wherever its config says.
+Without it, mpd plays wherever its config says, with its own volume, and Soloist
+into the default output, with its own: omarock's knob sets whichever is playing.
 
 ```
 mpd ─────────┐
@@ -20,6 +21,10 @@ Soloist ─────┘
 ```
 
 ## Set it up
+
+The easy way: **Set up…** under SOUND in omarock's settings, or `./install sound`
+from your clone. It asks which output, then does what follows, and restarts
+Spotify's player (if you have it) to play into the bus. By hand:
 
 1. **Pick the output** the bus plays into. Its node name is the second column of:
    ```bash
@@ -71,8 +76,9 @@ half-done edit can't change where the sound goes on the next restart.
 
 ## Remove it, in reverse
 
-`./install --uninstall` does this, asking first, and puts back the output mpd
-had before. By hand:
+**Remove…** under SOUND in omarock's settings, `./install --remove sound`, and
+`./install --uninstall` do this, asking first, and put back the output mpd had
+before. By hand:
 
 1. Take omarock's `audio_output` block out of mpd.conf (put your old one back, if
    you had one), and `systemctl --user restart mpd`.

@@ -63,12 +63,11 @@ has a switch too, on until you turn it off.
   in the files isn't shown.
 - **Optional:** `ncmpcpp`, the terminal player `t` opens (or set `tuiCommand`).
 
-omarock is young. It's used every day on one Omarchy desktop, and setting up the
-optional sources is still hands-on (see each folder's README).
+omarock is young. It's used every day on one Omarchy desktop.
 
 ## Install
 
-The installer walks you through it:
+The installer sets up your own music and the radio:
 
 ```bash
 git clone https://github.com/marcewing/omarock
@@ -76,19 +75,31 @@ cd omarock
 ./install
 ```
 
-It asks which sources you want. Then it sets up mpd, puts omarock on the bar, and
-takes you through each source's service in turn, checking first what's already
-there. It shows each command before running it, and asks before changing
-anything: packages (with sudo), your mpd config, systemd units. Passwords and
-keys go into hidden prompts, and from there into files only you can read.
+It sets up mpd (asking where your music is), then puts omarock on the bar. It
+checks first what's already there, shows each command before running it, and
+asks before changing anything: packages (with sudo), your mpd config, systemd
+units. Run it again any time: what's done is skipped.
 
-Run it again any time: what's done is skipped, so it's also how you add a source
-later. Keep the clone: the services install from it, so `git pull && ./install`
-updates them.
+**Spotify, SiriusXM and Apple Music** come afterwards, one at a time, from
+omarock's settings (press `,` in the panel, or the gear in the expanded view).
+Each has a **Set up…** button, which opens a terminal that walks you through it,
+as Omarchy's own installs do. Passwords and keys go into hidden prompts, and
+from there into files only you can read. Once it's set up, the source has a
+switch (off stops its services and keeps your accounts and keys), its settings,
+and **Remove…**, which takes it off again, accounts and keys included. From a
+terminal it's the same: `./install spotify`, `./install siriusxm`,
+`./install apple-music`, and `./install --remove spotify` and so on.
 
-**Apple Music** also needs the bridge on a Mac. Clone omarock there too and run
-`./install` on the Mac: it sets up the bridge, and then this machine's
-`./install` connects to it.
+**Apple Music** also needs the bridge on a Mac: clone omarock there too and run
+`./install` on the Mac first.
+
+**omarock's sound output** (also in the settings, optional) sends everything
+omarock plays into one output you pick, with one volume, and never anywhere
+else. Most don't need it; it matters if some output must never carry music.
+
+Keep the clone: the plugin and the services install from it. When the plugin
+has a newer version of a service than the one running, its settings offer
+**Update…**.
 
 **Using Claude Code?** Open the clone in it and ask it to set omarock up. Its
 `omarock-setup` skill knows the steps and the usual snags, and checks before it
@@ -161,14 +172,14 @@ omarchy plugin add https://github.com/marcewing/omarock --enable
 
 ### 3. More sources (optional)
 
-Each has a guide. Set the service up first, then switch the source on in
-omarock's settings:
+Each has a Set up… button in omarock's settings (above), and a guide for doing it
+by hand:
 
 - **Spotify:** [spotify/README.md](spotify/README.md)
 - **Apple Music:** [bridge/README.md](bridge/README.md)
 - **SiriusXM:** [sxm/README.md](sxm/README.md)
-- **One volume, and one pinned output, for everything:** [audio/README.md](audio/README.md).
-  Spotify needs it; it's optional for the rest.
+- **omarock's sound output** (one volume, and one pinned output, for
+  everything): [audio/README.md](audio/README.md)
 
 ### Updating, and removing
 
@@ -177,14 +188,18 @@ omarchy plugin update mre.omarock
 omarchy restart shell        # the shell's own reload keeps running the old code
 ```
 
-The services (Spotify's, SiriusXM's, the audio bus) update from your clone:
-`git pull`, then `./install` again, which offers each update it finds.
+The services (Spotify's, SiriusXM's, the sound output) update from the plugin:
+after an update, a source with a newer service waiting says so in the settings,
+with **Update…**. From your clone, `git pull` and then `./install spotify` (and
+so on) does the same.
 
-`./install --uninstall` takes omarock off again: the plugin, each service, the
-patches and the audio bus (mpd gets its old output back). It shows what each
-step removes and asks first, and leaves mpd, your music and playlists alone.
+**Remove…** in the settings, or `./install --remove spotify` (`siriusxm`,
+`apple-music`, `sound`), takes one source off, with its accounts and keys.
+`./install --uninstall` takes all of omarock off: the plugin, each service, the
+patches and the sound output (mpd gets its old output back). Each shows what it
+removes and asks first, and leaves mpd, your music and playlists alone.
 `omarchy plugin remove mre.omarock` alone removes only the plugin; the services
-stay until you remove them too (each guide says how, by hand).
+stay until you remove them too.
 
 ## Using omarock
 

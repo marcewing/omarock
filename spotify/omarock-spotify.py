@@ -9,7 +9,10 @@ a given song. It answers omarock (and tools/omarock-sp) on 127.0.0.1:8730 with
 the JSON of bridge/API.md, so omarock's Apple Music code serves Spotify too.
 
 Also:
-- Soloist's own volume stays at 100: the bus's volume is omarock's one volume.
+- With omarock's sound output (the bus, audio/), Soloist plays into it and
+  its own volume stays at 100: the bus's volume is omarock's one volume.
+  Without it, Soloist's volume is the volume: in the status ("volume"), set
+  with POST /v1/volume.
 - One player at a time: mpd starting to play pauses Spotify; Spotify starting
   to play pauses mpd (stops it on a stream, which is live).
 - Spotify is omarock's current source ("current" in the status) from when it
@@ -40,9 +43,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.2.3"
+VERSION = "0.3.0"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
+# omarock's sound output (audio/, ./install sound): Soloist plays into it
+# while it's set up (its unit decides as it starts).
+BUS_CONF = Path.home() / ".local/share/omarock/audio/omarock-bus.conf"
 MPD_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "mpd/socket"
 SIGN_IN_DAYS = 182
 
@@ -304,6 +310,9 @@ class Soloist:
             self.status = m.get("status", self.status)
         elif t == "volume_changed":
             self.volume = m.get("volume", self.volume)
+            if not BUS_CONF.exists():
+                self.changed()
+                return
             if self.volume != 100:
                 # The bus's volume is the volume; Soloist's stays at full.
                 log(f"Soloist's volume went to {self.volume}; back to 100")
@@ -384,6 +393,9 @@ class Soloist:
                "repeat": {"context": "all", "track": "one"}.get(repeat, "off")}
         if current and state != "stopped":
             out["song"] = current
+        # Without the bus, Soloist's own volume is the one that counts.
+        if not BUS_CONF.exists():
+            out["volume"] = self.volume
         if self.playing_elsewhere():
             out["elsewhere"] = self.elsewhere or "another device"
         return out
@@ -909,6 +921,11 @@ def post(path, parts, body):
         return settled(seq)
     if path == "queue/remove":
         raise RuntimeError("Spotify can't take songs out of its queue")
+    if path == "volume":
+        if BUS_CONF.exists():
+            raise RuntimeError("omarock's sound output sets the volume, not Spotify")
+        SOLOIST.command("set_volume", volume=max(0, min(100, int(round(float(body["volume"]))))))
+        return settled(seq, timeout=0.5)
     if path == "shuffle":
         SOLOIST.command("set_shuffle", enabled=bool(body.get("on")))
         return settled(seq)

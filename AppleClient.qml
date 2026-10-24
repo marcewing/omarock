@@ -77,7 +77,12 @@ Item {
   readonly property bool ready: reachable && authorized
   readonly property var song: bridgeStatus.song || null
   readonly property var currentSong: Apple.songAsMpd(bridgeStatus.song)
-  readonly property var status: Apple.statusAsMpd(bridgeStatus, mpd ? mpd.status.volume : -1)
+  // Spotify without omarock's sound output: Soloist's own volume is the
+  // volume, and its status has it. Otherwise it's mpd's (or the bus's).
+  // (Tested here, not through ownVolume, which can lag a new status.)
+  readonly property var status: Apple.statusAsMpd(bridgeStatus,
+    typeof bridgeStatus.volume === "number" ? bridgeStatus.volume : mpd ? mpd.status.volume : -1)
+  readonly property bool ownVolume: typeof bridgeStatus.volume === "number"
   readonly property var queue: bridgeStatus.queue || []
   // Spotify's: whether it is omarock's source now (it played since mpd did,
   // or omarock switched to it).
@@ -159,7 +164,8 @@ Item {
   // takes seconds to play, this says where the time went.
   function logTiming(method, entry, status) {
     var took = Date.now() - entry.sentAt
-    if (entry.path === "/v1/status" || (method !== "POST" && took <= 2000)) return
+    // A volume drag sends a run of POSTs: only a slow one is worth a line.
+    if (entry.path === "/v1/status" || ((method !== "POST" || entry.path === "/v1/volume") && took <= 2000)) return
     console.info("omarock: " + root.service + " " + method + " " + entry.path + " answered in " + took + " ms ("
       + (status || "no answer") + "), sent with " + entry.ahead.length + " in flight"
       + (entry.ahead.length > 0 ? ": " + entry.ahead.slice(0, 8).join(", ") : ""))
@@ -176,8 +182,15 @@ Item {
     }, 15000)
   }
 
+  // The last /v1/health answer: omarock-spotify's says whether Soloist is
+  // signed in (soloist.loggedIn), for the settings. healthKnown: it has
+  // answered at least once (or failed to).
+  property var health: ({})
+  property bool healthKnown: false
   function checkHealth(callback) {
     root.get("/v1/health", function(data, error) {
+      root.health = data || {}
+      root.healthKnown = true
       root.reachable = !!data
       root.authorized = !!data && data.authorized === true
       root.healthAuthorized = root.authorized
@@ -343,7 +356,34 @@ Item {
   function seekBy(delta) { root.seekTo(Math.max(0, root.elapsed + delta)) }
   function setRandom(on) { root.post("/v1/shuffle", { on: on }) }
   function setRepeat(on) { root.post("/v1/repeat", { mode: on ? "all" : "off" }) }
-  function setVolume(value) { if (root.mpd) root.mpd.setVolume(value) }
+  // Its own volume: one change in flight, a drag sending only the latest.
+  property int volumeWanted: -1
+  property bool volumeSending: false
+  function setVolume(value) {
+    if (!root.ownVolume) {
+      if (root.mpd) root.mpd.setVolume(value)
+      return
+    }
+    root.volumeWanted = Math.round(Math.max(0, Math.min(100, value)))
+    if (!root.volumeSending) root.sendVolume()
+  }
+  function sendVolume() {
+    var value = root.volumeWanted
+    root.volumeSending = true
+    root.post("/v1/volume", { volume: value }, function() {
+      root.volumeSending = false
+      if (root.volumeWanted !== value) root.sendVolume()
+      else root.volumeWanted = -1
+    })
+  }
+  // + and -: from the volume last asked for.
+  function nudgeVolume(delta) {
+    if (!root.ownVolume) {
+      if (root.mpd) root.mpd.nudgeVolume(delta)
+      return
+    }
+    root.setVolume((root.volumeWanted >= 0 ? root.volumeWanted : root.bridgeStatus.volume) + delta)
+  }
 
   // items: [{ kind, id, source }]; mode "play" (replace the queue, from
   // item start), "next" or "add".

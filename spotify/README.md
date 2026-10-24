@@ -3,13 +3,14 @@
 Spotify plays on your machine through **Soloist**, Spotify's own headless player
 (a Spotify Connect speaker). **omarock-spotify** drives it, and answers omarock
 with the same API as the Apple Music bridge, so the panel treats both alike.
-Soloist plays into omarock's PipeWire bus (`audio/`), so omarock's volume is the
-volume, and the sound goes only to the output you pinned the bus to.
+Soloist plays into your default output, with its own volume, which omarock's
+knob sets. With omarock's sound output set up (the bus, `audio/`), it plays into
+that instead: one volume for everything, and only the output you pinned.
 
 ```
 omarock, omarock-sp ──► omarock-spotify (127.0.0.1:8730) ──► Soloist (127.0.0.1:8731)
 media keys (MPRIS) ──┘          │                                   │
-                                └─► Spotify's Web API               └─► omarock bus ──► your speakers
+                                └─► Spotify's Web API               └─► your speakers (or the omarock bus)
 ```
 
 ## What you need
@@ -20,17 +21,19 @@ media keys (MPRIS) ──┘          │                                   │
   with your own account. omarock uses its Client ID to search, browse, read
   your library and save songs and albums to it, through Spotify's Web API.
 - **A Soloist API key** for the player, from the same dashboard.
-- **omarock's audio bus** ([audio/README.md](../audio/README.md)): Soloist plays
-  into it.
 - An x86_64 machine: the Soloist build that `tools/update-soloist` fetches.
 
 ## Set it up
 
-Run the tools from your omarock clone: the plugin's folder,
+The easy way: **Set up…** under SPOTIFY in omarock's settings (`,` in the panel),
+or `./install spotify` from your clone. It walks through all of what follows,
+opens the firewall for the pairing and closes it again, and switches Spotify on.
+Run it again (the settings' **Fix…** does) to finish a setup that stopped.
+
+By hand, run the tools from your omarock clone: the plugin's folder,
 `~/.config/omarchy/plugins/mre.omarock`, or a clone of your own.
 
-1. **The audio bus,** if you haven't yet: `tools/install-audio --start --output NAME`
-   ([audio/README.md](../audio/README.md)).
+1. **omarock's sound output** is optional ([audio/README.md](../audio/README.md)).
 2. **The developer app.** In the dashboard, create an app. Give it the redirect
    URI `http://127.0.0.1:8730/callback`, and tick the Web API. Then save its
    Client ID for omarock:
@@ -76,7 +79,9 @@ Run the tools from your omarock clone: the plugin's folder,
   don't reach the machine playing. Spotify playing on another device doesn't
   pause this machine's mpd either.
 - **The media keys** work on Spotify while it's the source, and on mpd otherwise.
-- **One volume.** Soloist's own volume stays at full: the bus's volume is omarock's.
+- **The volume.** Without omarock's sound output, the knob sets Soloist's own
+  volume (as your phone does). With it, Soloist's stays at full and the bus's is
+  omarock's one volume.
 - **What an app like this can't get from Spotify:**
   - genres;
   - the songs of other people's playlists (they still play);
@@ -88,9 +93,8 @@ Run the tools from your omarock clone: the plugin's folder,
 
 ## Keeping it working
 
-- **Soloist builds expire after 90 days.** An expired one stops, and the Spotify
-  button says the service isn't answering. Run `tools/update-soloist` every couple
-  of months.
+- **Soloist builds expire after 90 days.** omarock's settings offer **Update…**
+  ten days before, which fetches a new one; or run `tools/update-soloist`.
 - **The Web API sign-in lasts 6 months.** Then run `tools/omarock-sp login` again;
   `tools/omarock-sp health` shows when it ends.
 - **Logs:** `journalctl --user -u omarock-spotify -u omarock-soloist`.
@@ -106,8 +110,9 @@ Run the tools from your omarock clone: the plugin's folder,
 
 ## Remove it
 
-`./install --uninstall` does this, asking first. By hand, switch Spotify off in
-omarock's settings, then:
+**Remove…** under SPOTIFY in omarock's settings, or `./install --remove spotify`,
+does this, asking first; `./install --uninstall` too. By hand, switch Spotify
+off in omarock's settings, then:
 
 ```bash
 systemctl --user disable --now omarock-spotify omarock-soloist
@@ -123,7 +128,7 @@ Then delete the app in Spotify's developer dashboard.
 
 | File | What it does |
 | --- | --- |
-| `omarock-soloist.service` | Soloist, as a Connect speaker named after the machine, playing into the bus |
+| `omarock-soloist.service` | Soloist, as a Connect speaker named after the machine, playing into the bus if it's set up, else the default output |
 | `omarock-spotify.py`, `.service` | The service on 127.0.0.1:8730: status (a long poll), search, albums, artists, playlists, info, transport, saving to your library (`/me/library`), and Spotify's sign-in |
 | `spotify_web.py` | The Web API client (PKCE: no client secret). Also a CLI: `spotify_web.py get /me/player/devices` |
 | `soloist_ws.py` | A small WebSocket client for Soloist's API |

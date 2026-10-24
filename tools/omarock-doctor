@@ -78,7 +78,7 @@ loaded=$(journalctl --user -b --no-pager 2>/dev/null | grep -o "omarock [0-9.]* 
 printf '  sources: radio %s, spotify %s, appleMusic %s, siriusXM %s\n' \
   "$(setting radio true)" "$(setting spotify false)" "$(setting appleMusic false)" "$(setting siriusXM false)"
 
-head2 "Audio bus (optional; Spotify needs it)"
+head2 "omarock's sound output (the audio bus; optional)"
 if [[ -f $HOME/.local/share/omarock/audio/omarock-bus.conf ]]; then
   pin=$(grep -o 'target.object = "[^"]*"' "$HOME/.local/share/omarock/audio/omarock-bus.conf" | cut -d'"' -f2)
   ok "installed, pinned to $pin"
@@ -88,7 +88,7 @@ if [[ -f $HOME/.local/share/omarock/audio/omarock-bus.conf ]]; then
   if command -v mpc >/dev/null && MPD_HOST=$sock mpc outputs 2>/dev/null | grep -q "(omarock)"; then ok "mpd plays into the bus"
   else note "mpd's output isn't the bus: audio/README.md, step 3"; fi
 else
-  note "not installed: audio/README.md"
+  note "not set up (./install sound, or Set up… in omarock's settings): audio/README.md"
 fi
 
 if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/omarock-spotify.service ]]; then
@@ -96,7 +96,11 @@ if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/om
   [[ -x $HOME/.local/lib/omarock-soloist/soloist ]] && ok "Soloist: $("$HOME/.local/lib/omarock-soloist/soloist" --version 2>/dev/null | head -1)" || bad "Soloist isn't installed: tools/update-soloist"
   [[ -f $HOME/.config/omarock/spotify.json ]] && ok "the developer app: ~/.config/omarock/spotify.json" || bad "no ~/.config/omarock/spotify.json: spotify/README.md, step 2"
   private_file "$HOME/.config/omarock/soloist-key" "the Soloist key" "spotify/README.md, step 3"
-  for u in omarock-soloist omarock-spotify; do active $u && ok "$u is running" || bad "$u isn't running: journalctl --user -u $u"; done
+  if [[ $(setting spotify false) != true ]]; then
+    note "switched off in omarock's settings: its services are stopped"
+  else
+    for u in omarock-soloist omarock-spotify; do active $u && ok "$u is running" || bad "$u isn't running: journalctl --user -u $u"; done
+  fi
   h=$(health "$(setting spotifyService http://127.0.0.1:8730)")
   if [[ -n $h ]]; then
     python3 -I -c '
@@ -113,7 +117,11 @@ fi
 if [[ $(setting siriusXM false) == true ]] || [[ -e $HOME/.config/systemd/user/omarock-sxm.service ]]; then
   head2 "SiriusXM"
   private_file "$HOME/.config/omarock/siriusxm.json" "the account" "tools/install-sxm makes it: sxm/README.md"
-  active omarock-sxm && ok "omarock-sxm is running" || bad "omarock-sxm isn't running: journalctl --user -u omarock-sxm"
+  if [[ $(setting siriusXM false) != true ]]; then
+    note "switched off in omarock's settings: omarock-sxm is stopped"
+  else
+    active omarock-sxm && ok "omarock-sxm is running" || bad "omarock-sxm isn't running: journalctl --user -u omarock-sxm"
+  fi
   h=$(health "$(setting sxmService http://127.0.0.1:8720)")
   if [[ -n $h ]]; then
     python3 -I -c '

@@ -1,13 +1,23 @@
 #!/bin/bash
-# install: set omarock up, or add to what's set up. It asks which sources you
-# want, then walks through each in turn: mpd, the bar plugin, the radio's local
-# stations, the audio bus, Spotify, SiriusXM and Apple Music. Each step checks
-# what's there first, says what it will change, and asks before changing it;
-# every command it runs is shown. Run it again whenever you like: what's done
-# is skipped, and a source can be added later.
+# install: set omarock up. On its own it sets up local music and the radio:
+# mpd (which plays the music), the bar plugin, and the radio's local stations.
+# Spotify, SiriusXM and Apple Music each have a setup of their own, which
+# omarock's settings run in a terminal (their Set up buttons), or you can run
+# here. Each step checks what's there first, says what it will change, and asks
+# before changing it; every command it runs is shown. Run any of them again
+# whenever you like: what's done is skipped, a setup that stopped carries on,
+# and one that's out of date is updated.
 #
-#   ./install              from a clone of omarock, in a terminal on the desktop
-#   ./install --uninstall  take omarock off again, a piece at a time, asking first
+#   ./install                  local music and the radio, from a clone of
+#                              omarock, in a terminal on the desktop
+#   ./install spotify          Spotify
+#   ./install siriusxm         SiriusXM
+#   ./install apple-music      Apple Music, from omarock's bridge on your Mac
+#   ./install sound            omarock's own sound output, optional: one volume,
+#                              and one output it never leaves
+#   ./install --remove PIECE   take one of those four off again, with its
+#                              accounts and keys
+#   ./install --uninstall      take omarock off, a piece at a time, asking first
 #   ./install --help
 #
 # On a Mac, ./install sets up the Apple Music bridge instead (bridge/install).
@@ -15,6 +25,10 @@
 # Secrets (the Soloist key, the SiriusXM login, the bridge's token) are typed
 # into hidden prompts and go straight into files only you can read
 # (~/.config/omarock, mode 600). Nothing is printed or passed on a command line.
+#
+# Each run says how it went in ~/.local/state/omarock/setup.json, which
+# omarock's settings follow: what it set up or removed, and whether it's still
+# running, done, failed or stopped.
 #
 # For tests, OMAROCK_INSTALL_ANSWERS=FILE answers the prompts from FILE, without
 # gum: a line per prompt, `TEXT=ANSWER`, where TEXT is part of the prompt and
@@ -33,10 +47,13 @@ shelljson=$HOME/.config/omarchy/shell.json
 config=$HOME/.config/omarock
 units=$HOME/.config/systemd/user
 share=$HOME/.local/share/omarock
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/omarock
 answers=${OMAROCK_INSTALL_ANSWERS:-}
 asked=""          # with answers: a file of the prompts answered so far
 [[ -n $answers ]] && asked=$(mktemp -t omarock-install.XXXXXX)
 again=./install   # what to run to carry on, after a stop
+flow=""           # what this run sets up or removes (local, spotify, ...), for setup.json
+action=setup      # or remove
 
 bold=$'\e[1m' dim=$'\e[2m' reset=$'\e[0m' green=$'\e[32m' red=$'\e[31m' yellow=$'\e[33m'
 ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; }
@@ -120,22 +137,6 @@ choose() {
   for i in "${!keys[@]}"; do [[ ${keys[i]} == "$default" ]] && selected=${labels[i]}; done
   picked=$(gum choose --header "$header" ${selected:+--selected "$selected"} "${labels[@]}") || stopped
   for i in "${!labels[@]}"; do [[ ${labels[i]} == "$picked" ]] && printf '%s' "${keys[i]}"; done
-  return 0
-}
-
-# choose_many HEADER DEFAULTS KEY LABEL [...]: keys, comma-separated. Labels can't hold commas.
-choose_many() {
-  local header=$1 defaults=",$2," labels=() keys=() selected=() i picked out=() line
-  shift 2
-  while (($#)); do keys+=("$1"); labels+=("$2"); shift 2; done
-  if [[ -n $answers ]]; then answer "$header"; return; fi
-  for i in "${!keys[@]}"; do [[ $defaults == *",${keys[i]},"* ]] && selected+=(--selected "${labels[i]}"); done
-  picked=$(gum choose --no-limit --header "$header" "${selected[@]}" "${labels[@]}") || stopped
-  while IFS= read -r line; do
-    for i in "${!labels[@]}"; do [[ ${labels[i]} == "$line" ]] && out+=("${keys[i]}"); done
-  done <<<"$picked"
-  local IFS=,
-  printf '%s' "${out[*]}"
   return 0
 }
 
@@ -246,11 +247,21 @@ write_private() {
 }
 private_ok() { [[ -s $1 && $(stat -c %a "$1") == 600 ]]; }
 
-# A service from this clone is installed, and as this clone has it?
+# A service from this clone is installed, and as this clone has it? Only the
+# files the tools/install-* scripts install count (as tools/omarock-sources).
 installed_commit() { cat "$share/$1/INSTALLED" 2>/dev/null; }
+installs() {  # DIR: its files that get installed
+  case $1 in
+    spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist.service omarock-spotify.service ;;
+    sxm) echo omarock-sxm.py omarock-sxm.service ;;
+    audio) echo omarock-bus.conf omarock-guard.py omarock-players.conf omarock-bus.service omarock-guard.service ;;
+  esac
+}
 up_to_date() {  # DIR (audio, spotify, sxm): the installed copy matches HEAD's files
-  local c
-  c=$(installed_commit "$1") && [[ -n $c ]] && git -C "$repo" diff --quiet "$c" HEAD -- "$1/" 2>/dev/null
+  local c f paths=()
+  c=$(installed_commit "$1") && [[ -n $c ]] || return 1
+  for f in $(installs "$1"); do paths+=("$1/$f"); done
+  git -C "$repo" diff --quiet "$c" HEAD -- "${paths[@]}" 2>/dev/null
 }
 
 # ---- 0. Before anything ----
@@ -283,33 +294,9 @@ welcome() {
   local v
   v=$(manifest_version "$repo/manifest.json")
   printf '\n%somarock %s%s: a music player for the Omarchy bar\n\n' "$bold" "$v" "$reset"
-  explain "This sets omarock up one step at a time: mpd (which plays the music), the bar plugin, then the sources you pick. It shows each command before running it, and asks before it changes anything. Run it again whenever you like: what's done is checked and skipped, and you can add a source later."
-  echo
-  explain "Local music is always there. Which sources do you want too? Press x to pick or unpick one, then Enter."
+  explain "This sets up your own music and the radio: mpd (which plays the music), then omarock on the bar. It shows each command before running it, and asks before it changes anything. Run it again whenever you like: what's done is checked and skipped."
+  explain "Spotify, SiriusXM and Apple Music come afterwards, each from omarock's settings, if you want them."
 }
-
-choose_sources() {
-  local now=() picked
-  # Ticked: the sources switched on, and those set up but not finished (a
-  # SiriusXM login that didn't work, say), so running this again carries on.
-  [[ $(setting radio true) == true ]] && now+=(radio)
-  [[ $(setting spotify false) == true || -f $share/spotify/INSTALLED ]] && now+=(spotify)
-  [[ $(setting appleMusic false) == true || -f $config/apple.json ]] && now+=(apple)
-  [[ $(setting siriusXM false) == true || -f $share/sxm/INSTALLED ]] && now+=(sxm)
-  [[ -f $share/audio/omarock-bus.conf ]] && now+=(bus)
-  picked=$(IFS=,; choose_many "Sources (and the optional audio bus)" "${now[*]}" \
-    radio "Internet radio: thousands of stations with nothing to set up" \
-    spotify "Spotify: needs Premium and a free Spotify developer app" \
-    apple "Apple Music: needs a Mac running omarock's bridge (advanced)" \
-    sxm "SiriusXM: needs a subscription with streaming (unofficial)" \
-    bus "One volume and one pinned output for all of omarock (the audio bus)") || exit 1
-  want=",$picked,"
-  if [[ $want == *,spotify,* && $want != *,bus,* ]]; then
-    note "Spotify plays through the audio bus, so that's included."
-    want+="bus,"
-  fi
-}
-wants() { [[ $want == *",$1,"* ]]; }
 declare -A done_=()
 
 # ---- 1. mpd ----
@@ -548,17 +535,17 @@ step_radio() {
 # ---- 4. The audio bus ----
 
 step_bus() {
-  step "The audio bus"
+  step "omarock's sound output"
   local pin out default conf vol
   conf=$(mpd_conf)
   if [[ -f $share/audio/omarock-bus.conf ]]; then
     pin=$(grep -o 'target.object = "[^"]*"' "$share/audio/omarock-bus.conf" | cut -d'"' -f2)
     ok "installed, playing only into $pin"
     if ! up_to_date audio; then
-      confirm "This clone has a newer bus. Update it (same output)?" && run "$repo/tools/install-audio" --start
+      confirm "This clone has a newer version of it. Update it (same output)?" && run "$repo/tools/install-audio" --start
     fi
   else
-    explain "The bus is omarock's own output: everything omarock plays (mpd, Spotify) goes through it, with one volume, into one output you pick. It never falls back to another output: if yours goes away, the bus waits, silent."
+    explain "Everything omarock plays (mpd, Spotify) goes into one output you pick, with one volume. It never moves to another output: if yours goes away, omarock waits, silent. (Inside, it's a PipeWire bus: audio/README.md.)"
     explain "That matters if some outputs must never carry music: a radio transmitter's audio interface, say, or a TV in another room. Pick the output for your speakers or headphones."
     default=$(pactl get-default-sink 2>/dev/null)
     local name desc args=()
@@ -575,14 +562,14 @@ step_bus() {
 
   # mpd plays into the bus, with no volume of its own: the bus's is the volume.
   if grep -qE '^[[:space:]]*target[[:space:]]+"omarock"' "$conf" 2>/dev/null; then
-    ok "mpd plays into the bus"
+    ok "mpd plays into it"
   else
-    explain "mpd has to play into the bus. This puts a new audio_output in $conf, and comments out the ones there (to go back: audio/README.md):"
+    explain "mpd has to play into it. This puts a new audio_output in $conf, and comments out the ones there (to go back: audio/README.md):"
     printf '    %s\n' 'audio_output {' '    type        "pipewire"' '    name        "omarock"' '    target      "omarock"' '    mixer_type  "none"' '}'
     confirm "Change mpd's output, and restart mpd?" || return 1
     # The bus starts at mpd's volume now, since mpd's own goes to full.
     vol=$(mpc volume 2>/dev/null | grep -oE '[0-9]+' | head -1)
-    wait_until "Waiting for the bus…" 15 "$repo/tools/omarock-volume" \
+    wait_until "Waiting for it to start…" 15 "$repo/tools/omarock-volume" \
       && run "$repo/tools/omarock-volume" "${vol:-40}" >/dev/null
     backup "$conf"
     python3 -I - "$conf" <<'PY' || return 1
@@ -607,9 +594,10 @@ PY
     run systemctl --user restart mpd
     local i
     for ((i = 0; i < 40; i++)); do mpd_answers && break; sleep 0.5; done
-    if mpc outputs 2>/dev/null | grep -q "(omarock)"; then ok "mpd plays into the bus"; else bad "mpd's output isn't the bus: journalctl --user -u mpd"; return 1; fi
+    if mpc outputs 2>/dev/null | grep -q "(omarock)"; then ok "mpd plays into it"; else bad "mpd's output isn't omarock's: journalctl --user -u mpd"; return 1; fi
   fi
-  ok "omarock's volume is the bus's now (mpc volume no longer applies: tools/omarock-volume)"
+  ok "omarock's volume knob sets its volume now (mpc volume no longer applies: tools/omarock-volume)"
+  soloist_follow_bus
   done_[bus]=1
 }
 
@@ -630,16 +618,31 @@ cleanup_firewall() {
   for r in "${added_rules[@]}"; do run sudo ufw delete allow "$r" >/dev/null; done
   added_rules=()
 }
+# How this run went, into setup.json for omarock's settings: running while it
+# runs, then done, stopped (Ctrl-C, the terminal closed) or failed.
+record() {  # RESULT [EXIT CODE]
+  [[ -n $flow ]] || return 0
+  install -d "$state_dir"
+  jq -n --arg piece "$flow" --arg action "$action" --arg result "$1" --argjson code "${2:-0}" \
+    --argjson at "$(date +%s)" --argjson pid $$ \
+    '{piece: $piece, action: $action, result: $result, code: $code, at: $at, pid: $pid}' \
+    >"$state_dir/setup.json.new" && mv "$state_dir/setup.json.new" "$state_dir/setup.json"
+}
 # However the installer ends (done, stopped, Ctrl-C during a command, the
-# terminal closed), the pairing's firewall rules come out again.
-trap 'cleanup_firewall; [[ -z $asked ]] || rm -f "$asked"' EXIT
+# terminal closed), the pairing's firewall rules come out again, and
+# setup.json says how it ended.
+finish() {  # EXIT CODE
+  cleanup_firewall
+  [[ -z $asked ]] || rm -f "$asked"
+  case $1 in 0) record done 0 ;; 129 | 130 | 143) record stopped "$1" ;; *) record failed "$1" ;; esac
+}
+trap 'finish $?' EXIT
 trap 'exit 130' INT
 trap 'exit 129' HUP
 trap 'exit 143' TERM
 
 step_spotify() {
   step "Spotify"
-  if [[ -z ${done_[bus]:-} ]]; then bad "Spotify plays through the audio bus, which isn't set up."; return 1; fi
   explain "Spotify plays here through Soloist, Spotify's own player (a Spotify Connect speaker named after this machine). omarock-spotify drives it, and searches through Spotify's Web API. You need Spotify Premium."
   local id
   if [[ -f $config/spotify.json ]] && jq -e '.clientId | length > 0' "$config/spotify.json" >/dev/null 2>&1; then
@@ -911,27 +914,108 @@ set_setting() {  # KEY JSON: one of omarock's settings, into its settings file
   printf '  %s%s: %s%s\n' "$dim" "$1" "$(jq -r . <<<"$2")" "$reset"
 }
 
-step_switches() {
-  step "omarock's settings"
-  local src key
-  for src in radio spotify apple sxm; do
-    case $src in radio) key=radio ;; spotify) key=spotify ;; apple) key=appleMusic ;; sxm) key=siriusXM ;; esac
-    if wants "$src" && [[ -n ${done_[$src]:-} ]]; then pending[$key]=true
-    elif ! wants "$src" && [[ $(setting "$key" "$([[ $key == radio ]] && echo true || echo false)") == true ]]; then pending[$key]=false
-    fi
+unset_setting() {  # KEY...: out of omarock's settings file, back to their defaults
+  local file=$config/settings.json k
+  [[ -f $file ]] || return 0
+  for k; do
+    jq -e --arg k "$k" 'has($k)' "$file" >/dev/null 2>&1 || continue
+    jq --arg k "$k" 'del(.[$k])' "$file" >"$file.new" && mv "$file.new" "$file"
+    printf '  %s%s: back to its default%s\n' "$dim" "$k" "$reset"
   done
-  # Into ~/.config/omarock/settings.json, which the panel follows.
+}
+
+# What the steps found or chose (pending), into ~/.config/omarock/settings.json,
+# which the panel follows.
+save_pending() {
   local k
   for k in "${!pending[@]}"; do set_setting "$k" "${pending[$k]}"; done
-  for src in radio spotify apple sxm; do
-    case $src in radio) key=radio ;; spotify) key=spotify ;; apple) key=appleMusic ;; sxm) key=siriusXM ;; esac
-    if [[ $(setting "$key" "$([[ $key == radio ]] && echo true || echo false)") == true ]]; then ok "$key is on"
-    elif [[ $src == sxm ]] && wants sxm && sxm_account_set; then
-      note "siriusXM is off: it isn't signed in. Switch it on in omarock's settings and fix the login there, or run ./install again"
-    elif wants "$src"; then note "$key is off: its setup didn't finish (run ./install again)"
-    fi
-  done
-  explain "Change these any time in omarock's settings: press , in the panel, or the gear in the expanded view."
+}
+
+# ---- What a run sets up: local music, or one piece ----
+
+# A piece's name as typed, as setup.json and the settings know it.
+piece_name() {
+  case ${1:-} in
+    spotify) echo spotify ;;
+    siriusxm | sxm) echo siriusxm ;;
+    apple-music | apple | applemusic) echo apple-music ;;
+    sound | bus | audio) echo sound ;;
+    *) return 1 ;;
+  esac
+}
+piece_title() {
+  case $1 in spotify) echo Spotify ;; siriusxm) echo SiriusXM ;; apple-music) echo "Apple Music" ;; sound) echo "omarock's sound output" ;; esac
+}
+# The settings switch that shows a source in the panel.
+piece_switch() {
+  case $1 in spotify) echo spotify ;; siriusxm) echo siriusXM ;; apple-music) echo appleMusic ;; esac
+}
+no_piece() {
+  echo "install: no such piece: ${1:-(none)}. It's one of spotify, siriusxm, apple-music or sound." >&2
+  exit 2
+}
+
+# mpd, as omarock reaches it: every piece needs it. Set up first if it isn't.
+local_music() {
+  mpd_socket=$(setting socket "")
+  [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
+  export MPD_HOST=$mpd_socket
+  mpd_answers && return 0
+  explain "Your own music isn't set up here yet (mpd, which plays everything omarock plays), so that comes first."
+  step_mpd
+}
+
+setup_local() {
+  flow=local
+  record running
+  welcome
+  step_mpd
+  step_plugin
+  step_radio
+  save_pending
+  printf '\n%sReady%s\n' "$bold" "$reset"
+  explain "Click omarock in the bar (a music note until something plays). Press ? there for the keys."
+  explain "For Spotify, SiriusXM or Apple Music: omarock's settings (press , in the panel) set each one up."
+}
+
+setup_piece() {
+  local piece key
+  piece=$(piece_name "$1") || no_piece "$1"
+  flow=$piece again="./install $piece"
+  record running
+  printf '\n%sSetting up %s%s\n' "$bold" "$(piece_title "$piece")" "$reset"
+  local_music
+  case $piece in
+    spotify) step_spotify ;;
+    siriusxm) step_sxm ;;
+    apple-music) step_apple ;;
+    sound) step_bus ;;
+  esac || { printf '\n%s isn'"'"'t set up yet. Run %s again to carry on.\n' "$(piece_title "$piece")" "$again"; exit 1; }
+  key=$(piece_switch "$piece")
+  [[ -n $key ]] && pending[$key]=true
+  save_pending
+  printf '\n%sReady%s\n' "$bold" "$reset"
+  if [[ -n $key ]]; then
+    explain "$(piece_title "$piece") is switched on: it has its button in omarock's panel. Its switch in omarock's settings turns it off and on."
+  fi
+}
+
+remove_piece() {
+  local piece
+  piece=$(piece_name "${1:-}") || no_piece "${1:-}"
+  flow=$piece action=remove again="./install --remove $piece"
+  record running
+  printf '\n%sTaking %s off this machine%s\n' "$bold" "$(piece_title "$piece")" "$reset"
+  # mpc reaches mpd where omarock does.
+  mpd_socket=$(setting socket "")
+  [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
+  [[ -S $mpd_socket ]] && export MPD_HOST=$mpd_socket
+  case $piece in
+    spotify) un_spotify keys ;;
+    siriusxm) un_sxm keys ;;
+    apple-music) un_apple ;;
+    sound) un_bus piece ;;
+  esac || { printf '\nNothing more was removed. Run %s again whenever you like.\n' "$again"; exit 1; }
 }
 
 # ---- Taking it off: ./install --uninstall ----
@@ -962,34 +1046,106 @@ un_plugin() {
   if [[ -d $plugin_dir ]]; then bad "$plugin_dir is still there"; else ok "omarock is off the bar"; fi
 }
 
+# un_spotify, un_sxm [keys]: with keys (./install --remove), the source's
+# accounts and keys go too, its switch goes off, and a no stops the run.
 un_spotify() {
-  local paths
+  local paths keys=() with=${1:-}
+  [[ -n $with ]] && keys=("$config/spotify.json" "$config/soloist-key" "$config/spotify-token.json")
   mapfile -t paths < <(present "$units/omarock-spotify.service" "$units/omarock-soloist.service" "$share/spotify" \
-    "$HOME/.local/lib/omarock-soloist" "$HOME/.local/share/omarock-soloist" "$HOME/.cache/omarock-soloist")
-  ((${#paths[@]})) || return 0
+    "$HOME/.local/lib/omarock-soloist" "$HOME/.local/share/omarock-soloist" "$HOME/.cache/omarock-soloist" "${keys[@]}")
+  if ((${#paths[@]} == 0)); then
+    [[ -n $with ]] && { ok "Spotify isn't set up here"; set_setting spotify false; }
+    return 0
+  fi
   step "Spotify"
-  explain "This stops omarock-spotify and Soloist, and deletes them, with Soloist's sign-in and cache:"
+  if [[ -n $with ]]; then
+    explain "This stops omarock-spotify and Soloist, and deletes them, with Soloist's sign-in and cache, your app's Client ID, the Soloist key and the Web API's sign-in:"
+  else
+    explain "This stops omarock-spotify and Soloist, and deletes them, with Soloist's sign-in and cache:"
+  fi
   listing "${paths[@]}"
-  confirm "Remove Spotify's services?" || return 0
+  confirm "Remove Spotify$([[ -z $with ]] && echo "'s services")?" || { [[ -z $with ]]; return; }
   stop_units omarock-spotify omarock-soloist
   run rm -rf "${paths[@]}"
   run systemctl --user daemon-reload
-  ok "Spotify's services are gone"
+  [[ -n $with ]] && set_setting spotify false
+  ok "Spotify is gone from this machine"
   note "your developer app is still in Spotify's dashboard (developer.spotify.com): delete it there if you like"
+  [[ -n $with ]] && note "Soloist may stay listed among your account's devices until Spotify forgets it"
+  return 0
 }
 
 un_sxm() {
-  local paths
-  mapfile -t paths < <(present "$units/omarock-sxm.service" "$share/sxm" "$share/sxm-venv")
-  ((${#paths[@]})) || return 0
+  local paths keys=() with=${1:-}
+  # An editor's backup of the login holds it too.
+  [[ -n $with ]] && keys=("$config/siriusxm.json" "$config/siriusxm.json~")
+  mapfile -t paths < <(present "$units/omarock-sxm.service" "$share/sxm" "$share/sxm-venv" "${keys[@]}")
+  if ((${#paths[@]} == 0)); then
+    [[ -n $with ]] && { ok "SiriusXM isn't set up here"; set_setting siriusXM false; }
+    return 0
+  fi
   step "SiriusXM"
-  explain "This stops omarock-sxm and deletes it:"
+  if [[ -n $with ]]; then
+    explain "This stops omarock-sxm and deletes it, with your SiriusXM login:"
+  else
+    explain "This stops omarock-sxm and deletes it:"
+  fi
   listing "${paths[@]}"
-  confirm "Remove the SiriusXM service?" || return 0
+  confirm "Remove $([[ -n $with ]] && echo SiriusXM || echo "the SiriusXM service")?" || { [[ -z $with ]]; return; }
   stop_units omarock-sxm
   run rm -rf "${paths[@]}"
   run systemctl --user daemon-reload
-  ok "the SiriusXM service is gone"
+  [[ -n $with ]] && set_setting siriusXM false
+  ok "SiriusXM is gone from this machine"
+  return 0
+}
+
+# ./install --remove apple-music: the bridge's address and token here, and
+# the patches that were for its stream. The bridge on the Mac stays.
+un_apple() {
+  local token paths flac mpris
+  token=$(setting appleTokenFile "")
+  [[ -z $token ]] && token=$config/bridge-token
+  token=${token/#\~/$HOME}
+  mapfile -t paths < <(present "$config/apple.json" "$token")
+  mapfile -t flac < <(present "$units/mpd.service.d/omarock-flac.conf" "$HOME/.local/lib/omarock-flac")
+  mapfile -t mpris < <(present "$units/mpd-mpris.service.d/omarock-mpris.conf" "$HOME/.local/lib/omarock-mpris")
+  step "Apple Music"
+  if ((${#paths[@]} + ${#flac[@]} + ${#mpris[@]} == 0)); then
+    ok "Apple Music isn't set up here"
+    set_setting appleMusic false
+    return 0
+  fi
+  explain "This deletes the bridge's address and its token here$( ((${#flac[@]} + ${#mpris[@]})) && echo ", and omarock's patched builds for the bridge's stream: mpd and the media keys go back to Arch's own (mpd restarts, so anything playing stops for a moment)"):"
+  listing "${paths[@]}" "${flac[@]}" "${mpris[@]}"
+  confirm "Remove Apple Music from this machine?" || return 1
+  run rm -rf "${paths[@]}" "${flac[@]}" "${mpris[@]}"
+  if ((${#flac[@]} + ${#mpris[@]})); then
+    rmdir "$units/mpd.service.d" "$units/mpd-mpris.service.d" 2>/dev/null
+    run systemctl --user daemon-reload
+    ((${#flac[@]})) && { run systemctl --user restart mpd; mpd_back; }
+    ((${#mpris[@]})) && run systemctl --user restart mpd-mpris
+  fi
+  unset_setting appleBridge appleStream appleTokenFile appleRejoin appleIdleStop
+  set_setting appleMusic false
+  ok "Apple Music is gone from this machine"
+  note "the bridge on your Mac stays: ./install --uninstall in omarock's clone there takes it off"
+  return 0
+}
+
+# Soloist picks its output as it starts (its unit): omarock's sound output
+# while that's set up, else the default output. After the sound output comes
+# or goes, a Soloist playing to the wrong one restarts.
+soloist_follow_bus() {
+  active omarock-soloist || return 0
+  local pid on=false want=false
+  pid=$(systemctl --user show -p MainPID --value omarock-soloist)
+  # Its command line holds the Soloist key: read, never shown.
+  tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q -- '--pipewire-device omarock' && on=true
+  [[ -f $share/audio/omarock-bus.conf ]] && want=true
+  [[ $on == "$want" ]] && return 0
+  explain "Spotify's player restarts, to play $($want && echo "through omarock's sound output" || echo "into your default output")."
+  run systemctl --user restart omarock-soloist
 }
 
 un_patches() {
@@ -1058,29 +1214,41 @@ else:
 PY
 }
 
+# un_bus [piece]: as ./install --remove sound, it warns first, a no stops the
+# run, and Spotify's player follows.
 un_bus() {
-  local conf paths block=false back
+  local conf paths block=false back piece=${1:-}
   conf=$(mpd_conf)
   grep -qE '^[[:space:]]*target[[:space:]]+"omarock"' "$conf" 2>/dev/null && block=true
   mapfile -t paths < <(present "$units/omarock-bus.service" "$units/omarock-guard.service" "$share/audio" \
     "$HOME/.config/pipewire/client.conf.d/50-omarock-players.conf" "$config/audio-output")
-  $block || ((${#paths[@]})) || return 0
-  step "The audio bus"
+  if ! $block && ((${#paths[@]} == 0)); then
+    [[ -n $piece ]] && ok "omarock's sound output isn't set up here"
+    return 0
+  fi
+  step "omarock's sound output"
+  if [[ -n $piece ]]; then
+    explain "Without it, omarock plays wherever your default output is, and follows it when that changes. If some output must never carry music (a radio transmitter's audio interface, say), keep it."
+  fi
   if $block; then
     back=$(mpd_conf_undo "$conf" show)
-    explain "mpd plays into the bus. This takes omarock's audio_output out of $conf, and restarts mpd."
+    explain "mpd plays into it. This takes omarock's audio_output out of $conf, and restarts mpd."
     if [[ -n $back ]]; then
       explain "The output mpd had before comes back:"
       printf '    %s\n' "$back"
     else
-      explain "No output was set aside when the bus went in, so mpd will use its default (PipeWire's default output). Check that's where you want music to play."
+      explain "No output was set aside when it went in, so mpd will use its default (PipeWire's default output). Check that's where you want music to play."
     fi
   fi
   if ((${#paths[@]})); then
-    explain "The bus and its guard stop, and these go:"
+    explain "It and its guard stop, and these go:"
     listing "${paths[@]}"
   fi
-  confirm "Remove the audio bus$($block && echo ", and restart mpd")?" || return 0
+  if [[ -n $piece ]]; then
+    confirm "Remove omarock's sound output$($block && echo ", and restart mpd")?" no || return 1
+  else
+    confirm "Remove omarock's sound output$($block && echo ", and restart mpd")?" || return 0
+  fi
   if $block; then
     backup "$conf"
     mpd_conf_undo "$conf" write && mv "$conf.new" "$conf" && ok "wrote $conf"
@@ -1093,7 +1261,9 @@ un_bus() {
     mpd_back
     mpc outputs 2>/dev/null | grep '^Output' | sed 's/^/    /'
   fi
-  ok "the bus is gone; mpd's own volume applies again"
+  ok "omarock's sound output is gone; mpd's own volume applies again"
+  [[ -n $piece ]] && soloist_follow_bus
+  return 0
 }
 
 # The unix socket step_mpd added to mpd.conf: its comment and bind_to_address
@@ -1171,7 +1341,7 @@ un_config() {
 uninstall() {
   again="./install --uninstall"
   printf '\n%sTaking omarock off this machine%s\n\n' "$bold" "$reset"
-  explain "This goes through what omarock set up, in reverse: the bar plugin, the services, the patches, the audio bus, then its changes to mpd and its own files. It shows what each step removes, and asks first. mpd stays, with your music, its database and playlists."
+  explain "This goes through what omarock set up, in reverse: the bar plugin, the services, the patches, its sound output, then its changes to mpd and its own files. It shows what each step removes, and asks first. mpd stays, with your music, its database and playlists."
   # mpc reaches mpd where omarock did, while that's still there.
   mpd_socket=$(setting socket "")
   [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
@@ -1195,20 +1365,13 @@ uninstall() {
 
 main() {
   preflight "$@"
-  if [[ ${1:-} == --uninstall ]]; then uninstall; return; fi
-  welcome
-  choose_sources
-  step_mpd
-  step_plugin
-  wants radio && step_radio
-  wants bus && step_bus
-  wants spotify && step_spotify
-  wants sxm && step_sxm
-  wants apple && step_apple
-  step_switches
-  printf '\n%sHow it all looks%s (tools/omarock-doctor)\n' "$bold" "$reset"
-  "$repo/tools/omarock-doctor" | sed '1{/^$/d}'
-  explain "Click omarock in the bar (a music note until something plays). Press ? there for the keys, and , for the settings."
+  case ${1:-} in
+    --uninstall) uninstall ;;
+    --remove) remove_piece "${2:-}" ;;
+    "") setup_local ;;
+    -*) no_piece "$1" ;;
+    *) setup_piece "$1" ;;
+  esac
 }
 
 main "$@"; exit

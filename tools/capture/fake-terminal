@@ -1,0 +1,70 @@
+#!/bin/bash
+# The harness's omarchy-launch-floating-terminal-with-presentation: no
+# terminal, and never the real ./install. It logs the command it was given to
+# $HOME/terminal.log, then plays the run out on the test HOME's files, as
+# ./install would leave them: setup.json "running" for 2 s, then what the
+# setup or removal changes, then setup.json with the result. The result is
+# $HOME/.fake-flow-result's (done, or failed or stopped: then nothing changes),
+# else done.
+set -u
+echo "$*" >>"$HOME/terminal.log"
+read -ra words <<<"$*"
+action=setup piece=local
+case ${words[1]:-} in
+  --remove) action=remove piece=${words[2]:-} ;;
+  "") ;;
+  *) piece=${words[1]} ;;
+esac
+config=$HOME/.config/omarock share=$HOME/.local/share/omarock units=$HOME/.config/systemd/user
+state=$HOME/.local/state/omarock
+
+record() {  # in the run's own process ($BASHPID: $$ is this script's, gone at once)
+  mkdir -p "$state"
+  printf '{"piece": "%s", "action": "%s", "result": "%s", "code": %s, "at": %s, "pid": %s}\n' \
+    "$piece" "$action" "$1" "${2:-0}" "$(date +%s)" "$BASHPID" >"$state/setup.json"
+}
+switch() {  # KEY true|false: the source's switch, as ./install sets it
+  local file=$config/settings.json
+  [[ -s $file ]] || echo '{}' >"$file"
+  python3 -I -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d[sys.argv[2]] = sys.argv[3] == "true"; json.dump(d, open(p, "w"))' \
+    "$file" "$1" "$2"
+}
+
+(
+  record running
+  sleep 2
+  result=$(cat "$HOME/.fake-flow-result" 2>/dev/null || echo done)
+  if [[ $result != done ]]; then record "$result" 1; exit; fi
+  mkdir -p "$config" "$share" "$units" "$HOME/.fake-systemd"
+  case $action:$piece in
+    setup:spotify)
+      mkdir -p "$share/spotify" && echo harness >"$share/spotify/INSTALLED"
+      touch "$units/omarock-spotify.service" "$units/omarock-soloist.service" \
+        "$HOME/.fake-systemd/omarock-spotify" "$HOME/.fake-systemd/omarock-soloist"
+      switch spotify true ;;
+    remove:spotify)
+      rm -rf "$share/spotify" "$units/omarock-spotify.service" "$units/omarock-soloist.service" \
+        "$HOME/.fake-systemd/omarock-spotify" "$HOME/.fake-systemd/omarock-soloist" "$config/spotify.json" "$config/soloist-key"
+      switch spotify false ;;
+    setup:siriusxm)
+      mkdir -p "$share/sxm" && echo harness >"$share/sxm/INSTALLED"
+      touch "$units/omarock-sxm.service" "$HOME/.fake-systemd/omarock-sxm"
+      switch siriusXM true ;;
+    remove:siriusxm)
+      rm -rf "$share/sxm" "$units/omarock-sxm.service" "$HOME/.fake-systemd/omarock-sxm" "$config/siriusxm.json"
+      switch siriusXM false ;;
+    # The fake bridge's address and token, kept aside for a setup to bring back.
+    remove:apple-music)
+      for f in apple.json bridge-token; do [[ -e $config/$f ]] && mv "$config/$f" "$HOME/.removed-$f"; done
+      switch appleMusic false ;;
+    setup:apple-music)
+      for f in apple.json bridge-token; do [[ -e $HOME/.removed-$f ]] && mv "$HOME/.removed-$f" "$config/$f"; done
+      switch appleMusic true ;;
+    setup:sound)
+      mkdir -p "$share/audio" && echo harness >"$share/audio/INSTALLED"
+      echo 'target.object = "alsa_output.test-speakers"' >"$share/audio/omarock-bus.conf" ;;
+    remove:sound)
+      rm -rf "$share/audio" ;;
+  esac
+  record done 0
+) >/dev/null 2>&1 &

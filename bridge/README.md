@@ -151,7 +151,8 @@ stream, because restarting the bridge under mpd gives mpd errors until it's back
 
 ## 3. The Linux side
 
-Run `./install` on your Omarchy machine and pick Apple Music. It lists the Macs among
+On your Omarchy machine, **Set up…** under APPLE MUSIC in omarock's settings (or
+`./install apple-music` in your clone there) connects to the bridge. It lists the Macs among
 your Tailscale machines, checks the bridge answers, and asks for the bridge's token.
 Paste it (on the Mac, `pbcopy < ~/Library/Application\ Support/omarock-bridge/token`
 puts it on the clipboard without showing it; the Mac's `./install` offers to), or let
@@ -226,6 +227,10 @@ rm -rf ~/Library/Application\ Support/omarock-bridge
 ```
 
 `tccutil` finds the app by its bundle id, so run it before the app is removed.
+
+On the Omarchy machine, **Remove…** under APPLE MUSIC in omarock's settings (or
+`./install --remove apple-music`) deletes the bridge's address and token there,
+and the patched builds for its stream.
 
 ## Limits
 

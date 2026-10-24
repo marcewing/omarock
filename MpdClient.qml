@@ -39,6 +39,14 @@ Item {
   }
   readonly property int busVolume: root.busNode && root.busNode.audio ? Math.round(root.busNode.audio.volume * 100) : -1
   PwObjectTracker { objects: root.busNode ? [root.busNode] : [] }
+  // A PipeWire output's own name for people ("Framework Audio Expansion
+  // Card"), for the settings; its node name if PipeWire doesn't have it.
+  function outputDescription(name) {
+    var nodes = Pipewire.nodes ? Pipewire.nodes.values : []
+    for (var i = 0; i < nodes.length; i++)
+      if (nodes[i] && nodes[i].name === name) return nodes[i].description || nodes[i].nickname || name
+    return name
+  }
   property var currentSong: ({})
   property var queue: []
   property int queueTotalSeconds: 0

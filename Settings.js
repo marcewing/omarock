@@ -8,50 +8,76 @@
 // settings screen hands them to the panel instead of saving them:
 //   "account" and "secret": a login or a key, in its own file in
 //     ~/.config/omarock (tools/omarock-account); a secret is never shown;
-//   "action": a button (signing in to Spotify);
+//   "action": a button (signing in to Spotify, setting a source up);
 //   "folder": mpd's music folder, in mpd.conf (changed after asking).
-// A row with a source shows only while that source is switched on. Pure
-// functions, so node can test them (tests/settings.test.js).
+//
+// Spotify, SiriusXM, Apple Music and omarock's sound output are each set up
+// on their own (./install PIECE, which a button runs in a terminal). A
+// "source" row is that piece's button until it's set up, then its switch
+// (or, for the sound output, which has no switch, a line saying where it
+// plays). The piece's other rows show only once it's set up: its settings,
+// an Update or Fix button when it needs one, and Remove. Pure functions, so
+// node can test them (tests/settings.test.js).
 
 var schema = [
+  { key: "localSetUp", type: "action", label: "Set up your music", button: "Set up…", source: "local", when: "missing",
+    description: "mpd plays everything omarock plays, and omarock can't reach it. This sets it up, in a terminal: mpd, and where your music is." },
+  { key: "musicFolder", type: "folder", label: "Your music folder",
+    description: "Where mpd finds your music. Changing it restarts mpd (after asking) and reads the new folder." },
   { key: "radio", type: "boolean", label: "Internet radio", defaultValue: true,
     description: "Stations from Radio Browser, played by mpd. Nothing to set up." },
   { key: "radioState", type: "string", label: "Your US state", defaultValue: "",
     description: "For the radio's local stations: a state's name, such as Maine." },
-  { key: "spotify", type: "boolean", label: "Spotify", defaultValue: false,
-    description: "Needs Spotify Premium and the omarock-spotify service (spotify/README.md)." },
-  { key: "appleMusic", type: "boolean", label: "Apple Music", defaultValue: false,
-    description: "Needs the omarock bridge on a Mac (bridge/README.md)." },
-  { key: "siriusXM", type: "boolean", label: "SiriusXM", defaultValue: false,
-    description: "Needs a SiriusXM subscription and the omarock-sxm service (sxm/README.md). Unofficial." },
   { key: "lookup", type: "enum", label: "Look up the radio's songs in", options: ["Apple Music", "Spotify"],
     defaultValue: "Apple Music",
     description: "Click a song or artist playing on SiriusXM or the radio to find it there, while the station plays on. The other one if this one is off." },
 
-  { key: "musicFolder", type: "folder", label: "Your music folder",
-    description: "Where mpd finds your music. Changing it restarts mpd (after asking) and reads the new folder." },
-
-  { key: "sxmUser", type: "account", label: "SiriusXM email or username", source: "sxm" },
-  { key: "sxmPassword", type: "secret", label: "SiriusXM password", source: "sxm",
-    description: "Kept for omarock-sxm only, and never shown. Saving it signs in again." },
-
+  { key: "spotify", type: "source", source: "spotify", name: "Spotify", label: "Spotify", defaultValue: false,
+    description: "Played here by Spotify's own player. Off stops it, and keeps your accounts and keys.",
+    setUpDescription: "Needs Spotify Premium, and a free Spotify developer app. Set up opens a terminal that walks you through it." },
+  { key: "spotifyUpdate", type: "action", source: "spotify", name: "Spotify", when: "fix" },
   { key: "spotifyClient", type: "account", label: "Your Spotify app's Client ID", source: "spotify",
     description: "From your app in Spotify's developer dashboard (spotify/README.md)." },
   { key: "soloistKey", type: "secret", label: "The Soloist key", source: "spotify",
     description: "From the same dashboard, never shown. Saving it restarts Soloist." },
   { key: "spotifyLogin", type: "action", label: "Sign in to Spotify", button: "Sign in", source: "spotify",
-    description: "For search and your library: Spotify's sign-in, in your browser. Pairing your phone is ./install's, as it opens the firewall for a moment." },
+    description: "For search and your library: Spotify's sign-in, in your browser. It lasts six months." },
+  { key: "spotifyRemove", type: "action", label: "Remove Spotify", button: "Remove…", source: "spotify", remove: true,
+    description: "Stops and deletes its services, with your app's Client ID, the Soloist key and the sign-ins. Set up brings it back." },
 
-  { key: "appleBridge", type: "string", label: "The bridge's address", defaultValue: "",
+  { key: "siriusXM", type: "source", source: "sxm", name: "SiriusXM", label: "SiriusXM", defaultValue: false,
+    description: "SiriusXM's live channels, played by mpd. Off stops it, and keeps your login.",
+    setUpDescription: "Needs a SiriusXM subscription with streaming. Unofficial: it signs in as SiriusXM's web player does, which SiriusXM's terms forbid. Set up opens a terminal that walks you through it." },
+  { key: "sxmUpdate", type: "action", source: "sxm", name: "SiriusXM", when: "fix" },
+  { key: "sxmUser", type: "account", label: "SiriusXM email or username", source: "sxm" },
+  { key: "sxmPassword", type: "secret", label: "SiriusXM password", source: "sxm",
+    description: "Kept for omarock-sxm only, and never shown. Saving it signs in again." },
+  { key: "sxmRemove", type: "action", label: "Remove SiriusXM", button: "Remove…", source: "sxm", remove: true,
+    description: "Stops and deletes omarock-sxm, with your SiriusXM login. Set up brings it back." },
+
+  { key: "appleMusic", type: "source", source: "apple", name: "Apple Music", label: "Apple Music", defaultValue: false,
+    description: "Played on your Mac by omarock's bridge, and heard here. Off keeps the bridge's address and token.",
+    setUpDescription: "Needs a Mac running omarock's bridge: on the Mac, ./install in omarock's clone sets it up (with your Apple Developer membership). Set up then opens a terminal that connects this machine to it." },
+  { key: "appleUpdate", type: "action", source: "apple", name: "Apple Music", when: "fix" },
+  { key: "appleBridge", type: "string", label: "The bridge's address", defaultValue: "", source: "apple",
     description: "Empty: the one in ~/.config/omarock/apple.json." },
-  { key: "appleStream", type: "string", label: "The stream's address", defaultValue: "",
+  { key: "appleStream", type: "string", label: "The stream's address", defaultValue: "", source: "apple",
     description: "What mpd plays. Empty: the one in ~/.config/omarock/apple.json." },
   { key: "bridgeToken", type: "secret", label: "The bridge's token", source: "apple",
     description: "On the Mac: pbcopy < ~/Library/Application\\ Support/omarock-bridge/token, then paste it here. Never shown." },
-  { key: "appleIdleStop", type: "integer", label: "Let go of the stream when the Mac is paused",
+  { key: "appleIdleStop", type: "integer", label: "Let go of the stream when the Mac is paused", source: "apple",
     min: 0, max: 3600, step: 10, defaultValue: 60, description: "After this many seconds (0: never)." },
-  { key: "appleRejoin", type: "boolean", label: "Reconnect after each change", defaultValue: true,
+  { key: "appleRejoin", type: "boolean", label: "Reconnect after each change", defaultValue: true, source: "apple",
     description: "Needed with a stock libFLAC, which falls behind on the Mac's quiet stream; it costs a short stutter 2 s into each song. Turn it off once mpd uses the patched libFLAC (patches/README.md)." },
+  { key: "appleRemove", type: "action", label: "Remove Apple Music", button: "Remove…", source: "apple", remove: true,
+    description: "Deletes the bridge's address and token here, and the patched builds for its stream. The bridge on your Mac stays." },
+
+  { key: "sound", type: "source", source: "sound", name: "omarock's sound output", label: "omarock's sound output", switchless: true,
+    description: "Everything omarock plays goes into one output, with one volume, and never moves to another.",
+    setUpDescription: "Optional, and most don't need it: everything omarock plays goes into one output you pick, with one volume, and never moves to another. It matters when some output must never carry music (a radio transmitter's audio interface, say)." },
+  { key: "soundUpdate", type: "action", source: "sound", name: "omarock's sound output", when: "fix" },
+  { key: "soundRemove", type: "action", label: "Remove omarock's sound output", button: "Remove…", source: "sound", remove: true,
+    description: "omarock then plays into your default output, and follows it when that changes." },
 
   { key: "closeOnLeave", type: "boolean", label: "Close the panel when the pointer leaves it", defaultValue: true },
   { key: "maxLabelWidth", type: "integer", label: "How wide the song gets on the bar",
@@ -72,18 +98,24 @@ var schema = [
 ]
 
 var groups = [
-  { title: "SOURCES", keys: ["radio", "radioState", "spotify", "appleMusic", "siriusXM", "lookup"] },
-  { title: "YOUR MUSIC", keys: ["musicFolder"] },
-  { title: "SIRIUSXM", keys: ["sxmUser", "sxmPassword"] },
-  { title: "SPOTIFY", keys: ["spotifyClient", "soloistKey", "spotifyLogin"] },
-  { title: "APPLE MUSIC", keys: ["appleBridge", "appleStream", "bridgeToken", "appleIdleStop", "appleRejoin"] },
+  { title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioState", "lookup"] },
+  { title: "SPOTIFY", keys: ["spotify", "spotifyUpdate", "spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"] },
+  { title: "SIRIUSXM", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
+  { title: "APPLE MUSIC", keys: ["appleMusic", "appleUpdate", "appleBridge", "appleStream", "bridgeToken", "appleIdleStop",
+    "appleRejoin", "appleRemove"] },
+  { title: "SOUND", keys: ["sound", "soundUpdate", "soundRemove"] },
   { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "tuiCommand"] },
   { title: "ADVANCED", keys: ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile"] }
 ]
 
+// The piece ./install sets up for a row's source, and back.
+var pieces = { local: "", spotify: "spotify", sxm: "siriusxm", apple: "apple-music", sound: "sound" }
+
 // The settings kept in settings.json (not accounts, actions or the folder).
+// A source's switch is one; the sound output's row has none.
 function stored(field) {
   return field.type === "boolean" || field.type === "string" || field.type === "integer" || field.type === "enum"
+    || (field.type === "source" && !field.switchless)
 }
 
 var defaults = (function() {
@@ -118,13 +150,47 @@ function withValue(file, key, v) {
   return out
 }
 
-// The rows to show: a row with a source only while it's switched on
-// (sources: { sxm: true, spotify: false, apple: true }).
-function shown(sources) {
-  return schema.filter(function(field) { return !field.source || sources[field.source] === true })
+function copy(field, changes) {
+  var out = {}
+  for (var k in field) out[k] = field[k]
+  for (var c in changes) out[c] = changes[c]
+  return out
+}
+
+// The rows to show, as the pieces are now. states: per source (local,
+// spotify, sxm, apple, sound) { setUp, update, attention }: set up or not,
+// an update waiting, and what's wrong (or "").
+//   - a source row: Set up… until it's set up, then its switch (the sound
+//     output: a line, with no control);
+//   - the source's other rows: once it's set up;
+//   - its Update or Fix row: once set up, while it needs one (Fix, when
+//     something's wrong, comes before Update);
+//   - local music's Set up: only while mpd can't be reached.
+function shown(states) {
+  states = states || {}
+  var out = []
+  schema.forEach(function(field) {
+    var st = field.source ? (states[field.source] || {}) : {}
+    if (field.type === "source") {
+      if (st.setUp) out.push(copy(field, { type: field.switchless ? "info" : "boolean" }))
+      else out.push(copy(field, { type: "action", button: "Set up…", description: field.setUpDescription }))
+    } else if (field.when === "missing") {
+      if (!st.setUp) out.push(field)
+    } else if (field.when === "fix") {
+      if (!st.setUp || !(st.attention || st.update)) return
+      out.push(st.attention
+        ? copy(field, { label: "Set " + field.name + " up again", button: "Fix…",
+          description: "Runs its setup again, in a terminal: it carries on with whatever's missing." })
+        : copy(field, { label: "Update " + field.name, button: "Update…",
+          description: st.update === true ? "This copy of omarock has a newer version than the one running here." : st.update }))
+    } else if (!field.source || st.setUp) {
+      out.push(field)
+    }
+  })
+  return out
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { schema: schema, groups: groups, defaults: defaults, stored: stored, value: value,
+  module.exports = { schema: schema, groups: groups, pieces: pieces, defaults: defaults, stored: stored, value: value,
     parse: parse, withValue: withValue, shown: shown }
 }
