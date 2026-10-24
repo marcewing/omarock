@@ -17,6 +17,10 @@ The examples use `100.64.0.10` for the Mac's Tailscale address.
   string kept in `~/Library/Application Support/omarock-bridge/token` on the Mac
   and in `~/.config/omarock/bridge-token` on the Linux machine. A wrong or missing
   token gets 401.
+- Every request also carries `X-Omarock-Client: <machine name>`, the contents of
+  `/etc/hostname` (`framework`, `dellxps`), so the bridge knows which machine it plays
+  for (see **One machine at a time**). Letters, digits, `-`, `.` and `_`, at most 64;
+  anything else counts as no header.
 - Errors: a non-2xx status and `{"error": "what went wrong, in a sentence"}`.
   Use 400 for bad input, 404 for an unknown id, 409 if MusicKit isn't
   authorized or there's no subscription, and 502 if Apple's API failed.
@@ -206,11 +210,12 @@ skipped, and later detail responses mark them `"playable": false`.
   "queueOffset": 0,                        // index of queue[0] in the whole queue;
                                            // queueIndex is in the whole queue too, so the
                                            // current song is queue[queueIndex - queueOffset]
-  "queueLength": 23, "shuffle": false, "repeat": "off" }
+  "queueLength": 23, "shuffle": false, "repeat": "off",
+  "elsewhere": "dellxps" }                 // only to a machine the Mac isn't playing for
 ```
 
 `seq` goes up on every change omarock would show: the song, the state, the
-queue, shuffle or repeat. It does not change for position alone; omarock works
+queue, shuffle, repeat or the owner (below). It does not change for position alone; omarock works
 the position out from `position`, `positionAt` and `state`.
 
 Songs in `song` and `queue` carry `albumId` and `artistId`, which open with
@@ -221,6 +226,32 @@ Catalog songs also carry `inLibrary`, true or false as `/info` would answer it. 
 omitted while the bridge can't tell yet, and can arrive a moment after the song. When it
 lands or changes (an add, or the library index reloading), `seq` goes up. Library songs
 leave it out (`/info` tells one that's only on a playlist added to the library).
+
+### One machine at a time
+
+The Mac has one Apple Music queue, so it plays for one machine at a time: the
+**owner**, the machine that last started or took over playback. Requests that make the
+sender the owner, by its `X-Omarock-Client`:
+- `POST /play` with `mode` `play` (not `next` or `add`).
+- `POST /resume`, and `POST /queue/jump`.
+- `POST /toggle` when it resumes, or when it comes from another machine while the Mac
+  plays for the owner (then it doesn't pause: it takes playback over).
+
+A request without the header (omarock-am, older panels) leaves the owner as it is. The
+bridge forgets the owner when it restarts.
+
+To any other machine, while the Mac is playing:
+- `GET /status` (long polls too) and the transport replies carry
+  `"elsewhere": "<owner>"`. `state` stays the truth (`playing`); omarock shows it as
+  paused here and stops listening to the stream, without pausing the Mac.
+- `POST /pause`, `/next`, `/previous` and `/seek` answer 409
+  `{"error": "Apple Music is playing on dellxps: Play moves it here"}`, a sentence
+  omarock shows as is.
+
+While the Mac is paused or stopped, nobody gets `elsewhere` or a 409. Requests without
+the header never do. When the owner changes, `seq` goes up, so every waiting long poll
+returns, each answered for its own machine. Everything else (shuffle, repeat, adding to
+the queue, the library, playlists, `/info`) works the same from any machine.
 
 ## Behaviour
 

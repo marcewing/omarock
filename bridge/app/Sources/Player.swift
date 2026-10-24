@@ -5,13 +5,14 @@ import MusicKit
 
 /// ApplicationMusicPlayer, the status long poll, and the keep-awake assertion.
 /// `seq` goes up on every change omarock would show (song, state, queue, shuffle,
-/// repeat), never for position alone.
+/// repeat, the owner), never for position alone.
 @MainActor
 final class Player {
     private let player = ApplicationMusicPlayer.shared
     private(set) var seq = 1
     private var fingerprint = ""
-    private var waiters: [Int: ([String: Any]) -> Void] = [:]
+    /// Long polls, with the client each asked for (X-Omarock-Client).
+    private var waiters: [Int: (client: String?, respond: ([String: Any]) -> Void)] = [:]
     private var nextWaiter = 0
     private var subscriptions: Set<AnyCancellable> = []
     private var timer: Timer?
@@ -37,6 +38,29 @@ final class Player {
 
     var isPlaying: Bool { player.state.playbackStatus == .playing }
 
+    // MARK: The owner
+
+    /// The client (X-Omarock-Client, a machine name) that last started or took over
+    /// playback. The Mac plays for one machine at a time; the others are told it plays
+    /// elsewhere, and can't pause or skip it.
+    private(set) var owner: String?
+
+    /// Takes playback over for `client`; nil (a request without the header) leaves it.
+    func setOwner(_ client: String?) {
+        guard let client, client != owner else { return }
+        Log.info("player: now playing for \(client)\(owner.map { " (was \($0))" } ?? "")")
+        owner = client
+        changed = true
+        check()
+    }
+
+    /// The owner, to another client while the Mac plays; nil to the owner, to a request
+    /// without the header, and while paused.
+    func elsewhere(for client: String?) -> String? {
+        guard let client, let owner, owner != client, stateName == "playing" else { return nil }
+        return owner
+    }
+
     // MARK: Status
 
     func snapshot() -> [String: Any] {
@@ -55,6 +79,15 @@ final class Player {
             "repeat": repeatName,
         ]
         if let song = player.queue.currentEntry.flatMap({ song(of: $0) }) { status["song"] = normalize(song) }
+        return status
+    }
+
+    /// The status as `client` sees it: with `elsewhere` when the Mac plays for another.
+    func snapshot(for client: String?) -> [String: Any] { seen(snapshot(), by: client) }
+
+    private func seen(_ status: [String: Any], by client: String?) -> [String: Any] {
+        var status = status
+        status["elsewhere"] = elsewhere(for: client)
         return status
     }
 
@@ -85,16 +118,16 @@ final class Player {
     }
 
     /// Answers at once unless `since` is the current seq; then waits up to 25 s for a change.
-    func status(since: Int?, respond: @escaping ([String: Any]) -> Void) {
+    func status(since: Int?, client: String?, respond: @escaping ([String: Any]) -> Void) {
         check()
-        guard let since, since == seq else { return respond(snapshot()) }
+        guard let since, since == seq else { return respond(snapshot(for: client)) }
         let id = nextWaiter
         nextWaiter += 1
-        waiters[id] = respond
+        waiters[id] = (client, respond)
         DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, let waiter = self.waiters.removeValue(forKey: id) else { return }
-                waiter(self.snapshot())
+                waiter.respond(self.snapshot(for: waiter.client))
             }
         }
     }
@@ -193,8 +226,11 @@ final class Player {
         for _ in 0..<20 where !isPlaying { try await Task.sleep(nanoseconds: 50_000_000) }
     }
 
-    func toggle() async throws {
-        if isPlaying { await pauseSettled() } else { try await resume() }
+    /// Pauses, or resumes; from a client the Mac isn't playing for, it takes playback over.
+    func toggle(for client: String?) async throws {
+        if isPlaying, elsewhere(for: client) == nil { return await pauseSettled() }
+        if !isPlaying { try await resume() }
+        setOwner(client)
     }
 
     func next() async throws {
@@ -268,7 +304,7 @@ final class Player {
             let pending = waiters
             waiters.removeAll()
             let state = snapshot()
-            for waiter in pending.values { waiter(state) }
+            for waiter in pending.values { waiter.respond(seen(state, by: waiter.client)) }
         }
         holdAwake(isPlaying)
     }

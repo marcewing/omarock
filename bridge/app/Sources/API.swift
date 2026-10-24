@@ -88,11 +88,12 @@ final class API {
                                                     query: request.query, library: library))
         }
         guard authorized(request) else { throw APIError(status: 401, message: "Missing or wrong bearer token.") }
+        let client = Self.client(request)
 
         // Endpoints that work without MusicKit.
         switch (method, route) {
         case ("GET", ["status"]):
-            return player.status(since: request.query["since"].flatMap(Int.init)) { respond(.json(200, $0)) }
+            return player.status(since: request.query["since"].flatMap(Int.init), client: client) { respond(.json(200, $0)) }
         case ("POST", ["authorize"]):
             // Not in the contract: asks macOS for Apple Music access (a dialog on the Mac).
             let status = await MusicAuthorization.request()
@@ -130,22 +131,34 @@ final class API {
             return respond(.json(200, try await library.appendToPlaylist(MusicItemID(route[2]), songs: songs)))
         }
 
+        // Only the machine the Mac plays for can pause or skip it; Play takes it over.
+        if method == "POST", [["pause"], ["next"], ["previous"], ["seek"]].contains(route),
+           let owner = player.elsewhere(for: client) {
+            throw APIError(status: 409, message: "Apple Music is playing on \(owner): Play moves it here")
+        }
+
         switch (method, route) {
         // Transport
         case ("POST", ["play"]):
             let items = try (body["items"] as? [Any] ?? []).map(ItemRef.init)
             guard !items.isEmpty else { throw APIError.badRequest("items is empty.") }
             let songs = try await library.expand(items) { player.queueSongs }
-            try await player.play(songs, start: body["start"] as? Int ?? 0, mode: body["mode"] as? String ?? "play")
+            let mode = body["mode"] as? String ?? "play"
+            try await player.play(songs, start: body["start"] as? Int ?? 0, mode: mode)
+            if mode == "play" { player.setOwner(client) }
         case ("POST", ["pause"]): await player.pauseSettled()
-        case ("POST", ["resume"]): try await player.resume()
-        case ("POST", ["toggle"]): try await player.toggle()
+        case ("POST", ["resume"]):
+            try await player.resume()
+            player.setOwner(client)
+        case ("POST", ["toggle"]): try await player.toggle(for: client)
         case ("POST", ["next"]): try await player.next()
         case ("POST", ["previous"]): try await player.previous()
         case ("POST", ["seek"]):
             guard let position = (body["position"] as? NSNumber)?.doubleValue else { throw APIError.badRequest("position is required.") }
             player.seek(to: position)
-        case ("POST", ["queue", "jump"]): try await player.jump(to: try int(body, "index"))
+        case ("POST", ["queue", "jump"]):
+            try await player.jump(to: try int(body, "index"))
+            player.setOwner(client)
         case ("POST", ["queue", "remove"]): try player.remove(at: try int(body, "index"))
         case ("POST", ["shuffle"]):
             guard let on = body["on"] as? Bool else { throw APIError.badRequest("on is required.") }
@@ -208,7 +221,7 @@ final class API {
             throw APIError.notFound("No such endpoint.")
         }
         // Transport endpoints answer with the new status.
-        respond(.json(200, player.snapshot()))
+        respond(.json(200, player.snapshot(for: client)))
     }
 
     private func health() -> [String: Any] {
@@ -227,6 +240,14 @@ final class API {
     }
 
     // MARK: Request helpers
+
+    /// The machine a request comes from (X-Omarock-Client: its hostname), if it says.
+    private static func client(_ request: HTTPRequest) -> String? {
+        guard let name = request.headers["x-omarock-client"]?.trimmingCharacters(in: .whitespaces),
+              !name.isEmpty, name.count <= 64, name.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "-._".contains($0)) })
+        else { return nil }
+        return name
+    }
 
     /// Constant-time comparison of the bearer token.
     private func authorized(_ request: HTTPRequest) -> Bool {
