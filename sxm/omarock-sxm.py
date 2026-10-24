@@ -28,7 +28,7 @@ from aiosxm import SxmClient
 from aiosxm.models import build_image_url
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 HOST, PORT = "127.0.0.1", int(os.environ.get("OMAROCK_SXM_PORT", "8720"))
 CONFIG = Path(os.environ.get("OMAROCK_SXM_CONFIG", Path.home() / ".config/omarock/siriusxm.json"))
 BITRATE = "256k"
@@ -47,8 +47,34 @@ META_INTERVAL = 8192
 # mpd's HTTP input gives up on a connection that idle (it ends the "song").
 LEAD = 6.0
 SAMPLE_RATES = (96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350)
+# The login at start waits until SiriusXM's name resolves, for up to
+# NETWORK_WAIT seconds. Started with the session, before the network (a boot),
+# it failed, and the first tune had to log in.
+LOGIN_HOST = "api.edge-gateway.siriusxm.com"
+NETWORK_WAIT = 300
+NETWORK_POLL = 2
 
 log = logging.getLogger("omarock-sxm")
+
+
+async def wait_for_network(host, limit):
+    """Until host resolves, for up to limit seconds: whether it did."""
+    loop = asyncio.get_running_loop()
+    deadline = time.monotonic() + limit
+    waiting = False
+    while True:
+        try:
+            await loop.getaddrinfo(host, 443)
+            if waiting:
+                log.info("the network is up")
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            if not waiting:
+                log.info("waiting for the network (%s doesn't resolve yet)", host)
+                waiting = True
+            await asyncio.sleep(NETWORK_POLL)
 
 
 def art_url(key, base):
@@ -282,6 +308,7 @@ class Service:
 
     async def warm(self):
         """Log in and load the channel catalog at start, so the first tune is quick."""
+        await wait_for_network(LOGIN_HOST, NETWORK_WAIT)
         try:
             await (await self.client()).get_channels()
             log.info("channel catalog loaded")

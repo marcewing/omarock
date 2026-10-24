@@ -6,13 +6,16 @@
 # tools/update-soloist (Spotify's builds expire after 90 days: an expired one
 # exits with 10, which isn't restarted). Without its key it says so and stops
 # (78), rather than printing its usage every 5 s.
+# It waits for the network first: Soloist tries to log in once, at start, and a
+# session started before the network (a boot) stayed logged out. A user unit
+# can't wait for network-online.target, which is the system's.
 [Unit]
 Description=Spotify's Soloist for omarock (a Connect speaker playing into the omarock bus)
-After=pipewire.service omarock-bus.service network-online.target
+After=pipewire.service omarock-bus.service
 Wants=omarock-bus.service
 
 [Service]
-ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key "$$(cat "$$key")" --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 --pipewire-device omarock --initial-volume 100 --ws 127.0.0.1:8731'
+ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; until getent hosts apresolve.spotify.com >/dev/null; do [ -n "$$waiting" ] || echo "omarock-soloist: waiting for the network" >&2; waiting=1; sleep 2; done; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key "$$(cat "$$key")" --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 --pipewire-device omarock --initial-volume 100 --ws 127.0.0.1:8731'
 Restart=on-failure
 RestartSec=5
 RestartPreventExitStatus=10 78

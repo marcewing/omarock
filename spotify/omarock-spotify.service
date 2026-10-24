@@ -5,7 +5,7 @@
 # ~/.local/share/omarock/spotify/ (never the working tree).
 [Unit]
 Description=omarock-spotify: Spotify for omarock (Soloist and the Web API)
-After=omarock-soloist.service network-online.target
+After=omarock-soloist.service
 Wants=omarock-soloist.service
 
 [Service]

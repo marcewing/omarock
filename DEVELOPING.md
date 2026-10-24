@@ -212,6 +212,11 @@ opened; `--only fresh-start` checks that.
   from an idle machine they reach another one. omarock-spotify moves the
   playback here with the Web API (`PUT /me/player`, this device's id) instead,
   and refuses pause, skip and seek while another device plays.
+- Soloist logs in once, at start. Started before the network (a boot), it says
+  "login failed: make sure --api-key is valid" and stays logged out. Its unit
+  waits until Spotify's name resolves. omarock-sxm's login at start waits the
+  same way. A user unit can't use `network-online.target`: that's the system
+  manager's, and the user manager has no such unit.
 
 **Spotify's Web API, for an app in Development mode** (2026): search returns at
 most 10 per page; no genres, browse categories or artist top tracks; the songs of

@@ -1,5 +1,5 @@
-"""The relay's listeners: run with the service's venv,
-~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py"""
+"""The relay's listeners, and the login's wait for the network: run with the
+service's venv, ~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py"""
 import asyncio
 import importlib.util
 from pathlib import Path
@@ -30,6 +30,32 @@ async def main():
     assert fresh.empty() and relay.recent is None, "a restarted relay doesn't replay the old segment"
     await relay.task
     print("ok: relay listeners")
+    await network()
+
+
+async def network():
+    """No network yet (a boot): it waits, asking again, until the name resolves."""
+    loop = asyncio.get_running_loop()
+    asked = []
+
+    async def getaddrinfo(host, port):
+        asked.append(host)
+        if len(asked) < 3:
+            raise OSError("Temporary failure in name resolution")
+        return [("address",)]
+    loop.getaddrinfo = getaddrinfo
+    sxm.NETWORK_POLL = 0.01
+    assert await sxm.wait_for_network("example.com", 5) is True, "the network came up"
+    assert asked == ["example.com"] * 3, "asked until it resolved"
+    asked.clear()
+
+    async def never(host, port):
+        asked.append(host)
+        raise OSError("Temporary failure in name resolution")
+    loop.getaddrinfo = never
+    assert await sxm.wait_for_network("example.com", 0.05) is False, "no network: it gives up"
+    assert len(asked) >= 2, "after asking more than once"
+    print("ok: the login waits for the network")
 
 
 asyncio.run(main())

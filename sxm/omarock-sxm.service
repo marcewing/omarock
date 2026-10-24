@@ -1,9 +1,9 @@
 # omarock-sxm: SiriusXM's live channels as streams for mpd (sxm/README.md).
 # Installed by tools/install-sxm from a commit, into ~/.local/share/omarock/sxm/.
+# Its login at start waits for the network itself: a user unit can't wait for
+# network-online.target, which is the system's.
 [Unit]
 Description=omarock SiriusXM: live channels as streams for mpd (127.0.0.1:8720)
-After=network-online.target
-Wants=network-online.target
 
 [Service]
 ExecStart=%h/.local/share/omarock/sxm-venv/bin/python %h/.local/share/omarock/sxm/omarock-sxm.py
