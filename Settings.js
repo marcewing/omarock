@@ -87,7 +87,8 @@ var schema = [
   { key: "soundRemove", type: "action", label: "Remove omarock's sound output", button: "Remove…", source: "sound", remove: true,
     description: "omarock then plays into your default output, and follows it when that changes." },
 
-  { key: "closeOnLeave", type: "boolean", label: "Close the panel when the pointer leaves it", defaultValue: true },
+  { key: "closeOnLeave", type: "boolean", label: "Close the panel when the pointer leaves it", defaultValue: true,
+    description: "3 seconds after it leaves, unless it comes back." },
   { key: "maxLabelWidth", type: "integer", label: "How wide the song gets on the bar",
     min: 80, max: 600, step: 10, defaultValue: 300, description: "In pixels." },
   { key: "tuiCommand", type: "string", label: "Terminal player", defaultValue: "ncmpcpp",

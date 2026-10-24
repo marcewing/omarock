@@ -92,7 +92,7 @@ BarWidget {
     anchors.centerIn: parent
     spacing: Style.space(4)
 
-    // The panel opens under this: the cover, or the music note.
+    // The panel opens under this: the cover, or omarock's record.
     Item {
       id: lead
       width: root.showSong ? root.artSize : note.implicitWidth
@@ -105,7 +105,7 @@ BarWidget {
         anchors.fill: parent
         visible: !root.showSong
         bar: root.bar
-        text: "󰝚"
+        text: ""
         dimmed: !root.connected
         tooltipText: root.tooltipText
         onPressed: function(mouseButton) { root.press(mouseButton) }

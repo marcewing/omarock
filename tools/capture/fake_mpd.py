@@ -558,15 +558,25 @@ class Handler(socketserver.StreamRequestHandler):
                     reply.append(f"ACK [2@0] {{{commands[0][0]}}} {error}")
             self.wfile.write(("\n".join(reply) + "\n").encode("utf-8"))
 
+    def finish(self):
+        with self.server.fake.lock:
+            self.server.fake.events.pop(self, None)
+        super().finish()
+
     def idle(self, wanted):
         fake = self.server.fake
         with fake.lock:
-            fake.events[self] = set()
+            # Like mpd, a connection's changes are kept from one idle to the
+            # next: one that came in between is answered at once. (Starting
+            # afresh at each idle lost them, and the panel kept a deleted
+            # stream as its current song.)
+            pending = fake.events.setdefault(self, set())
             # omarock never sends noidle (it idles on its own connection), so
             # this simply waits for a change.
-            while not (fake.events[self] & set(wanted)):
+            while not (pending & set(wanted)):
                 fake.lock.wait()
-            hits = sorted(fake.events.pop(self, set()) & set(wanted))
+            hits = sorted(pending & set(wanted))
+            pending.difference_update(hits)
         self.wfile.write(("".join(f"changed: {s}\n" for s in hits) + "OK\n").encode("utf-8"))
 
 

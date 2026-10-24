@@ -1610,7 +1610,8 @@ def real_radio_scenario(host, output, socket_path, failures):
 
 
 def leave_scenario(host, failures):
-    """Closing when the pointer leaves the panel."""
+    """Closing when the pointer leaves the panel: 3 s later (Marc, 10-24:
+    "about a 3 second delay"), unless it comes back."""
     host.call("open")
     wait_for(lambda: host.state()["opened"], "open")
     host.settle(.5)
@@ -1625,13 +1626,17 @@ def leave_scenario(host, failures):
     host.settle(.7)
     check(host.state()["opened"], "moving over the rows keeps it open", failures)
     host.hover(w + 40, 20)
-    host.settle(.15)
+    host.settle(2)
     host.hover(w / 2, h / 2)
-    host.settle(.7)
-    check(host.state()["opened"], "coming back within the delay keeps it open", failures)
+    host.settle(3.5)
+    check(host.state()["opened"], "coming back 2 s later keeps it open, for good", failures)
     host.hover(w + 40, 20)
-    wait_for(lambda: not host.state()["opened"], "closes on leave", timeout=3)
-    check(True, "leaving the panel closes it", failures)
+    left = time.monotonic()
+    host.settle(2)
+    check(host.state()["opened"], "2 s after leaving it's still open", failures)
+    wait_for(lambda: not host.state()["opened"], "closes on leave", timeout=6)
+    waited = time.monotonic() - left
+    check(2.8 <= waited <= 4.5, f"leaving the panel closes it, {waited:.1f} s later", failures)
 
     # Compact from the expanded panel: the card shrinks from under the pointer.
     host.call("open")
@@ -1648,7 +1653,7 @@ def leave_scenario(host, failures):
     host.hover(card["width"] / 2, card["height"] / 2)
     host.settle(.3)
     host.hover(card["width"] + 40, 20)
-    wait_for(lambda: not host.state()["opened"], "closes on leave after Compact", timeout=3)
+    wait_for(lambda: not host.state()["opened"], "closes on leave after Compact", timeout=6)
 
     host.call("settings", json.dumps({"closeOnLeave": False}))
     host.call("open")
@@ -1657,7 +1662,7 @@ def leave_scenario(host, failures):
     host.settle(.3)
     check(host.state()["pointerArmed"], "the pointer over the panel again", failures)
     host.hover(card["width"] + 40, 20)
-    host.settle(.8)
+    host.settle(3.5)
     check(host.state()["opened"], "closeOnLeave off: it stays open", failures)
     host.call("settings", "{}")
     host.call("close")

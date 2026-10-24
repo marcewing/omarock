@@ -140,7 +140,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.8.4"
+  readonly property string version: "0.8.5"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -379,19 +379,25 @@ Panel {
     })
   }
 
-  // "Playing · song 3 of 12"; stateText adds "Apple Music · " in Apple Music
-  // mode, except under the header, where the switch beside it says so.
-  readonly property string playStateText: {
+  // "Playing · song 3 of 12" (playStateWord, then queuePlace); stateText
+  // adds "Apple Music · " in Apple Music mode, except under the header, where
+  // the switch beside it says so. The compact header leaves out the song.
+  readonly property string playStateWord: {
     if (!client.ready) return "Not connected"
     if (root.bridgeMode && !root.bridge.ready) return "Not connected"
     if (root.sxmMode && !sxm.available) return "SiriusXM isn't running"
     var s = root.player.status
-    var word = s.state === "play" ? "Playing" : s.state === "pause" ? "Paused" : "Stopped"
-    if (s.song >= 0 && s.queueLength > 0) word += " · song " + (s.song + 1) + " of " + s.queueLength
-    return word
+    return s.state === "play" ? "Playing" : s.state === "pause" ? "Paused" : "Stopped"
   }
-  readonly property string stateText: (root.bridgeMode ? root.bridge.service + " · " : root.sxmMode ? "SiriusXM · "
-    : root.radioMode ? "Radio · " : "") + root.playStateText
+  readonly property string queuePlace: {
+    if (!client.ready || (root.bridgeMode && !root.bridge.ready) || (root.sxmMode && !sxm.available)) return ""
+    var s = root.player.status
+    return s.song >= 0 && s.queueLength > 0 ? " · song " + (s.song + 1) + " of " + s.queueLength : ""
+  }
+  readonly property string playStateText: root.playStateWord + root.queuePlace
+  readonly property string sourcePrefix: root.bridgeMode ? root.bridge.service + " · " : root.sxmMode ? "SiriusXM · "
+    : root.radioMode ? "Radio · " : ""
+  readonly property string stateText: root.sourcePrefix + root.playStateText
 
   // The queue's total time, when all of it is listed.
   readonly property int queueSeconds: {
@@ -788,7 +794,7 @@ Panel {
     return name ? name + " didn't play: " + reason : what + " stopped: " + reason
   }
 
-  // The pointer left the card: close after a moment, unless it comes back.
+  // The pointer left the card: close 3 s later, unless it comes back.
   // On opening, and when the card resizes under a still pointer (Compact, a
   // shorter list), this waits until the pointer is over the card.
   function pointerLeft() {
@@ -2862,7 +2868,7 @@ Panel {
 
   Timer {
     id: leaveDelay
-    interval: 400
+    interval: 3000
     onTriggered: if (root.opened && !cardHover.hovered) root.close()
   }
 
@@ -3103,7 +3109,7 @@ Panel {
     Text {
       id: glyph
       textFormat: Text.PlainText
-      text: "󰝚"
+      text: ""
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.display
@@ -3111,12 +3117,14 @@ Panel {
   }
 
   component HeaderLabels: Column {
+    // The compact header: the play state alone, no "· song 3 of 12".
+    property bool brief: false
     spacing: Style.space(1)
 
     Text {
       textFormat: Text.PlainText
       width: parent.width
-      text: "Music"
+      text: "omarock"
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.title
@@ -3127,7 +3135,7 @@ Panel {
     Text {
       textFormat: Text.PlainText
       width: parent.width
-      text: (root.sources.length > 1 ? root.playStateText : root.stateText).toUpperCase()
+      text: ((root.sources.length > 1 ? "" : root.sourcePrefix) + (parent.brief ? root.playStateWord : root.playStateText)).toUpperCase()
       color: root.connected ? root.dim : Commons.Color.urgent
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
@@ -3680,6 +3688,7 @@ Panel {
 
         HeaderLabels {
           id: compactLabels
+          brief: true
           anchors.left: compactIcon.right
           anchors.leftMargin: Style.space(14)
           anchors.right: compactSource.visible ? compactSource.left : expandButton.left

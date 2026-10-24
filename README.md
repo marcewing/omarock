@@ -205,12 +205,12 @@ stay until you remove them too.
 
 - **The bar:** the album cover and "Artist — Song" (up to 300 px: the
   `maxLabelWidth` setting). A click opens the panel; a middle click plays or
-  pauses. With nothing queued it shows the music note, and a middle click on it
+  pauses. With nothing queued it shows a record, and a middle click on it
   plays a song picked at random from your library (so does Play in the panel).
 - **The panel:** now playing, with the cover, a seek bar, transport (shuffle,
   previous, play/pause, next, repeat) and volume, then search and the queue.
   **Expand** (`e`) makes it a bigger, two-column view in the same popup. It
-  closes when the pointer leaves it, after a moment (the `closeOnLeave` setting).
+  closes 3 seconds after the pointer leaves it, unless it comes back (the `closeOnLeave` setting).
   Open it again and it's as you left it: the search, where you'd browsed to, the
   cursor, an info card or the playlist picker, and the keys where they were (a
   setting you were typing is dropped, not saved).
