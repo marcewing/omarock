@@ -11,6 +11,12 @@
 //   "action": a button (signing in to Spotify, setting a source up);
 //   "folder": mpd's music folder, in mpd.conf (changed after asking).
 //
+// A few settings are in the file only, never on the screen: `socket`
+// (mpd's, which ./install sets when mpd listens somewhere else), and the
+// addresses the test harness points at its fakes, `spotifyService`,
+// `sxmService`, `radioBrowser` and `appleTokenFile`. Panel.qml gives each
+// its default.
+//
 // Spotify, SiriusXM, Apple Music and omarock's sound output are each set up
 // on their own (./install PIECE, which a button runs in a terminal). A
 // "source" row is that piece's button until it's set up, then its switch
@@ -83,18 +89,7 @@ var schema = [
   { key: "maxLabelWidth", type: "integer", label: "How wide the song gets on the bar",
     min: 80, max: 600, step: 10, defaultValue: 300, description: "In pixels." },
   { key: "tuiCommand", type: "string", label: "Terminal player", defaultValue: "ncmpcpp",
-    description: "What t and the TUI button open." },
-
-  { key: "socket", type: "string", label: "mpd's socket", defaultValue: "",
-    description: "Empty: $XDG_RUNTIME_DIR/mpd/socket." },
-  { key: "spotifyService", type: "string", label: "omarock-spotify's address", defaultValue: "",
-    description: "Empty: http://127.0.0.1:8730." },
-  { key: "sxmService", type: "string", label: "omarock-sxm's address", defaultValue: "",
-    description: "Empty: http://127.0.0.1:8720." },
-  { key: "radioBrowser", type: "string", label: "Radio Browser server", defaultValue: "",
-    description: "Empty: one of its servers, picked at random." },
-  { key: "appleTokenFile", type: "string", label: "The bridge's token file", defaultValue: "",
-    description: "Empty: ~/.config/omarock/bridge-token." }
+    description: "What t and the TUI button open." }
 ]
 
 var groups = [
@@ -104,8 +99,7 @@ var groups = [
   { title: "APPLE MUSIC", keys: ["appleMusic", "appleUpdate", "appleBridge", "appleStream", "bridgeToken", "appleIdleStop",
     "appleRejoin", "appleRemove"] },
   { title: "SOUND", keys: ["sound", "soundUpdate", "soundRemove"] },
-  { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "tuiCommand"] },
-  { title: "ADVANCED", keys: ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile"] }
+  { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "tuiCommand"] }
 ]
 
 // The piece ./install sets up for a row's source, and back.

@@ -77,6 +77,10 @@ everything else:
   The test HOME starts with Spotify and SiriusXM "set up"; `--only setup` sets
   pieces up and removes them through the settings.
 
+The panel finds the fakes through settings that are in no settings screen,
+only in the file (Settings.js): `spotifyService`, `sxmService`, `radioBrowser`
+and `appleTokenFile`. Pointing them elsewhere on a real machine works the same.
+
 It drives the panel with real key presses (QtTest's event injector) and clicks,
 saves screenshots, and fails on any QML warning from the plugin, or if the panel
 sends mpd an output command.

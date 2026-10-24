@@ -11,6 +11,15 @@ test("a value comes from settings.json, else the widget's settings, else its def
   assert.equal(Settings.value({ appleIdleStop: 0 }, { appleIdleStop: 60 }, "appleIdleStop"), 0)
 })
 
+test("the file-only settings aren't on the screen, and still apply from the file", () => {
+  const all = { local: { setUp: true }, spotify: { setUp: true }, sxm: { setUp: true }, apple: { setUp: true }, sound: { setUp: true } }
+  const fileOnly = ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile"]
+  assert.ok(!keys(Settings.shown(all)).some(k => fileOnly.includes(k)))
+  assert.ok(!Settings.groups.some(g => g.title === "ADVANCED"))
+  assert.equal(Settings.value({ socket: "/run/mpd/socket" }, {}, "socket", ""), "/run/mpd/socket")
+  assert.equal(Settings.value({}, { sxmService: "http://127.0.0.1:9" }, "sxmService", ""), "http://127.0.0.1:9")
+})
+
 test("the file parses to settings, or none; withValue changes one and keeps the rest", () => {
   const file = Settings.parse('{"radio": true, "theirs": 1}')
   assert.deepEqual(Settings.withValue(file, "spotify", false), { radio: true, theirs: 1, spotify: false })

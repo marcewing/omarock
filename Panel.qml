@@ -140,7 +140,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.8.1"
+  readonly property string version: "0.8.2"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -261,14 +261,9 @@ Panel {
   }
   // What an empty text setting means.
   readonly property var settingPlaceholders: ({
-    socket: Quickshell.env("XDG_RUNTIME_DIR") + "/mpd/socket",
     radioState: "none: no local stations",
     appleBridge: root.appleConfig.bridge ? "from apple.json: " + root.appleConfig.bridge : "http://your-mac:8710",
-    appleStream: root.appleConfig.stream ? "from apple.json: " + root.appleConfig.stream : "http://your-mac:8000/omarock.ogg",
-    appleTokenFile: "~/.config/omarock/bridge-token",
-    spotifyService: "http://127.0.0.1:8730",
-    sxmService: "http://127.0.0.1:8720",
-    radioBrowser: "one of Radio Browser's servers"
+    appleStream: root.appleConfig.stream ? "from apple.json: " + root.appleConfig.stream : "http://your-mac:8000/omarock.ogg"
   })
   // Under each source: a setup running in a terminal (or one that didn't
   // finish), else off, else what's wrong, else how it's doing.

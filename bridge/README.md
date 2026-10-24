@@ -173,7 +173,6 @@ Then switch Apple Music on in omarock's settings (`,` in the panel), where the
 token can be pasted later too. omarock's other settings for it, there or in
 `~/.config/omarock/settings.json`:
 - `appleBridge` and `appleStream`: the addresses, instead of `apple.json`.
-- `appleTokenFile`: the token, if not in `~/.config/omarock/bridge-token`.
 - `appleRejoin` (on by default): reconnects mpd to the stream after each change, so it
   stays near live.
 - `appleIdleStop`: after the bridge has been paused this many seconds, mpd lets go of the

@@ -324,9 +324,9 @@ A change saves at once.
   those still apply until you change them.)
 - **Accounts and keys** (the SiriusXM login, Spotify's Client ID and Soloist
   key, the bridge's token) each keep their own file in `~/.config/omarock`,
-  readable only by you. The settings screen never shows a password or key: its
-  field starts empty and says whether one is set. `tools/omarock-account` does
-  the same from a terminal.
+  readable only by you. The settings screen never shows a password or key: one
+  that's set shows as dots, and a new one replaces it. `tools/omarock-account`
+  does the same from a terminal.
 - **The music folder** is mpd's `music_directory`. Changing it asks first, then
   keeps a copy of mpd.conf, changes only that line, and restarts mpd.
 
@@ -338,22 +338,21 @@ A change saves at once.
 | `appleMusic` | off | Apple Music ([bridge/README.md](bridge/README.md)) |
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |
 | `lookup` | Apple Music | Where a click on the radio's song looks it up: `Apple Music` or `Spotify` (the other one if that one is off) |
-| `socket` | `$XDG_RUNTIME_DIR/mpd/socket` | mpd's unix socket |
 | `tuiCommand` | `ncmpcpp` | The terminal player `t` opens |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |
 | `maxLabelWidth` | 300 | How wide the song gets on the bar, in pixels |
 | `appleBridge`, `appleStream` | from `~/.config/omarock/apple.json` | The Apple Music bridge's address, and its stream's |
-| `appleTokenFile` | `~/.config/omarock/bridge-token` | The bridge's token |
 | `appleIdleStop` | 60 | Seconds the Mac is paused before mpd lets go of its stream (0: never) |
 | `appleRejoin` | on | Reconnect mpd to the Apple Music stream after each change; turn off with the patched libFLAC ([patches/README.md](patches/README.md)) |
-| `spotifyService` | `http://127.0.0.1:8730` | omarock-spotify's address |
-| `sxmService` | `http://127.0.0.1:8720` | omarock-sxm's address |
-| `radioBrowser` | a Radio Browser server | A Radio Browser server to use |
+
+One more is in the file only: `socket`, mpd's unix socket (default
+`$XDG_RUNTIME_DIR/mpd/socket`). `./install` sets it when your mpd already listens
+somewhere else.
 
 ## Troubleshooting
 
 - **"Waiting for mpd…":** mpd isn't on the socket omarock looks at. Check `ls
-  $XDG_RUNTIME_DIR/mpd/socket` and `systemctl --user status mpd`, or set `socket`.
+  $XDG_RUNTIME_DIR/mpd/socket` and `systemctl --user status mpd`, or set `socket` in settings.json.
 - **No covers:** omarock reads `cover.jpg` (or `folder.png`, and the like) from each
   album's folder, through mpd. Folders without one show a note.
 - **A change didn't show up after updating:** `omarchy restart shell`.
