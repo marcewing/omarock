@@ -266,6 +266,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     list_tuning_scenario(host, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
+    elsewhere_scenario(host, socket_path, failures)
 
     # mpd goes away: the panel says so instead of failing silently.
     host.call("close")
@@ -3105,6 +3106,73 @@ def apple_idle_scenario(host, socket_path, failures):
     host.call("close")
 
 
+def elsewhere_scenario(host, socket_path, failures):
+    """Apple Music and Spotify play on one machine at a time: the one that
+    last pressed Play. Another machine taking over (the fakes' "elsewhere"):
+    here the card says where it plays, mpd stops listening to the Mac's
+    stream without pausing the Mac, skipping is refused, and Play takes it
+    back. The local sources aren't touched."""
+    def fake_elsewhere(base, name):
+        request = urllib.request.Request(base + "/v1/fake/elsewhere", data=json.dumps({"name": name}).encode(), method="POST",
+                                         headers={"Authorization": "Bearer fake-bridge-token", "Content-Type": "application/json"})
+        urllib.request.urlopen(request, timeout=5).read()
+
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    host.call("open")
+    to_source(host, "apple")
+    wait_for(lambda: host.state()["appleReady"] and host.state()["bar"]["playing"], "Apple Music playing")
+    host.settle(.5)
+    check(host.state()["clientName"] != "", "the panel knows this machine's name: " + host.state()["clientName"], failures)
+    # Play here: the bridge plays for this machine.
+    host.call("press", "Space")
+    wait_for(lambda: not host.state()["bar"]["playing"], "paused")
+    host.call("press", "Space")
+    wait_for(lambda: host.state()["bar"]["playing"] and mpd_state(socket_path)["state"] == "play", "playing here")
+    pauses = len(bridge_requests("/v1/pause"))
+
+    # Another machine presses Play: mpd here stops, the Mac plays on.
+    fake_elsewhere(url, "otherbox")
+    wait_for(lambda: host.state()["elsewhere"] == "otherbox", "the panel hears it plays on otherbox")
+    wait_for(lambda: mpd_state(socket_path)["state"] != "play", "mpd here stops listening")
+    host.settle(.5)
+    s = host.state()
+    check(not s["bar"]["playing"] and s["appleMode"] and s["playerExtra"] == "Playing on otherbox · Play moves it here",
+          "Apple Music on otherbox: paused here, still the source, the card says where: " + s["playerExtra"], failures)
+    check(len(bridge_requests("/v1/pause")) == pauses, "and the Mac isn't paused", failures)
+    host.call("press", "n")
+    wait_for(lambda: host.state()["notice"] == "Apple Music is playing on otherbox: Play moves it here", "n is refused, saying why")
+    # Play here takes it back.
+    host.call("press", "Space")
+    wait_for(lambda: host.state()["elsewhere"] == "" and mpd_state(socket_path)["state"] == "play", "Play takes it back")
+    check(host.state()["bar"]["playing"], "Play moves Apple Music back here: mpd plays the stream", failures)
+    # The media keys (mpd's own play) take it back too.
+    fake_elsewhere(url, "otherbox")
+    wait_for(lambda: mpd_state(socket_path)["state"] != "play", "mpd here stops listening again")
+    resumes = len(bridge_requests("/v1/resume"))
+    mpd_client(socket_path, "play")
+    wait_for(lambda: len(bridge_requests("/v1/resume")) > resumes and host.state()["elsewhere"] == "", "mpd's play takes it back")
+    check(len(bridge_requests("/v1/pause")) == pauses, "the Mac was never paused for the other machine", failures)
+
+    # Spotify: the other machine's Spotify plays, so it's paused here.
+    host.call("setSource", "spotify")
+    wait_for(lambda: host.state()["spotifyMode"] and host.state()["bar"]["playing"], "Spotify playing here")
+    fake_elsewhere(BRIDGE["spotify"], "otherbox")
+    wait_for(lambda: host.state()["elsewhere"] == "otherbox", "Spotify plays on otherbox")
+    s = host.state()
+    check(not s["bar"]["playing"] and s["spotifyMode"] and s["playerExtra"] == "Playing on otherbox · Play moves it here",
+          "Spotify on otherbox: paused here, the card says where: " + s["playerExtra"], failures)
+    host.call("press", "n")
+    wait_for(lambda: host.state()["notice"] == "Spotify is playing on otherbox: Play moves it here", "Spotify's n is refused")
+    host.call("press", "Space")
+    wait_for(lambda: host.state()["elsewhere"] == "" and host.state()["bar"]["playing"], "Play moves Spotify here")
+    check(True, "Play moves Spotify back here", failures)
+    to_source(host, "local")
+    host.call("close")
+    BRIDGE["config"].unlink()
+
+
 def list_tuning_scenario(host, failures):
     """Tuning a station or channel from the list used to jump the list back
     to the start; it should stay where it is, with the new one selected. For
@@ -3910,6 +3978,7 @@ def main():
                             elif name == "sources-switch": sources_switch_scenario(host, socket_path, failures)
                             elif name == "settings": settings_scenario(host, output, failures)
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
+                            elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)
                             elif name == "bus-volume": bus_volume_scenario(host, socket_path, failures)

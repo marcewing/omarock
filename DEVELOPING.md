@@ -203,6 +203,16 @@ opened; `--only fresh-start` checks that.
 - PipeWire reads `$HOME/.config/pipewire` even with `XDG_CONFIG_HOME` set, so a
   test PipeWire needs a HOME of its own.
 
+**Spotify's Soloist**
+- Soloist reports the account's playback wherever it plays: on another
+  machine, its status says playing while nothing plays here. `is_active` says
+  whether this Soloist is the device playing; omarock-spotify's `heard()` is
+  what plays here.
+- Soloist's own play, pause and skip act on whichever device is active, so
+  from an idle machine they reach another one. omarock-spotify moves the
+  playback here with the Web API (`PUT /me/player`, this device's id) instead,
+  and refuses pause, skip and seek while another device plays.
+
 **Spotify's Web API, for an app in Development mode** (2026): search returns at
 most 10 per page; no genres, browse categories or artist top tracks; the songs of
 other people's playlists aren't listed; an artist's albums come at most 10 a page.

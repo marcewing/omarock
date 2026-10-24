@@ -427,8 +427,10 @@ function songAsMpd(song) {
 }
 
 // The bridge's status, as mpd's status would have it. Volume is mpd's.
+// Playing on another machine (status.elsewhere) is paused here.
 function statusAsMpd(status, volume) {
-  var state = status.state === "playing" ? "play" : status.state === "paused" ? "pause" : "stop"
+  var state = status.state === "playing" && !status.elsewhere ? "play"
+    : status.state === "playing" || status.state === "paused" ? "pause" : "stop"
   return { state: state, volume: volume, elapsed: status.position || 0,
     duration: status.song ? status.song.duration || 0 : 0,
     song: status.song ? status.queueIndex : -1, songId: status.song ? songKey(status.song) : "",

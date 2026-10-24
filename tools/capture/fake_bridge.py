@@ -136,6 +136,13 @@ class Bridge:
         # before 0.4.2), and /v1/info says it isn't in the library until its
         # catalog copy is added (POST /v1/fake/orphan).
         self.orphan = False
+        # The machine it plays for (X-Omarock-Client), as the bridge 0.5 and
+        # omarock-spotify 0.2.3 tell it: to another, while playing, the
+        # status says where (and Spotify's says paused), and pause, skip and
+        # seek are refused; Play moves it. POST /v1/fake/elsewhere {name}:
+        # another machine pressed Play.
+        self.owner, self.away = "", False
+        self.refused = 0
         # POST /v1/library/add, which older bridges lack (POST /v1/fake/library
         # takes it away); what it added, and what Spotify's remove took out.
         self.library_route = True
@@ -217,7 +224,8 @@ class Bridge:
                         if state == "play" and last != "play":
                             with self.lock:
                                 self.current = False
-                                if self.state == "playing" and last is not None:
+                                # Another machine's Spotify plays on.
+                                if self.state == "playing" and last is not None and not self.away:
                                     self.base, self.started, self.state = self.position(), time.monotonic(), "paused"
                                 self.changed()
                         last = state
@@ -230,10 +238,16 @@ class Bridge:
     def position(self):
         return self.base + (time.monotonic() - self.started if self.state == "playing" else 0)
 
-    def status(self):
+    def elsewhere(self, client):
+        return self.owner if self.away and client != self.owner and self.state == "playing" else ""
+
+    def status(self, client=""):
         out = {"seq": self.seq, "state": self.state, "current": self.current, "position": round(self.position(), 2),
                "positionAt": time.time(), "queue": self.queue, "queueIndex": self.index, "queueOffset": 0,
                "queueLength": len(self.queue), "shuffle": self.shuffle, "repeat": self.repeat}
+        if self.elsewhere(client):
+            out["elsewhere"] = self.owner
+            if self.spotify: out["state"] = "paused"
         if self.queue and self.state != "stopped":
             song = self.queue[self.index]
             out["song"] = dict(song, inLibrary=self.owns("song", song["catalogId"]))
@@ -377,15 +391,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def route(self, b, method, parts, query, body):
         path = "/".join(parts)
+        client = self.headers.get("X-Omarock-Client", "")
         if method == "GET" and path == "status":
             with b.lock:
                 since = query.get("since")
                 deadline = time.monotonic() + 25
                 while since is not None and int(since) == b.seq and time.monotonic() < deadline:
                     b.lock.wait(deadline - time.monotonic())
-                return b.status()
+                return b.status(client)
         with b.lock:
             if method == "POST":
+                if path == "fake/elsewhere":
+                    b.owner, b.away = body["name"], True
+                    if b.queue and b.state != "playing":
+                        b.base, b.started, b.state = b.position(), time.monotonic(), "playing"
+                    b.changed()
+                    return {"ok": True}
+                if b.elsewhere(client):
+                    if path in ("pause", "next", "previous", "seek"):
+                        b.refused += 1
+                        raise Refused(f"{'Spotify' if b.spotify else 'Apple Music'} is playing on {b.owner}: Play moves it here")
+                    if path == "toggle": path = "resume"
+                if client and (path in ("resume", "queue/jump", "activate") or path == "play" and body.get("mode", "play") == "play"):
+                    if b.away or b.owner != client:
+                        b.owner, b.away = client, False
+                        b.changed()
                 if path == "fake/info":
                     b.info_route = bool(body["on"])
                     return {"ok": True}
@@ -420,13 +450,13 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         threading.Thread(target=b.stop_mpd, daemon=True).start()
                     b.changed()
-                    return b.status()
+                    return b.status(client)
                 if b.spotify and path == "release":
                     if b.state == "playing":
                         b.base, b.started, b.state = b.position(), time.monotonic(), "paused"
                     b.current = False
                     b.changed()
-                    return b.status()
+                    return b.status(client)
                 if b.spotify and path == "queue/remove":
                     raise Refused("Spotify can't take songs out of its queue")
                 if path == "play":
@@ -441,36 +471,36 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         b.queue = b.queue + songs
                         b.changed()
-                    return b.status()
+                    return b.status(client)
                 if path in ("pause", "resume", "toggle"):
                     want = {"pause": "paused", "resume": "playing"}.get(path) or ("paused" if b.state == "playing" else "playing")
                     if b.queue and want != b.state:
                         b.base, b.started, b.state = b.position(), time.monotonic(), want
                         b.changed()
-                    return b.status()
+                    return b.status(client)
                 if path in ("next", "previous"):
                     b.play_at(max(0, min(len(b.queue) - 1, b.index + (1 if path == "next" else -1))))
-                    return b.status()
+                    return b.status(client)
                 if path == "seek":
                     b.base, b.started = float(body["position"]), time.monotonic()
-                    return b.status()
+                    return b.status(client)
                 if path == "queue/jump":
                     b.play_at(int(body["index"]))
-                    return b.status()
+                    return b.status(client)
                 if path == "queue/remove":
                     i = int(body["index"])
                     del b.queue[i]
                     if i < b.index: b.index -= 1
                     b.changed()
-                    return b.status()
+                    return b.status(client)
                 if path == "shuffle":
                     b.shuffle = bool(body["on"])
                     b.changed()
-                    return b.status()
+                    return b.status(client)
                 if path == "repeat":
                     b.repeat = body["mode"]
                     b.changed()
-                    return b.status()
+                    return b.status(client)
                 if path == "library/playlists":
                     pid = f"p-{len(b.playlists) + 1}"
                     b.playlists[pid] = {"kind": "playlist", "id": pid, "source": "library", "name": body["name"],

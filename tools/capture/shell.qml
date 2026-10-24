@@ -266,6 +266,8 @@ ShellRoot {
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
         bridgeSong: p.bridgeMode ? p.bridge.song : null, playingIds: p.bridgeMode ? p.playingIds() : null,
         lookup: p.lookupService, accounts: p.accounts,
+        clientName: p.clientName, elsewhere: p.bridgeMode ? p.bridge.elsewhere : "",
+        playerExtra: p.bridgeMode ? p.bridgeExtra : "",
         playingLibrary: p.playingLibraryText, canAddPlayingToPlaylist: p.canAddPlayingToPlaylist,
         infoAction: p.infoLibraryAction,
         albumLibrary: p.browseAlbumLibrary ? { text: p.browseAlbumLibrary.text, hover: p.browseAlbumLibrary.hover,

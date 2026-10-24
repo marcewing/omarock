@@ -41,6 +41,10 @@ Item {
   property bool ticking: false
   // Stop mpd once the Mac has been paused or stopped this long (0: never).
   property int idleStopSeconds: 60
+  // This machine's name, sent with every request (X-Omarock-Client). Apple
+  // Music and Spotify play on one machine at a time: the one that last
+  // pressed Play. The others hear nothing, and are told where it plays.
+  property string clientName: ""
   // Reconnect mpd to the stream 2 s after each change made here (catchUp).
   // Only for a stock libFLAC, which falls behind on a quiet stream; with
   // the patched one (tools/build-libflac) mpd stays about 0.3 s behind by
@@ -78,6 +82,16 @@ Item {
   // Spotify's: whether it is omarock's source now (it played since mpd did,
   // or omarock switched to it).
   readonly property bool current: bridgeStatus.current === true
+  // The machine it plays on instead ("dellxps"), or "": here it's paused,
+  // and Play moves it here. Pause, skip and seek are refused meanwhile.
+  readonly property string elsewhere: bridgeStatus.elsewhere || ""
+
+  // Another machine took the Mac's music: this one's mpd stops listening,
+  // and the Mac plays on for it.
+  onElsewhereChanged: root.leaveStream()
+  function leaveStream() {
+    if (root.elsewhere !== "" && root.streamed && root.active && root.mpd && root.mpd.status.state === "play") root.mpd.send("stop")
+  }
 
   FileView {
     id: tokenView
@@ -128,6 +142,7 @@ Item {
     }
     xhr.open(method, root.baseUrl + path)
     if (root.token !== "") xhr.setRequestHeader("Authorization", "Bearer " + root.token)
+    if (root.clientName !== "") xhr.setRequestHeader("X-Omarock-Client", root.clientName)
     root.inflight = root.inflight.concat([entry])
     if (body !== undefined && body !== null) {
       xhr.setRequestHeader("Content-Type", "application/json")
@@ -247,12 +262,16 @@ Item {
   }
   Component.onCompleted: if (root.active) root.checkHealth(function() { root.poll() })
 
-  // Playback. Play also starts mpd on the stream when it isn't playing.
+  // Playback. Play also starts mpd on the stream when it isn't playing, and
+  // takes the music over from another machine.
   function playPause() {
-    if (root.bridgeStatus.state === "playing" && (!root.streamed || root.mpd.status.state === "play")) root.post("/v1/pause")
+    if (root.bridgeStatus.state === "playing" && root.elsewhere === "" && (!root.streamed || root.mpd.status.state === "play"))
+      root.post("/v1/pause")
     else root.resume()
   }
-  function pause() { root.post("/v1/pause") }
+  // Not while it plays on another machine: leaving Apple Music here, say,
+  // mustn't stop it there.
+  function pause() { if (root.elsewhere === "") root.post("/v1/pause") }
   // The Mac first, then mpd on the stream (see catchUp).
   function resume() { root.post("/v1/resume", {}, root.catchUp) }
   // Only while mpd's source is this stream: a song played here from a lookup

@@ -284,6 +284,12 @@ stay until you remove them too (each guide says how, by hand).
   and what's on. Enter tunes, `n`/`p` step through the favourites, `A` adds or
   removes a favourite (your account's, as in the SiriusXM app). Space stops and
   starts: it's live.
+- **On more than one machine:** local music, the radio and SiriusXM play on
+  each machine on its own. Apple Music and Spotify play on one machine at a
+  time, the one where you last pressed Play: a Spotify account plays on one
+  device at a time, and the Mac has one Apple Music player. The other
+  machines' panels show it paused, "Playing on dellxps · Play moves it here",
+  and their pause and skip don't reach it. (Apple Music needs bridge 0.5.)
 
 ## Settings
 

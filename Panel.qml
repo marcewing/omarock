@@ -128,7 +128,8 @@ Panel {
   // Dolby Atmos.
   // Under the song in the player card: Explicit, Lossless, Dolby Atmos (the
   // genre has a line of its own).
-  readonly property string bridgeExtra: bridge.song ? Apple.badges(bridge.song) : ""
+  readonly property string bridgeExtra: bridge.elsewhere !== "" ? "Playing on " + bridge.elsewhere + " · Play moves it here"
+    : bridge.song ? Apple.badges(bridge.song) : ""
   // Under the station in the player card: where it is, its genres and sound.
   readonly property string radioExtra: radio.station ? Radio.describe(radio.station) : ""
   // Under the channel in the player card: the show, else the genre.
@@ -138,7 +139,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.6.7"
+  readonly property string version: "0.7.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -701,13 +702,16 @@ Panel {
     // is the one the status is about: mpd's status comes before its current
     // song, so switching from a stopped Apple Music stream to SiriusXM read
     // as the stream playing again, and resumed the Mac to play to nobody.
+    // While the Mac plays for another machine, this one's mpd stopping
+    // (leaveStream) leaves it playing, and mpd playing takes it over.
     if (!root.mpdOnApple || state === was || String(client.currentSong.id) !== String(client.status.songId)) return
+    var mine = apple.elsewhere === ""
     if (state === "pause") {
       client.send("stop")
-      if (apple.bridgeStatus.state === "playing") apple.pause()
+      if (apple.bridgeStatus.state === "playing" && mine) apple.pause()
     } else if (state === "stop" && was === "play") {
-      if (apple.bridgeStatus.state === "playing") apple.pause()
-    } else if (state === "play" && apple.bridgeStatus.state === "paused") {
+      if (apple.bridgeStatus.state === "playing" && mine) apple.pause()
+    } else if (state === "play" && (apple.bridgeStatus.state === "paused" || !mine)) {
       apple.post("/v1/resume", {}, apple.catchUp)
     }
   }
@@ -2601,11 +2605,21 @@ Panel {
     onTuneRequested: function(channel) { root.tune(channel.id) }
   }
 
+  // This machine's name, for the services that play on one machine at a
+  // time (Apple Music, Spotify): they say where they play instead.
+  property string clientName: ""
+  FileView {
+    path: "/etc/hostname"
+    printErrors: false
+    onLoaded: root.clientName = text().trim()
+  }
+
   AppleClient {
     id: apple
     baseUrl: root.appleBridge
     tokenFile: root.appleTokenFile
     mpd: client
+    clientName: root.clientName
     active: root.mpdOnApple
     idleStopSeconds: Math.max(0, Number(root.setting("appleIdleStop", 60)) || 0)
     // On unless switched off: only a patched libFLAC keeps up without it.
@@ -2620,6 +2634,7 @@ Panel {
     id: spotify
     baseUrl: root.spotifyService
     mpd: client
+    clientName: root.clientName
     service: "Spotify"
     serviceKey: "spotify"
     streamed: false

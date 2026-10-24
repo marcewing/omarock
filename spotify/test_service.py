@@ -50,18 +50,18 @@ ITEM = {"uri": "spotify:track:4Indecision", "entity_type": "track"}
 def main():
     s = fresh()
     check("at start, mpd's: not current", s.status_json()["current"] is False)
-    s.handle({"type": "playback_state", "status": "playing", "item": ITEM})
+    s.handle({"type": "playback_state", "status": "playing", "item": ITEM, "is_active": True})
     check("Spotify starting makes it current", s.status_json()["current"] is True)
 
     out = service.post("release", ["release"], {})
     check("release pauses Spotify", s.ws.sent == ["pause"] and out["state"] == "paused", str(s.ws.sent))
     check("release: not current", out["current"] is False)
     s.status = "playing"   # as if Soloist reported playing late, already playing
-    s.handle({"type": "playback_state", "status": "playing", "item": ITEM})
+    s.handle({"type": "playback_state", "status": "playing", "item": ITEM, "is_active": True})
     check("a late report of playing doesn't make it current again", s.status_json()["current"] is False)
 
     s = fresh()
-    s.handle({"type": "playback_state", "status": "paused", "item": ITEM})
+    s.handle({"type": "playback_state", "status": "paused", "item": ITEM, "is_active": True})
     out = service.post("activate", ["activate"], {})
     check("activate: current, mpd paused, Spotify resumes",
           out["current"] is True and service.mpd_paused == [True] and s.ws.sent == ["play"] and out["state"] == "playing",
@@ -75,7 +75,7 @@ def main():
     check("release while paused sends nothing", out["current"] is False and s.ws.sent == [], str(s.ws.sent))
 
     s = fresh()
-    s.handle({"type": "playback_state", "status": "playing", "item": ITEM})
+    s.handle({"type": "playback_state", "status": "playing", "item": ITEM, "is_active": True})
     service.mpd_changed(s, None, "play")
     check("connecting to a playing mpd: not current, Spotify not paused", s.yielded and s.ws.sent == [], str(s.ws.sent))
     s.yielded = False
@@ -86,11 +86,55 @@ def main():
     service.mpd_changed(s, "play", "pause")
     check("mpd pausing changes nothing", s.yielded and s.ws.sent == [], str(s.ws.sent))
 
+    elsewhere()
     library()
     album_library()
     renewal()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
+
+
+def elsewhere():
+    """Another machine's Spotify playing (this Soloist isn't the active
+    device): paused here, and not Spotify starting here, so mpd isn't paused;
+    pause, skip and seek don't reach it, release and mpd leave it playing;
+    resume moves it here, with the Web API."""
+    calls = []
+
+    def call(method, path, body=None):
+        calls.append((method, path, body))
+        return (200, {"device": {"name": "framework"}, "is_playing": True}) if method == "GET" else (204, None)
+    service.spotify_web.call = call
+    service.device_id = lambda: "dev-here"
+    s = fresh()
+    s.on_playing = lambda: service.pause_mpd()
+    s.handle({"type": "playback_state", "status": "playing", "item": ITEM, "is_active": False})
+    time.sleep(0.1)
+    out = s.status_json()
+    check("elsewhere: paused here, not current, mpd left alone",
+          out["state"] == "paused" and out["current"] is False and service.mpd_paused == [], f"{out['state']} {out['current']} {service.mpd_paused}")
+    check("elsewhere: says where", out.get("elsewhere") == "framework", str(out.get("elsewhere")))
+    for path in ("pause", "next", "seek"):
+        try:
+            service.post(path, [path], {"position": 10})
+            check(f"elsewhere: {path} refused", False)
+        except RuntimeError as e:
+            check(f"elsewhere: {path} refused, saying where", "playing on framework" in str(e) and s.ws.sent == [], f"{e} {s.ws.sent}")
+    service.post("release", ["release"], {})
+    s.yielded = False
+    service.mpd_changed(s, "pause", "play")
+    time.sleep(0.1)
+    check("elsewhere: release and mpd starting leave it playing", s.ws.sent == [], str(s.ws.sent))
+
+    calls.clear()
+    s.yielded = True
+    threading.Timer(0.1, s.handle, [{"type": "playback_state", "status": "playing", "item": ITEM, "is_active": True}]).start()
+    out = service.post("resume", ["resume"], {})
+    check("resume moves it here", ("PUT", "/me/player", {"device_ids": ["dev-here"], "play": True}) in calls
+          and s.ws.sent == [] and out["state"] == "playing" and "elsewhere" not in out, f"{calls} {s.ws.sent} {out['state']}")
+    time.sleep(0.1)
+    check("moved here, it's Spotify starting here: current, mpd paused",
+          out["current"] is True and service.mpd_paused == [False], f"{out['current']} {service.mpd_paused}")
 
 
 def library():

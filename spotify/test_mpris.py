@@ -33,6 +33,7 @@ class FakeSoloist:
         self.seq = 1
         self.logged_in = True
         self.status = "idle"
+        self.active = True
         self.item = None
         self.options = {}
         self.yielded = False
@@ -54,6 +55,16 @@ class FakeSoloist:
 
     def safe(self, name, **args):
         self.sent.append((name, args))
+
+    # As omarock-spotify's Soloist: another device's playing is paused here.
+    def playing_elsewhere(self):
+        return not self.active and self.status in ("playing", "buffering")
+
+    def heard(self):
+        return "paused" if self.playing_elsewhere() else self.status
+
+    def play_here_soon(self):
+        self.sent.append(("play", {}) if self.active else ("move here", {}))
 
 
 def gdbus(*args):
@@ -182,6 +193,21 @@ def main():
     soloist.changed()
     check("Spotify again: Paused, can play", until(lambda: get("PlaybackStatus") == "(<'Paused'>,)")
           and get("CanPlay") == "(<true>,)", get("PlaybackStatus") + get("CanPlay"))
+
+    # Another machine's Spotify playing: paused here, the keys don't reach
+    # it, and Play moves it here.
+    soloist.active = False
+    soloist.status = "playing"
+    soloist.changed()
+    time.sleep(0.3)
+    check("playing on another machine: Paused here", get("PlaybackStatus") == "(<'Paused'>,)", get("PlaybackStatus"))
+    soloist.sent.clear()
+    for method in ("Pause", "Stop", "Next", "Previous"):
+        call(method)
+    call("Seek", "1000000")
+    check("playing on another machine: pause, skip and seek send nothing", soloist.sent == [], str(soloist.sent))
+    call("PlayPause")
+    check("playing on another machine: PlayPause moves it here", soloist.sent == [("move here", {})], str(soloist.sent))
     monitor.terminate()
     print(f"{'FAILED: ' + ', '.join(failures) if failures else 'all passed'}")
     sys.exit(1 if failures else 0)

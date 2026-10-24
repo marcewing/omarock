@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 MPD_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "mpd/socket"
@@ -165,7 +165,11 @@ class Soloist:
         self.seq = 1
         self.connected = False
         self.logged_in = False
+        # This Soloist is Spotify's active device, the one heard. Soloist
+        # reports the account's playback wherever it plays; the device
+        # playing instead, while another one is (its name, from the Web API).
         self.active = False
+        self.elsewhere = ""
         self.status = "idle"
         self.item = None
         self.context = None
@@ -234,9 +238,54 @@ class Soloist:
         if (entity or {}).get("entity_type") == "track" and tid and tid not in self.tracks and tid not in self.wanted:
             self.wanted.append(tid)
 
+    def heard(self):
+        """The playback status here: another device's playing is, here, paused."""
+        return "paused" if self.playing_elsewhere() else self.status
+
+    def playing_elsewhere(self):
+        return not self.active and self.status in ("playing", "buffering")
+
+    def play_here(self):
+        """Play on this device. Soloist's own play resumes on whichever device
+        is active, another machine's say, so then move the playback here."""
+        if self.active:
+            self.command("play")
+            return
+        dev = device_id()
+        if not dev:
+            raise RuntimeError("Soloist has no device id yet: is omarock-soloist running?")
+        status, data = spotify_web.call("PUT", "/me/player", {"device_ids": [dev], "play": True})
+        if status >= 400:
+            raise ApiError(status, data)
+
+    def play_here_soon(self):
+        """play_here, off the caller's thread (the media keys'), logging what fails."""
+        def run():
+            try: self.play_here()
+            except Exception as e: log(f"couldn't play here: {e}")  # noqa: BLE001
+        threading.Thread(target=run, daemon=True).start()
+
+    def refuse_elsewhere(self):
+        """Pause, skip and seek act on the device playing: not another machine's."""
+        if self.playing_elsewhere():
+            raise RuntimeError(f"Spotify is playing on {self.elsewhere or 'another device'}: Play moves it here")
+
+    def find_elsewhere(self):
+        """The name of the device playing instead, for "playing on …"."""
+        try:
+            status, data = spotify_web.call("GET", "/me/player")
+        except (spotify_web.NotSignedIn, spotify_web.ApiError, OSError) as e:
+            log(f"couldn't tell which device is playing: {e}")
+            return
+        device = (data or {}).get("device") or {} if status == 200 and isinstance(data, dict) else {}
+        if self.playing_elsewhere():
+            self.elsewhere = device.get("name") or "another device"
+            self.changed()
+
     def handle(self, m):
         t = m.get("type")
-        was_playing = self.status == "playing"
+        was_playing = self.heard() == "playing"
+        was_elsewhere = self.playing_elsewhere()
         if t == "auth_state":
             self.logged_in, self.active = bool(m.get("logged_in")), bool(m.get("is_active"))
         elif t == "playback_state":
@@ -283,11 +332,17 @@ class Soloist:
         else:
             return
         # Only a start counts: a late report of playing, after a release has
-        # paused it, mustn't make Spotify current again.
-        if self.status == "playing" and not was_playing:
+        # paused it, mustn't make Spotify current again. And only a start
+        # here: another machine's Spotify playing doesn't stop this one's mpd.
+        started = self.heard() == "playing" and not was_playing
+        if started:
             self.yielded = False
+        if not self.playing_elsewhere():
+            self.elsewhere = ""
+        elif not was_elsewhere:
+            threading.Thread(target=self.find_elsewhere, daemon=True).start()
         self.changed()
-        if self.status == "playing" and not was_playing and self.on_playing:
+        if started and self.on_playing:
             threading.Thread(target=self.on_playing, daemon=True).start()
 
     def safe(self, name, **args):
@@ -313,7 +368,7 @@ class Soloist:
         return self.tracks.get(tid) or song_from_entity(entity)
 
     def status_json(self):
-        state = {"playing": "playing", "buffering": "playing", "paused": "paused"}.get(self.status, "stopped")
+        state = {"playing": "playing", "buffering": "playing", "paused": "paused"}.get(self.heard(), "stopped")
         if not self.item:
             state = "stopped"
         current = self.song_for(self.item)
@@ -329,6 +384,8 @@ class Soloist:
                "repeat": {"context": "all", "track": "one"}.get(repeat, "off")}
         if current and state != "stopped":
             out["song"] = current
+        if self.playing_elsewhere():
+            out["elsewhere"] = self.elsewhere or "another device"
         return out
 
     def enrich_forever(self):
@@ -394,7 +451,7 @@ def mpd_changed(soloist, last, state):
     if not soloist.yielded:
         soloist.yielded = True
         soloist.changed()
-    if last is not None and soloist.status in ("playing", "buffering"):
+    if last is not None and soloist.heard() in ("playing", "buffering"):
         log("mpd started playing: pausing Spotify")
         soloist.safe("pause")
 
@@ -794,7 +851,7 @@ def post(path, parts, body):
                 if not uris:
                     raise ValueError("nothing playable")
                 web_play({"uris": uris, "offset": {"position": min(max(0, start), len(uris) - 1)}})
-            return settled(seq, lambda: SOLOIST.status == "playing", 6)
+            return settled(seq, lambda: SOLOIST.heard() == "playing", 6)
         # next and add: Spotify's queue takes songs after what's queued already.
         for uri in WEB.expand(items, SOLOIST)[:100]:
             SOLOIST.command("add_to_queue", uri=uri)
@@ -805,35 +862,45 @@ def post(path, parts, body):
         SOLOIST.yielded = False
         SOLOIST.changed()
         pause_mpd(quiet=True)
-        if SOLOIST.item and SOLOIST.status not in ("playing", "buffering") and body.get("resume", True):
-            SOLOIST.command("play")
-            return settled(seq, lambda: SOLOIST.status == "playing")
+        if SOLOIST.item and SOLOIST.heard() not in ("playing", "buffering") and body.get("resume", True):
+            SOLOIST.play_here()
+            return settled(seq, lambda: SOLOIST.heard() == "playing", 6)
         return SOLOIST.status_json()
     if path == "release":
-        # omarock switched away: Spotify pauses and stops being the source.
-        playing = SOLOIST.status in ("playing", "buffering")
+        # omarock switched away: Spotify pauses and stops being the source
+        # (here: another machine's Spotify plays on).
+        playing = SOLOIST.heard() in ("playing", "buffering")
         if playing:
             SOLOIST.command("pause")
         SOLOIST.yielded = True
         SOLOIST.changed()
-        return settled(SOLOIST.seq, lambda: SOLOIST.status not in ("playing", "buffering")) if playing else SOLOIST.status_json()
+        return settled(SOLOIST.seq, lambda: SOLOIST.heard() not in ("playing", "buffering")) if playing else SOLOIST.status_json()
     if path == "pause":
+        SOLOIST.refuse_elsewhere()
         SOLOIST.command("pause")
-        return settled(seq, lambda: SOLOIST.status != "playing")
+        return settled(seq, lambda: SOLOIST.heard() != "playing")
     if path == "resume":
+        # Here: playing on another machine, it moves to this one.
         if SOLOIST.item:
-            SOLOIST.command("play")
-            return settled(seq, lambda: SOLOIST.status == "playing")
+            SOLOIST.play_here()
+            return settled(seq, lambda: SOLOIST.heard() == "playing", 6)
         return SOLOIST.status_json()
     if path == "toggle":
-        return post("pause" if SOLOIST.status == "playing" else "resume", parts, body)
+        return post("pause" if SOLOIST.heard() == "playing" else "resume", parts, body)
     if path in ("next", "previous"):
+        SOLOIST.refuse_elsewhere()
         SOLOIST.command("skip_next" if path == "next" else "skip_prev")
         return settled(seq)
     if path == "seek":
+        SOLOIST.refuse_elsewhere()
         SOLOIST.command("seek", position_ms=int(float(body["position"]) * 1000))
         return settled(seq, timeout=1.5)
     if path == "queue/jump":
+        # A song from the queue plays here.
+        if SOLOIST.item and not SOLOIST.active:
+            SOLOIST.play_here()
+            SOLOIST.wait(seq, lambda: SOLOIST.active, 6)
+            seq = SOLOIST.seq
         status = SOLOIST.status_json()
         steps = int(body["index"]) - status["queueIndex"]
         for _ in range(abs(steps)):

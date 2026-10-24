@@ -69,6 +69,12 @@ Run the tools from your omarock clone: the plugin's folder,
   switching back plays on from there. Spotify started from your phone (Connect)
   makes omarock follow it, and mpd playing (`mpc play`, the media keys) takes over
   from Spotify.
+- **One machine at a time.** A Spotify account plays on one device at a time.
+  With omarock on two machines, Play on one moves Spotify to that machine's
+  Soloist (Spotify's transfer). The other's panel shows it paused, "Playing on
+  framework · Play moves it here", and its pause, skip, seek and media keys
+  don't reach the machine playing. Spotify playing on another device doesn't
+  pause this machine's mpd either.
 - **The media keys** work on Spotify while it's the source, and on mpd otherwise.
 - **One volume.** Soloist's own volume stays at full: the bus's volume is omarock's.
 - **What an app like this can't get from Spotify:**

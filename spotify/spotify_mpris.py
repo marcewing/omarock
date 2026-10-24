@@ -70,7 +70,7 @@ class Player(dbus.service.Object):
         return dbus.Dictionary(m, signature="sv")
 
     def playback_status(self):
-        return STATUS.get(self.soloist.status, "Stopped") if self.loaded() else "Stopped"
+        return STATUS.get(self.soloist.heard(), "Stopped") if self.loaded() else "Stopped"
 
     def player_props(self):
         s = self.soloist
@@ -138,34 +138,37 @@ class Player(dbus.service.Object):
 
     # ---------- org.mpris.MediaPlayer2.Player ----------
 
+    # While another machine's Spotify plays, the keys here don't reach it;
+    # Play moves it here.
     @dbus.service.method(PLAYER)
     def Next(self):
-        if self.loaded():
+        if self.loaded() and not self.soloist.playing_elsewhere():
             self.soloist.safe("skip_next")
 
     @dbus.service.method(PLAYER)
     def Previous(self):
-        if self.loaded():
+        if self.loaded() and not self.soloist.playing_elsewhere():
             self.soloist.safe("skip_prev")
 
     @dbus.service.method(PLAYER)
     def Pause(self):
-        self.soloist.safe("pause")
+        if not self.soloist.playing_elsewhere():
+            self.soloist.safe("pause")
 
     @dbus.service.method(PLAYER)
     def Stop(self):
-        self.soloist.safe("pause")
+        self.Pause()
 
     @dbus.service.method(PLAYER)
     def Play(self):
         if self.loaded():
-            self.soloist.safe("play")
+            self.soloist.play_here_soon()
 
     @dbus.service.method(PLAYER)
     def PlayPause(self):
         if not self.loaded():
             return
-        if self.soloist.status in ("playing", "buffering"):
+        if self.soloist.heard() in ("playing", "buffering"):
             self.Pause()
         else:
             self.Play()
@@ -191,7 +194,7 @@ class Player(dbus.service.Object):
         length = self.song().get("duration")
         if length and seconds >= length:
             self.Next()
-        elif self.loaded():
+        elif self.loaded() and not self.soloist.playing_elsewhere():
             self.soloist.safe("seek", position_ms=int(max(0.0, seconds) * 1000))
 
     # ---------- telling the bus ----------
