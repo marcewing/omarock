@@ -349,6 +349,21 @@ ShellRoot {
       var list = host.panel.listView
       return list.indexAt(list.width / 2, list.contentY + list.height / 2)
     }
+    // The list scrolled so the row at its bottom (or top) edge is half off
+    // it, and where on the card the half that shows is: {index, x, y, listY}.
+    function cutRow(edge: string): string {
+      var list = host.panel.listView
+      var bottom = edge === "bottom"
+      var index = list.indexAt(list.width / 2, list.contentY + (bottom ? list.height - 1 : 1))
+      var delegate = list.itemAtIndex(index)
+      var row = delegate ? delegate.children[1] : null
+      if (!row) return "{}"
+      var top = delegate.y + row.y
+      list.contentY = bottom ? top + row.height / 2 - list.height : top + row.height / 2
+      var at = list.mapToItem(popup().contentItem[0].parent.parent, list.width / 3,
+        bottom ? list.height - row.height / 4 : row.height / 4)
+      return JSON.stringify({ index: index, x: at.x, y: at.y, listY: Math.round(list.contentY) })
+    }
     function cardSize(): string {
       var card = popup().contentItem[0].parent.parent
       return JSON.stringify({ width: card.width, height: card.height })

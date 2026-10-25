@@ -61,7 +61,6 @@ has a switch too, on until you turn it off.
 - **mpd-mpris**, for the media keys.
 - **Album covers:** an image in each album folder, such as `cover.jpg`. Art embedded
   in the files isn't shown.
-- **Optional:** `ncmpcpp`, the terminal player `t` opens (or set `tuiCommand`).
 
 omarock is young. It's used every day on one Omarchy desktop.
 
@@ -259,7 +258,7 @@ stay until you remove them too.
   tags, format, average bitrate, size and path.
 - **Keys** do what you'd guess: Space play/pause, `/` search, arrows to move,
   open and go back, Shift+←/→ to seek, `n`/`p`, `+`/`-`, `m` the next source, `,`
-  settings, `t` a terminal player (ncmpcpp), `?` for the full list.
+  settings, `?` for the full list.
   - **The hint line** under the list shows the keys that work where you are: on
     the row under the cursor, or in the search box while you type. It never
     changes the panel's height. When there are too many for it, the least used
@@ -317,7 +316,7 @@ A change saves at once.
   edit by hand; omarock follows it as it changes:
 
   ```json
-  { "spotify": true, "tuiCommand": "rmpc" }
+  { "spotify": true, "maxLabelWidth": 400 }
   ```
 
   (Before 0.6 they were keys on omarock's entry in `~/.config/omarchy/shell.json`;
@@ -338,7 +337,6 @@ A change saves at once.
 | `appleMusic` | off | Apple Music ([bridge/README.md](bridge/README.md)) |
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |
 | `lookup` | Apple Music | Where a click on the radio's song looks it up: `Apple Music` or `Spotify` (the other one if that one is off) |
-| `tuiCommand` | `ncmpcpp` | The terminal player `t` opens |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |
 | `maxLabelWidth` | 300 | How wide the song gets on the bar, in pixels |
 | `appleIdleStop` | 60 | Seconds the Mac is paused before mpd lets go of its stream (0: never) |

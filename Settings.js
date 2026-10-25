@@ -90,9 +90,7 @@ var schema = [
   { key: "closeOnLeave", type: "boolean", label: "Close the panel when the pointer leaves it", defaultValue: true,
     description: "3 seconds after it leaves, unless it comes back." },
   { key: "maxLabelWidth", type: "integer", label: "How wide the song gets on the bar",
-    min: 80, max: 600, step: 10, defaultValue: 300, description: "In pixels." },
-  { key: "tuiCommand", type: "string", label: "Terminal player", defaultValue: "ncmpcpp",
-    description: "What t and the TUI button open." }
+    min: 80, max: 600, step: 10, defaultValue: 300, description: "In pixels." }
 ]
 
 var groups = [
@@ -101,7 +99,7 @@ var groups = [
   { title: "SIRIUSXM", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
   { title: "APPLE MUSIC", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },
   { title: "SOUND", keys: ["sound", "soundUpdate", "soundRemove"] },
-  { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "tuiCommand"] }
+  { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth"] }
 ]
 
 // The piece ./install sets up for a row's source, and back.

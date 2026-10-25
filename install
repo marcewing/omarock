@@ -307,7 +307,6 @@ step_mpd() {
   for p in mpd mpd-mpris mpc; do pacman -Q "$p" >/dev/null 2>&1 || need+=("$p"); done
   if ((${#need[@]})); then
     explain "omarock is a client for mpd, which plays the music and keeps the queue and playlists. mpc is its command line, and mpd-mpris passes the media keys to it. All three come from Arch's own repositories."
-    if ! pacman -Q ncmpcpp >/dev/null 2>&1 && confirm "Install ncmpcpp too? The panel's TUI button opens it." no; then need+=(ncmpcpp); fi
     confirm "Install ${need[*]} with pacman?" || { bad "omarock can't play anything without mpd."; stopped; }
     run sudo pacman -S --needed --noconfirm "${need[@]}" || stopped
   fi
@@ -1357,7 +1356,7 @@ uninstall() {
   [[ -d $share ]] && rmdir "$share" 2>/dev/null
   ((step_no > before)) || ok "nothing of omarock's is set up here"
   printf '\n%sWhat stays%s\n' "$bold" "$reset"
-  explain "mpd, mpc and mpd-mpris (and ncmpcpp, if it came with them), with mpd's config, database and playlists. omarock's radio favourites are the mpd playlist \"Radio\"."
+  explain "mpd, mpc and mpd-mpris, with mpd's config, database and playlists. omarock's radio favourites are the mpd playlist \"Radio\"."
   mapfile -t backups < <(compgen -G "$(mpd_conf).before-omarock-*")
   if ((${#backups[@]})); then explain "Copies of mpd.conf from before each change:"; listing "${backups[@]}"; fi
   explain "This clone, $repo: delete it when you're done. On a Mac, the Apple Music bridge comes off with ./install --uninstall in its clone there (bridge/README.md)."

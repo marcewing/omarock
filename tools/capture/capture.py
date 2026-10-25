@@ -271,6 +271,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     keep_state_scenario(host, output, failures)
     hints_scenario(host, output, failures)
     list_tuning_scenario(host, failures)
+    hover_scroll_scenario(host, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
     elsewhere_scenario(host, socket_path, failures)
@@ -2167,7 +2168,7 @@ def hints_scenario(host, output, failures):
     the panel is, all of them. w, or its Window button, keeps the keys open in
     a window of their own: fixed in size as it maps, so Hyprland floats it,
     then free to resize, and RIGHT NOW there follows the panel. The expanded
-    header has no Keys or TUI buttons (? and t are keys)."""
+    header has no Keys or TUI buttons (? is a key)."""
     long_notice = "A notice far too long for the line: " + "it goes on and on, " * 12 + "and ends here."
 
     def line(label):
@@ -3277,6 +3278,37 @@ def list_tuning_scenario(host, failures):
     host.call("close")
 
 
+def hover_scroll_scenario(host, failures):
+    """The pointer on a row that the list's edge cuts in half puts the cursor
+    there and leaves the list where it is. It used to scroll that row into
+    view, which moved the list under the pointer: as the mouse went up and
+    down over the list, the list rocked a row back and forth. The keys still
+    scroll to the cursor."""
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    to_source(host, "sxm")
+    wait_for(lambda: host.state()["sxmMode"] and len(host.state()["rows"]) > 20, "sxm's channels")
+    reopen(host)
+    host.call("scrollList", 400)
+    host.settle(.4)
+    for edge, key, step in (("bottom", "Down", 1), ("top", "Up", -1)):
+        cut = json.loads(host.call("cutRow", edge))
+        host.settle(.3)
+        host.hover(cut["x"], cut["y"])
+        host.settle(.6)
+        s = host.state()
+        check(s["cursor"] == cut["index"] and abs(s["listY"] - cut["listY"]) <= 1,
+              f"the pointer on the row half off the {edge}: the cursor on it ({s['cursor']}, row {cut['index']}), "
+              f"the list put ({cut['listY']} -> {s['listY']})", failures)
+        # The pointer off the list, onto the card's corner; then a key.
+        host.hover(4, 4)
+        host.call("press", key)
+        host.settle(.4)
+        after = host.state()
+        check(after["cursor"] == cut["index"] + step and (after["listY"] - s["listY"]) * step > 0,
+              f"then {key} scrolls to row {after['cursor']} ({s['listY']} -> {after['listY']})", failures)
+
+
 def favourite_follow_scenario(host, output, failures):
     """A on a station used to move it to the favourites while the list stayed
     put. A in the list: the cursor follows the station or channel
@@ -4205,6 +4237,7 @@ def main():
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
+                            elif name == "hover-scroll": hover_scroll_scenario(host, failures)
                             elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)
                             elif name == "bus-volume": bus_volume_scenario(host, socket_path, failures)
                             elif name == "real-apple-info": real_apple_info_scenario(host, output, socket_path, failures)

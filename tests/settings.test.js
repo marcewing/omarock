@@ -40,7 +40,7 @@ test("the file parses to settings, or none; withValue changes one and keeps the 
 })
 
 test("defaults cover the stored settings only: a source's switch, not the sound output's line", () => {
-  assert.equal(Settings.defaults.tuiCommand, "ncmpcpp")
+  assert.ok(!("tuiCommand" in Settings.defaults))
   assert.equal(Settings.defaults.maxLabelWidth, 300)
   assert.equal(Settings.defaults.spotify, false)
   assert.ok(!("sxmPassword" in Settings.defaults) && !("musicFolder" in Settings.defaults) && !("sound" in Settings.defaults))

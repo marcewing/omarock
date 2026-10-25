@@ -41,6 +41,8 @@ CursorSurface {
   readonly property bool isPlaying: entry.playing === true
     || (!isQueue && entry.file !== undefined && entry.file === row.playingFile)
   readonly property bool hot: rowMouse.containsMouse || (row.cursor && row.actionsOnCursor)
+  // The pointer is somewhere on the row, its buttons included.
+  readonly property bool pointerOver: pointerHover.hovered
 
   signal hoveredRow()
   signal activated()
@@ -52,6 +54,8 @@ CursorSurface {
   hasCursor: row.cursor
   current: row.isPlaying
   implicitHeight: Math.max(Style.space(row.hasCover ? 48 : 38), content.implicitHeight + Style.spacing.md * 2)
+
+  HoverHandler { id: pointerHover }
 
   MouseArea {
     id: rowMouse

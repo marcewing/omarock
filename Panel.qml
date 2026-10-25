@@ -14,8 +14,9 @@ import "Settings.js" as Settings
 import "Hints.js" as Hints
 
 // omarock's popup. Laid out like crmne.hyprmoncfg: a compact panel with an
-// Expand button, and an expanded panel in the same popup with Keys, TUI and
-// Compact. mpd is the backend; the panel keeps no music state of its own.
+// Expand button, and an expanded panel in the same popup with the sources,
+// the gear and Compact. mpd is the backend; the panel keeps no music state of
+// its own.
 Panel {
   id: root
   moduleName: "mre.omarock"
@@ -33,7 +34,6 @@ Panel {
     var configured = root.setting("socket", "")
     return configured !== "" ? configured : Quickshell.env("XDG_RUNTIME_DIR") + "/mpd/socket"
   }
-  readonly property string tuiCommand: root.setting("tuiCommand", "ncmpcpp")
   // Close when the pointer leaves the panel, once it has been over it.
   readonly property bool closeOnLeave: root.setting("closeOnLeave", true) === true
   property bool pointerArmed: false
@@ -140,7 +140,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.8.5"
+  readonly property string version: "0.8.6"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -852,11 +852,6 @@ Panel {
     if (root.pickerOpen) playlistPicker.takeFocus()
     else if (root.searchFocused && root.searchField) root.searchField.forceActiveFocus()
     else keyCatcher.forceActiveFocus()
-  }
-
-  function launchTui() {
-    root.close()
-    Quickshell.execDetached(["omarchy-launch-or-focus-tui", root.tuiCommand])
   }
 
   function say(text) {
@@ -2589,7 +2584,6 @@ Panel {
     else if (t === "r") player.setRepeat(!status.repeat)
     else if (t === "m" && root.sources.length > 1) root.nextSourceKey()
     else if (t === "e") root.expanded = !root.expanded
-    else if (t === "t") root.launchTui()
     else if (t === "?") root.keysOpen = !root.keysOpen
     else if (t === ",") root.openSettings()
     else if (t === "i") root.showInfo()
@@ -2986,7 +2980,6 @@ Panel {
         visible: root.keysOpen
         foreground: root.foreground
         fontFamily: root.fontFamily
-        tuiName: root.tuiCommand
         version: root.version
         here: root.hereKeys
         onCloseRequested: root.keysOpen = false
@@ -3259,8 +3252,14 @@ Panel {
     property string listKey: listRoot.role === "current" ? root.listKey : ""
     property string shownKey: ""
     onMarkIndexChanged: Qt.callLater(listRoot.keepMarkVisible)
+    // Not the row under the pointer: the pointer put the cursor there, and
+    // scrolling a row half off the edge into view moved the list under the
+    // pointer (the list rocked a row up and down as the mouse went over it).
     function keepMarkVisible() {
-      if (listRoot.markIndex >= 0 && listRoot.markIndex < list.count) list.positionViewAtIndex(listRoot.markIndex, ListView.Contain)
+      if (listRoot.markIndex < 0 || listRoot.markIndex >= list.count) return
+      var item = list.itemAtIndex(listRoot.markIndex)
+      if (item && item.pointerOver) return
+      list.positionViewAtIndex(listRoot.markIndex, ListView.Contain)
     }
     // The rows changed. The ListView's model is their count, and each row
     // reads its entry by index, because a ListView given a new array starts
@@ -3330,6 +3329,7 @@ Panel {
         required property int index
         // The row, read by index (the model is the count).
         readonly property var modelData: listRoot.model[entryColumn.index] || ({})
+        readonly property bool pointerOver: trackRow.pointerOver
         onModelDataChanged: root.requestCover(entryColumn.modelData)
         Component.onCompleted: root.requestCover(entryColumn.modelData)
         width: ListView.view.width
@@ -3354,6 +3354,7 @@ Panel {
         }
 
         TrackRow {
+          id: trackRow
           width: parent.width
           entry: entryColumn.modelData
           cursor: listRoot.markIndex === entryColumn.index
@@ -3661,7 +3662,6 @@ Panel {
       focus: true
       foreground: root.foreground
       fontFamily: root.fontFamily
-      tuiName: root.tuiCommand
       version: root.version
       here: root.hereKeys
       onCloseRequested: root.closeKeysWindow()

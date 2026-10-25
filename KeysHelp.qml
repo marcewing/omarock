@@ -11,7 +11,6 @@ Rectangle {
 
   property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
-  property string tuiName: "ncmpcpp"
   property string version: ""
   // [key, what it does] for RIGHT NOW.
   property var here: []
@@ -73,7 +72,6 @@ Rectangle {
     { title: "PANEL", keys: [
       ["m", "Next source: local music, Apple Music, Spotify, SiriusXM, the radio (the ones set up)"],
       ["e", "Expand or compact"],
-      ["t", "Open the terminal player (" + root.tuiName + ")"],
       [",", "Settings: the sources, and how the panel behaves"],
       ["?", "Show or hide these keys"],
       ["w", "With the keys showing: keep them open in a window of their own"],
