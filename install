@@ -56,12 +56,27 @@ flow=""           # what this run sets up or removes (local, spotify, ...), for 
 action=setup      # or remove
 
 bold=$'\e[1m' dim=$'\e[2m' reset=$'\e[0m' green=$'\e[32m' red=$'\e[31m' yellow=$'\e[33m'
-ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; }
-bad() { printf '  %s✗%s %s\n' "$red" "$reset" "$*"; }
-note() { printf '  %s–%s %s\n' "$yellow" "$reset" "$*"; }
-explain() { printf '%s\n' "$*" | fold -s -w 76 | sed 's/^/  /'; }
+# A blank line before each paragraph and each question, so a new prompt is
+# easy to pick out, and never two in a row. The prompts run in $(…), so
+# whether the last line was blank is kept in a file they can change too.
+spacing=$(mktemp -t omarock-spacing.XXXXXX)
+gap() { [[ -s $spacing ]] || { printf '\n' >&2; printf 1 >"$spacing"; }; }
+printed() { : >"$spacing"; }
+ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; printed; }
+bad() { printf '  %s✗%s %s\n' "$red" "$reset" "$*"; printed; }
+note() { printf '  %s–%s %s\n' "$yellow" "$reset" "$*"; printed; }
+explain() { gap; printf '%s\n' "$*" | fold -s -w 76 | sed 's/^/  /'; printed; }
+block() { printf '    %s\n' "$@"; printed; }  # LINE...: indented, as part of the paragraph above
+# A step's heading. A run that sets up or removes one piece has its title
+# at the top already, so that step has none.
 step_no=0
-step() { step_no=$((step_no + 1)); printf '\n%s%d. %s%s\n' "$bold" "$step_no" "$*" "$reset"; }
+single=""
+step() {
+  [[ $* == "$single" ]] && return 0
+  step_no=$((step_no + 1))
+  printf '\n%s%d. %s%s\n' "$bold" "$step_no" "$*" "$reset"
+  printed
+}
 
 # A command, shown as it would be typed (on stderr, so its output can be
 # silenced alone), then run.
@@ -71,6 +86,7 @@ run() {
     if [[ $a =~ ^[A-Za-z0-9_./:=@%+,~-]+$ ]]; then shown+=" $a"; else shown+=" '${a//\'/\'\\\'\'}'"; fi
   done
   printf '  %s$%s%s\n' "$dim" "$shown" "$reset" >&2
+  printed
   "$@"
 }
 
@@ -109,10 +125,15 @@ answer() {  # PROMPT: the prompt's answer from the file
 # question, how gum would offer it (the default, a placeholder), the answer.
 answered() {  # PROMPT HOW ANSWER
   printf '  ? %s%s  %s→ %s%s\n' "$1" "${2:+ $dim$2$reset}" "$bold" "$3" "$reset" >&2
+  printed
 }
+
+# Each prompt has a blank line above it. Gum clears a prompt once it's
+# answered, so the blank line is still the last one on the screen.
 
 # confirm PROMPT [yes|no]: the default is yes.
 confirm() {
+  gap
   if [[ -n $answers ]]; then
     local a
     a=$(answer "$1")
@@ -129,6 +150,7 @@ confirm() {
 
 # ask PROMPT [VALUE] [PLACEHOLDER]: a line of text.
 ask() {
+  gap
   if [[ -n $answers ]]; then
     local a
     a=$(answer "$1")
@@ -141,6 +163,7 @@ ask() {
 
 # secret PROMPT: a line of text that isn't shown.
 secret() {
+  gap
   if [[ -n $answers ]]; then
     local a
     a=$(answer "$1")
@@ -156,6 +179,7 @@ choose() {
   local header=$1 default=$2 labels=() keys=() selected="" i picked
   shift 2
   while (($#)); do keys+=("$1"); labels+=("$2"); shift 2; done
+  gap
   if [[ -n $answers ]]; then
     picked=$(answer "$header")
     for i in "${!keys[@]}"; do [[ ${keys[i]} == "$picked" ]] && selected=${labels[i]}; done
@@ -565,29 +589,43 @@ step_radio() {
 
 # ---- 4. The audio bus ----
 
+# An output's name for people ("Laptop Speakers"), else its node name.
+output_name() {
+  local desc
+  desc=$(pactl -f json list sinks 2>/dev/null | jq -r --arg n "$1" '.[] | select(.name == $n) | .description // empty' | head -1)
+  [[ -n $desc && $desc != "(null)" ]] && echo "$desc" || echo "$1"
+}
+
 step_bus() {
   step "omarock's sound output"
   local pin out default conf vol
   conf=$(mpd_conf)
   if [[ -f $share/audio/omarock-bus.conf ]]; then
     pin=$(grep -o 'target.object = "[^"]*"' "$share/audio/omarock-bus.conf" | cut -d'"' -f2)
-    ok "installed, playing only into $pin"
+    ok "installed, playing only into $(output_name "$pin")"
     if ! up_to_date audio; then
       confirm "This clone has a newer version of it. Update it (same output)?" && run "$repo/tools/install-audio" --start
     fi
   else
-    explain "Everything omarock plays (mpd, Spotify) goes into one output you pick, with one volume. It never moves to another output: if yours goes away, omarock waits, silent. (Inside, it's a PipeWire bus: audio/README.md.)"
+    explain "When set up, everything omarock plays (mpd, Spotify) goes into one output you pick, with one volume. It never moves to another output: if the selected output goes away, omarock waits, silent. (Inside, it's a PipeWire bus: audio/README.md.)"
     explain "That matters if some outputs must never carry music: a radio transmitter's audio interface, say, or a TV in another room. Pick the output for your speakers or headphones."
     default=$(pactl get-default-sink 2>/dev/null)
-    local name desc args=()
+    # Each output by its name for people. An output with none isn't one to
+    # pick; two with the same name say which is which.
+    local name desc names=() descs=() args=() i
+    local -A seen=()
     while IFS=$'\t' read -r name desc; do
-      [[ $name == omarock || -z $name ]] && continue
-      args+=("$name" "$desc ($name)")
-    done < <(pactl -f json list sinks 2>/dev/null | jq -r '.[] | [.name, .description] | @tsv')
+      [[ $name == omarock || -z $name || -z $desc || $desc == "(null)" ]] && continue
+      names+=("$name") descs+=("$desc")
+      seen[$desc]=$((${seen[$desc]:-0} + 1))
+    done < <(pactl -f json list sinks 2>/dev/null | jq -r '.[] | [.name, (.description // "")] | @tsv')
+    for i in "${!names[@]}"; do
+      args+=("${names[i]}" "${descs[i]}$( ((${seen[${descs[i]}]} > 1)) && echo " (${names[i]})")")
+    done
     if ((${#args[@]} == 0)); then bad "PipeWire lists no outputs."; return 1; fi
     out=$(choose "Which output should omarock play into?" "$default" "${args[@]}") || exit 1
     [[ -n $out ]] || return 1
-    confirm "omarock will play only into $out. Go on?" || return 1
+    confirm "omarock will play only into $(output_name "$out"). Go on?" || return 1
     run "$repo/tools/install-audio" --start --output "$out" || return 1
   fi
 
@@ -595,8 +633,11 @@ step_bus() {
   if grep -qE '^[[:space:]]*target[[:space:]]+"omarock"' "$conf" 2>/dev/null; then
     ok "mpd plays into it"
   else
-    explain "mpd has to play into it. This puts a new audio_output in $conf, and comments out the ones there (to go back: audio/README.md):"
-    printf '    %s\n' 'audio_output {' '    type        "pipewire"' '    name        "omarock"' '    target      "omarock"' '    mixer_type  "none"' '}'
+    explain "mpd has to play into it. This puts a new audio_output in"
+    gap
+    block "$conf"
+    explain "and comments out the ones there (see: audio/README.md):"
+    block 'audio_output {' '    type        "pipewire"' '    name        "omarock"' '    target      "omarock"' '    mixer_type  "none"' '}'
     confirm "Change mpd's output, and restart mpd?" || return 1
     # The bus starts at mpd's volume now, since mpd's own goes to full.
     vol=$(mpc volume 2>/dev/null | grep -oE '[0-9]+' | head -1)
@@ -665,6 +706,7 @@ record() {  # RESULT [EXIT CODE]
 finish() {  # EXIT CODE
   cleanup_firewall
   [[ -z $asked ]] || rm -f "$asked"
+  rm -f "$spacing"
   case $1 in 0) record done 0 ;; 129 | 130 | 143) record stopped "$1" ;; *) record failed "$1" ;; esac
 }
 trap 'finish $?' EXIT
@@ -674,15 +716,16 @@ trap 'exit 143' TERM
 
 step_spotify() {
   step "Spotify"
-  explain "Spotify plays here through Soloist, Spotify's own player (a Spotify Connect speaker named after this machine). omarock-spotify drives it, and searches through Spotify's Web API. You need Spotify Premium."
+  explain "Omarock plays Spotify music through Soloist, Spotify's own player. omarock-spotify drives it, and searches through Spotify's Web API."
+  explain "You need Spotify Premium."
   local id
   if [[ -f $config/spotify.json ]] && jq -e '.clientId | length > 0' "$config/spotify.json" >/dev/null 2>&1; then
     ok "the developer app: $config/spotify.json"
   else
-    explain "First, a Spotify developer app of your own (free): at developer.spotify.com/dashboard, create an app with the redirect URI http://127.0.0.1:8730/callback, and tick Web API. Its Client ID goes in omarock's config."
+    explain "First, create a Spotify developer app of your own (free). At developer.spotify.com/dashboard, create an app with the redirect URI http://127.0.0.1:8730/callback, and tick Web API. Its Client ID goes in omarock's config."
     if [[ -z $answers ]] && confirm "Open the dashboard in your browser?"; then xdg-open https://developer.spotify.com/dashboard >/dev/null 2>&1 & fi
     while :; do
-      id=$(ask "The app's Client ID (Enter to stop here):" "" "32 letters and digits") || exit 1
+      id=$(ask "The app's Client ID (Blank to stop here):" "" "32 letters and digits") || exit 1
       [[ -z $id ]] && return 1
       [[ $id =~ ^[0-9a-fA-F]{32}$ ]] && break
       bad "A Client ID is 32 letters and digits."
@@ -694,9 +737,9 @@ step_spotify() {
   if private_ok "$config/soloist-key"; then
     ok "the Soloist key: $config/soloist-key"
   else
-    explain "Then the Soloist key, from the same dashboard. It goes into $config/soloist-key, readable only by you, and isn't shown as you type."
+    explain "Next we need the Soloist key, from the same dashboard. It goes into $config/soloist-key."
     local key
-    key=$(secret "The Soloist key (Enter to stop here):") || exit 1
+    key=$(secret "The Soloist key (Blank to stop here):") || exit 1
     [[ -z $key ]] && return 1
     printf '%s\n' "$key" | write_private "$config/soloist-key"
     key=""
@@ -729,7 +772,7 @@ step_spotify() {
   if sp_paired; then
     ok "Soloist is signed in to your account"
   else
-    explain "Now pair Soloist with your account, once: in Spotify on your phone or computer, on this network, open Connect to a device, pick $(hostname), and play something."
+    explain "Now you must pair Soloist with your account, once. Open Spotify on your phone or computer, on this network, then open Connect to a device, pick $(hostname), and play something."
     if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
       local port
       port=$(ss -ltnpH 2>/dev/null | awk '/"soloist"/ && $4 !~ /^127\./ {n = split($4, a, ":"); print a[n]; exit}')
@@ -757,7 +800,7 @@ step_spotify() {
   if sp_signed_in; then
     ok "signed in to Spotify's Web API"
   else
-    explain "Last, sign in to Spotify's Web API (for search and your library). This opens Spotify's sign-in page in your browser."
+    explain "Finally, you have to sign in to Spotify's Web API (for search and your library). This opens Spotify's sign-in page in your browser."
     if confirm "Sign in now?"; then
       run "$repo/tools/omarock-sp" login
       wait_until "Waiting for the sign-in… (Ctrl-C to do it later)" 300 sp_signed_in \
@@ -781,7 +824,7 @@ sys.exit(0 if d.get("username") and d.get("password") and d["username"] != "you@
 step_sxm() {
   step "SiriusXM"
   if [[ ! -f $share/sxm/INSTALLED ]]; then
-    explain "omarock-sxm plays SiriusXM's live channels through mpd. It's unofficial: it signs in as SiriusXM's web player does. SiriusXM's terms forbid that, so your account could be limited or closed, and it may stop working whenever SiriusXM changes its player (sxm/README.md, \"Read this first\")."
+    explain "Omarock plays SiriusXM using omarock-sxm. It's unofficial! It signs in as SiriusXM's web player does. SiriusXM's terms forbid that, so your account could be limited or closed, and it may stop working whenever SiriusXM changes its player (see: sxm/README.md)."
     confirm "Set it up anyway?" no || return 1
   fi
   if [[ ! -f $share/sxm/INSTALLED ]]; then
@@ -796,9 +839,11 @@ step_sxm() {
     if sxm_account_set && ! $again; then
       ok "the account: $config/siriusxm.json"
     else
-      explain "Your SiriusXM login goes into $config/siriusxm.json, readable only by you. The password isn't shown as you type."
+      explain "Your SiriusXM login goes into $config/siriusxm.json."
+      # The one entered before, to change; not install-sxm's template's.
       user=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("username", ""))' "$config/siriusxm.json" 2>/dev/null)
-      user=$(ask "SiriusXM email or username (Enter to stop here):" "$user") || exit 1
+      [[ $user == you@example.com ]] && user=""
+      user=$(ask "SiriusXM email or username (Blank to stop here):" "$user") || exit 1
       [[ -z $user ]] && return 1
       pass=$(secret "SiriusXM password:") || exit 1
       printf '%s\0%s' "$user" "$pass" | python3 -I -c '
@@ -831,7 +876,7 @@ bridge_status() {  # BRIDGE TOKENFILE: the HTTP status of an authenticated reque
 
 step_apple() {
   step "Apple Music"
-  explain "Apple Music plays on a Mac, through omarock's bridge: an app built there with your own Apple Developer membership (bridge/README.md): clone omarock on the Mac and run ./install there too. Its sound comes here as a stream mpd plays. Both machines need to reach each other, over Tailscale, say."
+  explain "For Omarock to play Apple Music, you'll need to have a bridge program running on a Mac signed into Apple Music. The bridge is an app built on your Mac with your own Apple Developer membership (bridge/README.md). Clone omarock on the Mac and run ./install there. Its sound comes here as a stream. Both machines need to reach each other, over Tailscale, say."
   local bridge="" stream="" h
   if [[ -f $config/apple.json ]]; then
     bridge=$(jq -r '.bridge // empty' "$config/apple.json")
@@ -852,7 +897,7 @@ step_apple() {
     while :; do
       addr=other
       if ((${#args[@]})); then addr=$(choose "Which Mac?" "" "${args[@]}" other "Another address…") || exit 1; fi
-      if [[ $addr == other ]]; then addr=$(ask "The Mac's address (Enter to stop here):" "" "100.64.0.10 or my-mac") || exit 1; fi
+      if [[ $addr == other ]]; then addr=$(ask "The Mac's address (Blank to stop here):" "" "100.64.0.10 or my-mac") || exit 1; fi
       [[ -z $addr ]] && return 1
       bridge="http://$addr:8710"
       h=$(health "$bridge")
@@ -876,11 +921,11 @@ step_apple() {
   if private_ok "$tokenfile" && [[ $(bridge_status "$bridge" "$tokenfile") == 200 ]]; then
     ok "the bridge's token: $tokenfile"
   else
-    explain "omarock needs the bridge's token, which the bridge made on the Mac. It goes into $tokenfile, readable only by you."
+    explain "omarock needs the bridge's token, which the bridge made on the Mac. It goes into $tokenfile."
     local how token code user host
-    how=$(choose "How should it come over?" paste \
+    how=$(choose "How do you want to set the token?" paste \
       paste "I'll paste it (on the Mac: pbcopy < ~/Library/Application\ Support/omarock-bridge/token)" \
-      ssh "Copy it with scp (the Mac's Remote Login must be on)") || exit 1
+      ssh "Copy it with scp (your Mac's Remote Login must be on)") || exit 1
     if [[ $how == ssh ]]; then
       user=$(ask "Your user name on the Mac:" "$USER") || exit 1
       host=${bridge#http://}
@@ -908,7 +953,7 @@ step_apple() {
     ok "mpd uses the patched libFLAC"
     [[ $(setting appleRejoin true) == true ]] && pending[appleRejoin]=false
   else
-    explain "For smooth playback, mpd needs a fix to libFLAC that isn't in Arch's yet (patches/README.md). Without it, mpd falls behind the Mac, and omarock catches it up after each change, with a short stutter. This builds the fixed library for mpd only (a few minutes; needs cmake and ninja)."
+    explain "For smooth playback, mpd needs a fix to libFLAC that isn't in Arch's repo yet (patches/README.md). Without it, mpd falls behind the Mac, and omarock catches it up after each change, with a short stutter. This builds the fixed library for mpd only (a few minutes; needs cmake and ninja)."
     if confirm "Build the patched libFLAC?" no; then
       run sudo pacman -S --needed --noconfirm base-devel cmake ninja git \
         && run "$repo/tools/build-libflac" \
@@ -943,6 +988,7 @@ set_setting() {  # KEY JSON: one of omarock's settings, into its settings file
   { jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$file" 2>/dev/null || jq -n --arg k "$1" --argjson v "$2" '{($k): $v}'; } \
     >"$file.new" && mv "$file.new" "$file"
   printf '  %s%s: %s%s\n' "$dim" "$1" "$(jq -r . <<<"$2")" "$reset"
+  printed
 }
 
 unset_setting() {  # KEY...: out of omarock's settings file, back to their defaults
@@ -952,6 +998,7 @@ unset_setting() {  # KEY...: out of omarock's settings file, back to their defau
     jq -e --arg k "$k" 'has($k)' "$file" >/dev/null 2>&1 || continue
     jq --arg k "$k" 'del(.[$k])' "$file" >"$file.new" && mv "$file.new" "$file"
     printf '  %s%s: back to its default%s\n' "$dim" "$k" "$reset"
+    printed
   done
 }
 
@@ -1005,38 +1052,45 @@ setup_local() {
   step_radio
   save_pending
   printf '\n%sReady%s\n' "$bold" "$reset"
-  explain "Click omarock in the bar (a music note until something plays). Press ? there for the keys."
+  explain "Click omarock in the bar (a record until something plays). Press ? there for the keys."
   explain "For Spotify, SiriusXM or Apple Music: omarock's settings (press , in the panel) set each one up."
 }
 
 setup_piece() {
   local piece key
   piece=$(piece_name "$1") || no_piece "$1"
-  flow=$piece again="./install $piece"
+  flow=$piece again="./install $piece" single=$(piece_title "$piece")
   record running
-  printf '\n%sSetting up %s%s\n' "$bold" "$(piece_title "$piece")" "$reset"
+  printf '\n%sSetting up %s%s\n' "$bold" "$single" "$reset"
+  printed
   local_music
   case $piece in
     spotify) step_spotify ;;
     siriusxm) step_sxm ;;
     apple-music) step_apple ;;
     sound) step_bus ;;
-  esac || { printf '\n%s isn'"'"'t set up yet. Run %s again to carry on.\n' "$(piece_title "$piece")" "$again"; exit 1; }
+  esac || { printf '\n%s isn'"'"'t set up yet. Run %s again to carry on.\n' "$single" "$again"; exit 1; }
   key=$(piece_switch "$piece")
   [[ -n $key ]] && pending[$key]=true
   save_pending
-  printf '\n%sReady%s\n' "$bold" "$reset"
+  gap
   if [[ -n $key ]]; then
-    explain "$(piece_title "$piece") is switched on: it has its button in omarock's panel. Its switch in omarock's settings turns it off and on."
+    printf '%s%s is enabled in omarock.%s\n' "$bold" "$single" "$reset"
+  else
+    local pin
+    pin=$(cat "$config/audio-output" 2>/dev/null)
+    printf '%somarock'"'"'s sound output is set up: everything omarock plays goes into %s.%s\n' "$bold" \
+      "$([[ -n $pin ]] && output_name "$pin" || echo "the output you picked")" "$reset"
   fi
 }
 
 remove_piece() {
   local piece
   piece=$(piece_name "${1:-}") || no_piece "${1:-}"
-  flow=$piece action=remove again="./install --remove $piece"
+  flow=$piece action=remove again="./install --remove $piece" single=$(piece_title "$piece")
   record running
-  printf '\n%sTaking %s off this machine%s\n' "$bold" "$(piece_title "$piece")" "$reset"
+  printf '\n%sRemoving %s%s\n' "$bold" "$single$([[ $piece == sound ]] && echo " handling")" "$reset"
+  printed
   # mpc reaches mpd where omarock does.
   mpd_socket=$(setting socket "")
   [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
@@ -1056,7 +1110,7 @@ remove_piece() {
 # removes and asks first. mpd, its packages, the music and playlists stay.
 
 present() { local p; for p; do [[ -e $p || -L $p ]] && printf '%s\n' "$p"; done; }
-listing() { local p; for p; do printf '    %s\n' "${p/#"$HOME"/\~}"; done; }
+listing() { local p; for p; do printf '    %s\n' "${p/#"$HOME"/\~}"; done; printed; }
 stop_units() {  # UNIT...: stop and disable those that are installed
   local u have=()
   for u; do [[ -f $units/$u.service ]] && have+=("$u.service"); done
@@ -1259,20 +1313,21 @@ un_bus() {
   fi
   step "omarock's sound output"
   if [[ -n $piece ]]; then
-    explain "Without it, omarock plays wherever your default output is, and follows it when that changes. If some output must never carry music (a radio transmitter's audio interface, say), keep it."
+    explain "Without it, omarock plays wherever your default output is, and follows it when that changes. If some output must never carry music (a radio transmitter's audio interface, say), you should keep this enabled."
   fi
   if $block; then
     back=$(mpd_conf_undo "$conf" show)
-    explain "mpd plays into it. This takes omarock's audio_output out of $conf, and restarts mpd."
     if [[ -n $back ]]; then
-      explain "The output mpd had before comes back:"
-      printf '    %s\n' "$back"
+      explain "This takes omarock's audio_output out of $conf, and restarts mpd. The output mpd had previously is restored:"
+      mapfile -t back < <(printf '%s\n' "$back")
+      block "${back[@]}"
     else
+      explain "This takes omarock's audio_output out of $conf, and restarts mpd."
       explain "No output was set aside when it went in, so mpd will use its default (PipeWire's default output). Check that's where you want music to play."
     fi
   fi
   if ((${#paths[@]})); then
-    explain "It and its guard stop, and these go:"
+    explain "These files are removed:"
     listing "${paths[@]}"
   fi
   if [[ -n $piece ]]; then
