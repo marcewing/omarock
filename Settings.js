@@ -44,7 +44,7 @@ var schema = [
     description: "Click a song or artist playing on SiriusXM or the radio to find it there, while the station plays on. Time Machine's Top 100 plays there too, away from Apple Music and Spotify. The other one if this one is off." },
 
   { key: "timeMachine", type: "boolean", label: "Time Machine", defaultValue: false,
-    description: "A Time Machine button at the top of the panel: pick a year, and only music from then or before shows, with that year's Top 100 from Billboard (as Wikipedia lists it)." },
+    description: "A Time Machine button at the top of the panel: enter a year, and only music from then or before shows, with that year's Top 100 from Billboard (as Wikipedia lists it). Songs from after it come out of the queue." },
 
   { key: "spotify", type: "source", source: "spotify", name: "Spotify", label: "Spotify", defaultValue: false,
     description: "Played here by Spotify's own player. Off stops it, and keeps your accounts and keys.",

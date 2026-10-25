@@ -282,8 +282,8 @@ ShellRoot {
             ? host.findNamed(popup().contentItem[0].parent.parent, "timeMachineChip").text : "",
           top100: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "top100Button")
             ? host.findNamed(popup().contentItem[0].parent.parent, "top100Button").text : "",
-          picker: { open: p.yearPickerOpen, index: p.yearPicker.index,
-            choices: p.yearPicker.choices.slice(0, 12).map(function(c) { return c.label }) },
+          picker: { open: p.yearPickerOpen, typed: p.yearPicker.typed, valid: p.yearPicker.valid,
+            warning: p.yearPicker.warning, later: p.yearPicker.laterCount },
           songItems: p.browseTop && p.browseTop.songItems ? p.browseTop.songItems.length : -1 },
         clientName: p.clientName, elsewhere: p.bridgeMode ? p.bridge.elsewhere : "",
         playerExtra: p.bridgeMode ? p.bridgeExtra : "",

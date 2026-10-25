@@ -115,8 +115,9 @@ Panel {
   // year picked at the top (t). Then search, artists, albums, genres,
   // playlists, Shuffle and the random song leave out music from after it,
   // on every source but the live ones, and Top 100 (T) has Billboard's
-  // year-end chart for it, played on Apple Music or Spotify. The queue stays
-  // as it is. The year is kept in settings.json (timeMachineYear).
+  // year-end chart for it, played on Apple Music or Spotify. Songs from
+  // after it come out of the queue (keepQueueInYear). The year is kept in
+  // settings.json (timeMachineYear).
   readonly property bool timeMachineEnabled: root.setting("timeMachine", false) === true
   readonly property int timeYear: {
     if (!root.timeMachineEnabled) return 0
@@ -131,6 +132,10 @@ Panel {
   property bool yearPickerOpen: false
   // What's listed belongs to the year it was listed for.
   onTimeYearChanged: root.clearSearch()
+  // The years of the queue's songs (0 where there's none), for the year
+  // picker's warning.
+  readonly property var queueYears: root.bridgeMode ? root.bridge.queue.map(TimeMachine.yearOf)
+    : client.queue.map(function(song) { return parseInt(Mpd.songYear(song), 10) || 0 })
   readonly property var sources: ["local"].concat(appleEnabled ? ["apple"] : []).concat(spotifyEnabled ? ["spotify"] : [])
     .concat(sxmEnabled ? ["sxm"] : []).concat(radioEnabled ? ["radio"] : [])
   readonly property var sourceNames: ({ local: "local music", apple: "Apple Music", spotify: "Spotify", sxm: "SiriusXM", radio: "the radio" })
@@ -139,6 +144,7 @@ Panel {
     root.triedSource = ""
     root.pickerItem = null
     root.clearSearch()
+    root.recheckQueue()
   }
   // The channel to come back to when switching to SiriusXM.
   property string lastChannel: ""
@@ -161,7 +167,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.0"
+  readonly property string version: "0.9.1"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1107,13 +1113,90 @@ Panel {
     keyCatcher.forceActiveFocus()
   }
 
-  // A year (0: off), kept in settings.json.
+  // A year (0: off), kept in settings.json. The queue's songs from after it
+  // come out of it, as the picker warned.
   function pickYear(year) {
     root.closeYearPicker()
     if (year === root.timeYear) return
     root.saveSetting("timeMachineYear", year)
     root.say(year > 0 ? "Time Machine: " + year + ". Only music from then or before; "
       + TimeMachine.chartName(year) + " (T) has its chart" : "Time Machine is off: all your music again")
+    if (year > 0) root.keepQueueInYear(true)
+  }
+
+  // Time Machine keeps the queue to its year: songs from after it come out
+  // of mpd's queue and Apple Music's; Spotify's can't be changed, so a song
+  // from after it playing there is skipped. Done when a year is picked, and
+  // again as the queue or the source changes (queueKeeper), so a song added
+  // later (from mpc, or a phone) goes too. Songs without a year stay.
+  // announce: say what went.
+  function keepQueueInYear(announce) {
+    var year = root.timeYear
+    if (year === 0) return
+    // Nothing extra goes to mpd while a stream starts (MpdClient.playStream).
+    if (client.streamTuning !== "") {
+      queueKeeper.restart()
+      return
+    }
+    // mpd keeps its song while another source plays: it waits on it paused.
+    client.removeAfterYear(year, root.source !== "local", function(count) {
+      if (announce && count > 0) root.say("Time Machine: " + year + ". " + root.countText(count, "song")
+        + " from after it came out of the queue")
+    })
+    if (root.bridgeMode) root.keepBridgeInYear(root.bridge, year, announce)
+  }
+
+  // Apple Music's or Spotify's queue (the window its status lists): a song
+  // from after the year playing jumps to the next one up to it (or pauses,
+  // with none), then the later ones come out, the last first so the others
+  // keep their places. Not while it plays for another machine.
+  property bool bridgeKeeping: false
+  function keepBridgeInYear(bridge, year, announce) {
+    if (root.bridgeKeeping || bridge.elsewhere !== "") return
+    var status = bridge.bridgeStatus
+    var queue = status.queue || []
+    var offset = status.queueOffset || 0
+    var current = status.queueIndex
+    function later(song) { return TimeMachine.yearOf(song) > year }
+    var steps = []
+    var going = []
+    queue.forEach(function(song, i) { if (bridge.canRemove && later(song) && offset + i !== current) going.push(offset + i) })
+    var playing = queue[current - offset]
+    if (playing && later(playing) && status.state === "playing") {
+      var next = -1
+      for (var i = current - offset + 1; i < queue.length && next < 0; i++) if (!later(queue[i])) next = offset + i
+      if (next >= 0) {
+        steps.push(["/v1/queue/jump", { index: next }])
+        if (bridge.canRemove) going.push(current)
+      } else {
+        steps.push(["/v1/pause", {}])
+      }
+    }
+    going.sort(function(a, b) { return b - a }).forEach(function(index) { steps.push(["/v1/queue/remove", { index: index }]) })
+    if (steps.length === 0) return
+    root.bridgeKeeping = true
+    function run(k) {
+      if (k === steps.length) {
+        root.bridgeKeeping = false
+        if (announce && going.length > 0) root.say("Time Machine: " + year + ". " + root.countText(going.length, "song")
+          + " from after it came out of " + bridge.service + "'s queue")
+        else if (steps[0][0] === "/v1/pause") root.say("Nothing in " + bridge.service + "'s queue is from " + year + " or before")
+        // What changed meanwhile (another device adding to the queue).
+        root.recheckQueue()
+        return
+      }
+      bridge.post(steps[k][0], steps[k][1], function(data, error) {
+        if (error !== "") root.bridgeKeeping = false
+        else run(k + 1)
+      })
+    }
+    run(0)
+  }
+
+  // The queue changed (or the source did): Time Machine looks at it again,
+  // once it settles.
+  function recheckQueue() {
+    if (root.timeYear > 0) queueKeeper.restart()
   }
 
   // T or the Top 100 button: Billboard's chart for Time Machine's year, from
@@ -2841,6 +2924,7 @@ Panel {
     // The radio's favourites are the "Radio" playlist: follow the list.
     onPlaylistsChanged: radio.refreshFavorites()
     onStatusChanged: root.followMpd()
+    onQueueChanged: root.recheckQueue()
   }
 
   // omarock's settings file, followed as it changes (by the settings
@@ -3028,6 +3112,7 @@ Panel {
     // On unless switched off: only a patched libFLAC keeps up without it.
     rejoinAfterChange: root.setting("appleRejoin", true) === true
     onLastErrorChanged: if (root.appleMode && apple.lastError !== "") root.say(apple.lastError)
+    onBridgeStatusChanged: if (root.appleMode) root.recheckQueue()
   }
 
   // Spotify's service. Followed whenever Spotify is switched on, as its
@@ -3051,6 +3136,7 @@ Panel {
     retryMs: root.spotifyMode ? 3000 : 30000
     idleStopSeconds: 0
     onLastErrorChanged: if (root.spotifyMode && spotify.lastError !== "") root.say(spotify.lastError)
+    onBridgeStatusChanged: if (root.spotifyMode) root.recheckQueue()
   }
 
   // Time Machine's charts, and their songs as Apple Music and Spotify have them.
@@ -3065,6 +3151,13 @@ Panel {
     id: searchDelay
     interval: 180
     onTriggered: root.runSearch()
+  }
+
+  // Time Machine's look at the queue, once a change has settled.
+  Timer {
+    id: queueKeeper
+    interval: 400
+    onTriggered: root.keepQueueInYear(false)
   }
 
   Timer {
@@ -3265,6 +3358,8 @@ Panel {
         z: 10
         open: root.yearPickerOpen
         year: root.timeYear
+        queueYears: root.queueYears
+        skipsInstead: root.spotifyMode
         foreground: root.foreground
         fontFamily: root.fontFamily
         onPicked: function(year) { root.pickYear(year) }

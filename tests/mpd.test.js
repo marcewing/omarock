@@ -321,6 +321,7 @@ test("withYear narrows a filter to Time Machine's year; inYear the same for a so
   assert.ok(!Mpd.inYear({ file: "x" }, 1959) && Mpd.inYear({ file: "x" }, 0))
   assert.deepEqual(Mpd.genreCommands("Jazz", "add", 1959),
     ['findadd "((genre == \\"Jazz\\") AND (date =~ \\"^(1[0-8][0-9]{2}|19[0-4][0-9]|195[0-8]|1959)\\"))"'])
+  assert.equal(Mpd.afterYearFilter(1959), '((date != "") AND (date !~ "^(1[0-8][0-9]{2}|19[0-4][0-9]|195[0-8]|1959)"))')
   assert.deepEqual(Mpd.randomSongCommands(3, 2, 1959),
     ['findadd "(date =~ \\"^(1[0-8][0-9]{2}|19[0-4][0-9]|195[0-8]|1959)\\")" window 3:4', "play 2"])
 })

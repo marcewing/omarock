@@ -480,6 +480,23 @@ Item {
     })
   }
 
+  // Time Machine: the queue's songs from after `year` out of it, found in
+  // mpd (playlistsearch), then one deleteid at a time, quietly, as in
+  // deleteStreams. The song playing goes last, so mpd carries on with the
+  // next one left rather than each later one in turn; keepCurrent keeps it
+  // (another source plays, and mpd waits on it paused). Streams and songs
+  // without a date stay. callback(how many went).
+  function removeAfterYear(year, keepCurrent, callback) {
+    root.send(Mpd.command("playlistsearch", [Mpd.afterYearFilter(year)]), function(lines, error) {
+      var current = String(root.status.songId)
+      var ids = error === "" ? Mpd.parseValues(lines, "id") : []
+      var going = ids.filter(function(id) { return id !== current })
+      if (!keepCurrent && going.length < ids.length) going.push(current)
+      going.forEach(function(id) { root.send(Mpd.command("deleteid", [id]), null, true) })
+      if (callback) callback(going.length)
+    })
+  }
+
   // Leaving the streams: a request still on its way goes no further.
   function cancelStream() {
     root.streamRequest++

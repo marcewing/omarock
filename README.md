@@ -33,8 +33,8 @@ media keys and any other mpd client always agree with it.
   add it to a playlist (mpd's own stored playlists).
 - **Everything about a song or album (`i`):** its tags, format, bitrate and
   size, and, on a streaming service, whether it's in your library.
-- **Time Machine:** pick a year, and only music from then or before shows, with
-  that year's Billboard Top 100 to play on Apple Music or Spotify.
+- **Time Machine:** enter a year, and only music from then or before shows and
+  plays, with that year's Billboard Top 100 to play on Apple Music or Spotify.
 - **Keys that do what you'd guess,** and the full list is a `?` away.
 - **One volume for every source** (with omarock's optional audio bus).
 
@@ -250,12 +250,17 @@ stay until you remove them too.
   switches to it; `a` adds it to that service's queue, `A` to one of its
   playlists; Esc comes back to the station.
 - **Time Machine** (switch it on in the settings): the **Time Machine: OFF** button
-  at the top (or `t`) picks a year. Then search, artists, albums, genres,
+  at the top (or `t`) asks for a year. Then search, artists, albums, genres,
   playlists, Shuffle and the random song on Play leave out music from after it,
   on local music, Apple Music and Spotify, by each song's year (an album's, for
-  local songs: its Date tag); songs without a year are left out too. The queue
-  stays as it is, and SiriusXM and the radio play on. Picking Off brings
-  everything back.
+  local songs: its Date tag); songs without a year are left out too.
+  - **The queue:** songs from after the year come out of it, as the box warns
+    before you go: mpd's queue, and Apple Music's when it's playing. Spotify's
+    queue can't be changed, so its later songs are skipped instead. A song
+    added later (from `mpc`, or a phone) comes out too. Songs without a year
+    stay, and SiriusXM and the radio play on.
+  - **Off:** type `off` (or **Turn off**) to have all your music again. What
+    came out of the queue doesn't come back.
   - **Top 100** (or `T`), beside Playlists: Billboard's year-end Hot 100 for the
     year, from Wikipedia (a top 50 for 1956–58, a top 30 for 1949–55). omarock
     finds each song on Apple Music or Spotify: the one playing, else the

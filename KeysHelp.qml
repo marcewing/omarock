@@ -64,7 +64,7 @@ Rectangle {
       ["x", "In a playlist, remove the song; on a playlist, delete it (asks first)"]
     ] },
     { title: "TIME MACHINE", keys: [
-      ["t", "Pick a year: only music from then or before shows (once Time Machine is switched on in the settings)"],
+      ["t", "Enter a year: only music from then or before shows, and the queue's later songs come out (once Time Machine is switched on in the settings)"],
       ["T", "With a year picked: Billboard's Top 100 for it, played on Apple Music or Spotify"]
     ] },
     { title: "SEARCH", keys: [

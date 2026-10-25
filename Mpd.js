@@ -92,6 +92,12 @@ function withYear(filter, year) {
   return year > 0 ? andFilter([filter, yearFilter(year)]) : filter
 }
 
+// Songs from after the year: a Date tag that isn't up to it. Streams and
+// songs without a date aren't among them.
+function afterYearFilter(year) {
+  return andFilter([tagFilter("date", "!=", ""), tagFilter("date", "!~", yearPattern(year))])
+}
+
 // The same for a song in hand.
 function inYear(song, year) {
   var y = songYear(song)
@@ -695,6 +701,7 @@ if (typeof module !== "undefined") {
     yearPattern: yearPattern,
     yearFilter: yearFilter,
     withYear: withYear,
+    afterYearFilter: afterYearFilter,
     inYear: inYear,
     parseObject: parseObject,
     parseSongs: parseSongs,

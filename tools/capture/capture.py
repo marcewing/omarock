@@ -3394,37 +3394,54 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("expand", "false")
     host.settle(.5)
 
-    def pick(typed, wanted):
+    def pick(typed):
         host.call("press", "t")
         wait_for(lambda: host.state()["timeMachine"]["picker"]["open"], "the year picker")
         host.settle(.3)
         host.call("typeKeys", typed)
-        wait_for(lambda: host.state()["timeMachine"]["picker"]["choices"][:1] == [wanted], typed + " finds " + wanted)
+        wait_for(lambda: host.state()["timeMachine"]["picker"]["typed"] == typed, "typed " + typed)
         host.call("press", "Return")
         wait_for(lambda: not host.state()["timeMachine"]["picker"]["open"], "the picker closes")
 
-    # t: the picker, Off then the years, newest first; "85" finds 1985.
+    def file_of(title):
+        return next(l[6:] for l in mpd_query(socket_path, 'find "(title == \\"%s\\")"' % title) if l.startswith("file: "))
+
+    # A queue from either side of 1988, playing a 2019 song.
+    mixed = [file_of(t) for t in ("Glasswork", "Fernweh", "Orbit Song", "Schnee")]
+    mpd_client(socket_path, "clear", *['add "%s"' % f for f in mixed], "play 0")
+    wait_for(lambda: host.state()["queueLength"] == 4 and host.state()["nowPlaying"].startswith("Glasswork"), "a mixed queue")
+
+    # t: a box for the year, warning that the queue's later songs will go.
     host.call("press", "t")
     wait_for(lambda: host.state()["timeMachine"]["picker"]["open"], "the year picker")
     host.settle(.3)
     s = host.state()
-    last = time.localtime().tm_year - 1
-    check(s["timeMachine"]["picker"]["choices"][:3] == ["Off", str(last), str(last - 1)] and s["timeMachine"]["picker"]["index"] == 1,
-          "t opens the picker: Off, then the years from last year, on the newest: " + str(s["timeMachine"]["picker"]["choices"][:3]), failures)
-    host.call("typeKeys", "85")
-    wait_for(lambda: host.state()["timeMachine"]["picker"]["choices"] == ["1985"], "85 is 1985")
+    check(s["timeMachine"]["picker"]["warning"] == "Anything in the queue from after the year you enter will be removed from it.",
+          "t asks for a year, warning that the queue's songs from after it will go: " + s["timeMachine"]["picker"]["warning"], failures)
+    host.call("typeKeys", "1988")
+    wait_for(lambda: host.state()["timeMachine"]["picker"]["valid"], "1988 typed")
+    s = host.state()
+    check(s["timeMachine"]["picker"]["warning"] == "2 songs in the queue are from after 1988, and will be removed from it.",
+          "with a year typed, it says how many: " + s["timeMachine"]["picker"]["warning"], failures)
     host.grab(output / "compact-time-machine-picker.png")
     host.call("press", "Escape")
     wait_for(lambda: not host.state()["timeMachine"]["picker"]["open"], "Esc closes it")
-    check(host.state()["timeMachine"]["year"] == 0, "Esc picks nothing", failures)
+    check(host.state()["timeMachine"]["year"] == 0 and len(mpd_files(socket_path)) == 4, "Esc picks nothing, and the queue stays", failures)
 
     # 1988, for the local library: its 2019 and 2021 albums, and 1990's sampler, go.
-    pick("1988", "1988")
+    pick("1988")
     s = host.state()
     check(s["timeMachine"]["year"] == 1988 and s["timeMachine"]["chip"] == "1988" and s["timeMachine"]["top100"] == "Top 100"
           and settings_file().get("timeMachineYear") == 1988,
           "a year picked: the chip says it, Top 100 shows, and settings.json keeps it", failures)
     check("T top 100" in s["hint"], "and T is in the hints: " + s["hint"], failures)
+    wait_for(lambda: mpd_files(socket_path) == [mixed[1], mixed[3]], "the later songs out of the queue")
+    wait_for(lambda: host.state()["nowPlaying"].startswith("Fernweh"), "the next song up to 1988 plays")
+    check(mpd_state(socket_path)["state"] == "play" and "2 songs from after it came out of the queue" in host.state()["notice"],
+          "the queue's 2019 and 2021 songs come out, and the next one from 1988 plays: " + host.state()["notice"], failures)
+    mpd_client(socket_path, 'add "%s"' % mixed[2])
+    wait_for(lambda: mpd_files(socket_path) == [mixed[1], mixed[3]], "a later song added comes out again", timeout=6)
+    check(True, "a 2021 song added from another client (mpc) comes out too", failures)
     host.grab(output / "compact-time-machine.png")
 
     def results(query):
@@ -3453,9 +3470,6 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("back")
 
     # A playlist: only its songs to 1988, each removed from its own place.
-    def file_of(title):
-        return next(l[6:] for l in mpd_query(socket_path, 'find "(title == \\"%s\\")"' % title) if l.startswith("file: "))
-    mixed = [file_of(t) for t in ("Glasswork", "Fernweh", "Orbit Song", "Schnee")]
     mpd_client(socket_path, *['playlistadd "Then and Now" "%s"' % f for f in mixed])
     host.call("key", "P")
     wait_for(lambda: host.state()["browse"] == "playlists:Playlists" and "playlist:Then and Now" in host.state()["rows"], "Playlists")
@@ -3495,7 +3509,7 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("hide")
     host.call("open")
     wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
-    pick("1985", "1985")
+    pick("1985")
     host.call("setSource", "apple")
     wait_for(lambda: host.state()["appleMode"] and host.state()["appleReady"], "Apple Music")
     s = results("bob mould")
@@ -3505,6 +3519,29 @@ def time_machine_scenario(host, output, socket_path, failures):
     check("album:Zen Arcade" in s["rows"] and "album:New Day Rising" in s["rows"],
           "and keeps 1984's and 1985's albums: " + ", ".join(s["rows"]), failures)
     host.call("back")
+
+    # Apple Music's queue, as another device left it: 1989's songs either
+    # side of 1984's, the first playing. It moves on to 1984's, and 1989's go.
+    def songs(*ids): return [{"kind": "song", "id": i, "source": "catalog"} for i in ids]
+    request = urllib.request.Request(f"http://127.0.0.1:{BRIDGE['port']}/v1/play", method="POST",
+                                     data=json.dumps({"items": songs("c-so-8", "c-so-1", "c-so-9", "c-so-11"), "mode": "play"}).encode(),
+                                     headers={"Authorization": "Bearer fake-bridge-token", "Content-Type": "application/json"})
+    urllib.request.urlopen(request, timeout=5).read()
+    wait_for(lambda: host.state()["rows"] == ["queue:Something I Learned Today", "queue:Keep On Loving You"],
+             "Apple Music's queue to 1985")
+    removed = [b["index"] for _, _, b in bridge_requests("/v1/queue/remove")]
+    check(host.state()["nowPlaying"].startswith("Something I Learned Today") and removed[-2:] == [2, 0],
+          "Apple Music's queue: past 1989's song playing to 1984's, and 1989's taken out, the last first: " + str(removed), failures)
+    to_source(host, "local")
+
+    # Spotify's queue can't be changed: a later song playing is skipped.
+    host.call("setSource", "spotify")
+    wait_for(lambda: host.state()["spotifyMode"], "Spotify")
+    spotify_post("/v1/play", {"items": songs("c-so-8", "c-so-1"), "mode": "play"})
+    wait_for(lambda: host.state()["nowPlaying"].startswith("Something I Learned Today"), "Spotify past 1989's song")
+    jumps = [b["index"] for _, _, b in spotify_requests("/v1/queue/jump")]
+    check(jumps[-1:] == [1] and not spotify_requests("/v1/queue/remove"),
+          "Spotify: 1989's song playing is skipped, to 1984's: " + str(jumps), failures)
     to_source(host, "local")
 
     # Top 100, from local music: the chart from Wikipedia, its songs found on
@@ -3560,7 +3597,7 @@ def time_machine_scenario(host, output, socket_path, failures):
     to_source(host, "local")
 
     # A year Wikipedia has no page for says so.
-    pick("1988", "1988")
+    pick("1988")
     host.call("press", "T")
     wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1988" and not host.state()["browseLoading"], "1988's chart")
     check("no page for 1988" in (host.state()["browseInfo"].get("emptyText") or ""),
@@ -3568,7 +3605,7 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("back")
 
     # Off: everything again, and no Top 100.
-    pick("off", "Off")
+    pick("off")
     s = host.state()
     check(s["timeMachine"]["year"] == 0 and s["timeMachine"]["chip"] == "OFF" and s["timeMachine"]["top100"] == "",
           "Off: the chip says OFF, and Top 100 goes", failures)
@@ -3577,7 +3614,7 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("back")
 
     # The setting off, from the settings screen: no chip, and the year forgotten.
-    pick("1985", "1985")
+    pick("1985")
     host.call("press", ",")
     wait_for(lambda: host.state()["settingsOpen"] and "timeMachine" in host.state()["settingsRows"], "settings")
     settings_cursor_to(host, "timeMachine")
