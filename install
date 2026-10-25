@@ -86,7 +86,7 @@ stopped() {
 # The answers file has a line per prompt, `TEXT=ANSWER`: the first line whose
 # TEXT is in the prompt answers it. By text, not order, since some prompts
 # come only sometimes (mpd still reading the music, say).
-answer() {  # PROMPT [SHOWN]: the prompt's answer from the file, logged
+answer() {  # PROMPT: the prompt's answer from the file
   local key value
   # The same prompt again and again is a retry the file's answer never gets out of.
   if (($(grep -cxF -- "$1" "$asked") >= 5)); then
@@ -97,7 +97,6 @@ answer() {  # PROMPT [SHOWN]: the prompt's answer from the file, logged
   printf '%s\n' "$1" >>"$asked"
   while IFS='=' read -r key value; do
     [[ -n $key && $1 == *"$key"* ]] || continue
-    printf '  ? %s %s%s%s\n' "$1" "$dim" "${2:-$value}" "$reset" >&2
     printf '%s' "$value"
     return 0
   done <"$answers"
@@ -106,9 +105,21 @@ answer() {  # PROMPT [SHOWN]: the prompt's answer from the file, logged
   exit 3
 }
 
+# A prompt answered from the file, as the run's output shows it: the
+# question, how gum would offer it (the default, a placeholder), the answer.
+answered() {  # PROMPT HOW ANSWER
+  printf '  ? %s%s  %s→ %s%s\n' "$1" "${2:+ $dim$2$reset}" "$bold" "$3" "$reset" >&2
+}
+
 # confirm PROMPT [yes|no]: the default is yes.
 confirm() {
-  if [[ -n $answers ]]; then [[ $(answer "$1") == y* ]]; return; fi
+  if [[ -n $answers ]]; then
+    local a
+    a=$(answer "$1")
+    answered "$1" "$([[ ${2:-yes} == yes ]] && echo "[Yes] No" || echo "Yes [No]")" "$([[ $a == y* ]] && echo Yes || echo No)"
+    [[ $a == y* ]]
+    return
+  fi
   local rc
   gum confirm --default="$([[ ${2:-yes} == yes ]] && echo true || echo false)" "$1"
   rc=$?
@@ -118,13 +129,25 @@ confirm() {
 
 # ask PROMPT [VALUE] [PLACEHOLDER]: a line of text.
 ask() {
-  if [[ -n $answers ]]; then answer "$1"; return; fi
+  if [[ -n $answers ]]; then
+    local a
+    a=$(answer "$1")
+    answered "$1" "${2:+[filled in: $2]}${3:+[placeholder: $3]}" "${a:-(Enter)}"
+    printf '%s' "$a"
+    return
+  fi
   gum input --header "$1" --value "${2:-}" --placeholder "${3:-}" --width 72 || stopped
 }
 
 # secret PROMPT: a line of text that isn't shown.
 secret() {
-  if [[ -n $answers ]]; then answer "$1" "••••"; return; fi
+  if [[ -n $answers ]]; then
+    local a
+    a=$(answer "$1")
+    answered "$1" "[hidden as it's typed]" "$([[ -n $a ]] && echo "••••" || echo "(Enter)")"
+    printf '%s' "$a"
+    return
+  fi
   gum input --password --header "$1" --width 72 || stopped
 }
 
@@ -133,7 +156,16 @@ choose() {
   local header=$1 default=$2 labels=() keys=() selected="" i picked
   shift 2
   while (($#)); do keys+=("$1"); labels+=("$2"); shift 2; done
-  if [[ -n $answers ]]; then answer "$header"; return; fi
+  if [[ -n $answers ]]; then
+    picked=$(answer "$header")
+    for i in "${!keys[@]}"; do [[ ${keys[i]} == "$picked" ]] && selected=${labels[i]}; done
+    answered "$header" "" "${selected:-$picked}"
+    for i in "${!labels[@]}"; do
+      printf '      • %s%s\n' "${labels[i]}" "$([[ ${keys[i]} == "$default" ]] && echo "$dim  (the cursor starts here)$reset")" >&2
+    done
+    printf '%s' "$picked"
+    return
+  fi
   for i in "${!keys[@]}"; do [[ ${keys[i]} == "$default" ]] && selected=${labels[i]}; done
   picked=$(gum choose --header "$header" ${selected:+--selected "$selected"} "${labels[@]}") || stopped
   for i in "${!labels[@]}"; do [[ ${labels[i]} == "$picked" ]] && printf '%s' "${keys[i]}"; done
