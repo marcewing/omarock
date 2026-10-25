@@ -82,7 +82,7 @@ var schema = [
   { key: "appleIdleStop", type: "integer", label: "Let go of the stream when the Mac is paused", source: "apple",
     min: 0, max: 3600, step: 10, defaultValue: 60, description: "After this many seconds (0: never)." },
   { key: "appleRemove", type: "action", label: "Remove Apple Music", button: "Remove…", source: "apple", remove: true,
-    description: "Deletes the bridge's address and token here, and the patched builds for its stream. The bridge on your Mac stays." },
+    description: "Deletes the bridge's address and token here, and the patched builds for its stream. The bridge on your Mac remains." },
 
   { key: "sound", type: "source", source: "sound", name: "omarock's sound output", label: "omarock's sound output", switchless: true,
     description: "Everything omarock plays goes into one output, with one volume, and never moves to another.",

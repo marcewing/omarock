@@ -1160,7 +1160,7 @@ un_apple() {
   unset_setting appleBridge appleStream appleTokenFile appleRejoin appleIdleStop
   set_setting appleMusic false
   ok "Apple Music is gone from this machine"
-  note "the bridge on your Mac stays: ./install --uninstall in omarock's clone there takes it off"
+  note "The bridge on your Mac remains. \"./install --uninstall\" in the Mac's omarock clone to remove it."
   return 0
 }
 
