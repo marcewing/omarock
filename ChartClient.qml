@@ -123,14 +123,33 @@ Item {
       var lanes = target.serviceKey === "spotify" ? root.spotifyParallel : root.parallel
       for (var i = 0; i < lanes; i++) next()
     }
-    if (state.read) { go(); return }
+    root.readFound(key, go)
+  }
+
+  // What was found before, from the cache, once; then().
+  function readFound(key, then) {
+    var state = root.states[key] || (root.states[key] = { looking: false, error: "", read: false })
+    if (state.read) { then(); return }
     root.readCache(key.replace(":", "-") + ".json", function(data) {
-      state.read = true
-      if (data && data.found) {
+      if (!state.read && data && data.found) {
         var have = root.found[key] || (root.found[key] = {})
         for (var rank in data.found) if (have[rank] === undefined) have[rank] = data.found[rank]
       }
-      go()
+      state.read = true
+      then()
+    })
+  }
+
+  // The ids of the chart's songs found on a service: they belong to its
+  // year, whatever year the version found says (a later re-release, say),
+  // so Time Machine keeps them in the queue. callback({ id: true }).
+  function songIds(service, year, callback) {
+    var key = service + ":" + year
+    root.readFound(key, function() {
+      var ids = {}
+      var have = root.found[key] || {}
+      for (var rank in have) if (have[rank]) ids[have[rank].id] = true
+      callback(ids)
     })
   }
 

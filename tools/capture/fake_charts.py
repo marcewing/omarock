@@ -3,8 +3,8 @@
 Top 100 away from the real one: Billboard's year-end chart for 1985 as a
 page of wikitext, in the shapes Wikipedia's pages use (a rowspan, a row
 header, a sort value, a reference, a double A-side), with songs the fake
-bridge's catalog has and some it doesn't. Every other year's page is
-missing. Every request is logged (path, query and Api-User-Agent).
+bridge's catalog has (one only as a later version: 1989's), and some it
+doesn't. Every other year's page is missing. Every request is logged (path, query and Api-User-Agent).
 
     fake_charts.py <port-file> <request-log>
 """
@@ -32,7 +32,9 @@ CHART_1985 = """Some words about the year.
 |4 || "[[Careless Whisper]]" || [[Wham!]] featuring [[George Michael]]
 |-
 |5 || "[[Makes No Sense at All]]" / "[[Love Is All Around (Mary Tyler Moore Theme)|Love Is All Around]]" || [[Hüsker Dü]]
-""" + "".join(f"|-\n|{n} || \"[[Chart Song {n}]]\" || [[The Chart Band {n}]]\n" for n in range(6, 13)) + """|}
+|-
+|6 || "See a Little Light" || [[Bob Mould]]
+""" + "".join(f"|-\n|{n} || \"[[Chart Song {n}]]\" || [[The Chart Band {n}]]\n" for n in range(7, 13)) + """|}
 
 == References ==
 {{reflist}}

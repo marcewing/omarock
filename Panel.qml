@@ -13,6 +13,7 @@ import "Info.js" as Info
 import "Settings.js" as Settings
 import "Hints.js" as Hints
 import "TimeMachine.js" as TimeMachine
+import "Keeper.js" as Keeper
 
 // omarock's popup. Laid out like crmne.hyprmoncfg: a compact panel with an
 // Expand button, and an expanded panel in the same popup with the sources,
@@ -167,7 +168,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.1"
+  readonly property string version: "0.9.2"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -473,6 +474,7 @@ Panel {
     if (kind === "channel" || kind === "station") return hint("Enter", "tune", "Tune it", true)
     if (kind === "track") return hint("Enter", "play from here", "Play from this song", true)
     if (kind === "playtop") return hint("Enter", "play them all", "Play the chart's songs, from the top", true)
+    if (kind === "shuffletop") return hint("Enter", "shuffle them", "Play the chart's songs in an order of their own", true)
     if (kind === "chartmiss") return null
     if (kind === "shuffleall") return hint("Enter", "shuffle all", "Shuffle all the songs", true)
     if (kind === "savequeue") return hint("Enter", "save the queue", "Save the queue as a playlist", true)
@@ -845,6 +847,9 @@ Panel {
     console.info("omarock " + root.version + " loaded")
     root.readSources()
   }
+  // Which panel keeps the queue to Time Machine's year (Keeper.js).
+  readonly property string keeperId: Math.random().toString(36).slice(2)
+  Component.onDestruction: Keeper.release(root.keeperId)
 
   onOpenedChanged: {
     client.ticking = root.opened
@@ -1132,7 +1137,8 @@ Panel {
   // announce: say what went.
   function keepQueueInYear(announce) {
     var year = root.timeYear
-    if (year === 0) return
+    // One panel does it, of the one on each bar.
+    if (year === 0 || !Keeper.claim(root.keeperId)) return
     // Nothing extra goes to mpd while a stream starts (MpdClient.playStream).
     if (client.streamTuning !== "") {
       queueKeeper.restart()
@@ -1149,15 +1155,24 @@ Panel {
   // Apple Music's or Spotify's queue (the window its status lists): a song
   // from after the year playing jumps to the next one up to it (or pauses,
   // with none), then the later ones come out, the last first so the others
-  // keep their places. Not while it plays for another machine.
+  // keep their places. Not while it plays for another machine. The year's
+  // Top 100 stays, whatever year the versions found say (ChartClient.songIds).
   property bool bridgeKeeping: false
   function keepBridgeInYear(bridge, year, announce) {
     if (root.bridgeKeeping || bridge.elsewhere !== "") return
+    root.bridgeKeeping = true
+    charts.songIds(bridge.serviceKey, year, function(chartSongs) {
+      root.bridgeKeeping = false
+      if (bridge.elsewhere === "" && root.timeYear === year) root.trimBridge(bridge, year, announce, chartSongs)
+    })
+  }
+
+  function trimBridge(bridge, year, announce, chartSongs) {
     var status = bridge.bridgeStatus
     var queue = status.queue || []
     var offset = status.queueOffset || 0
     var current = status.queueIndex
-    function later(song) { return TimeMachine.yearOf(song) > year }
+    function later(song) { return TimeMachine.yearOf(song) > year && !chartSongs[song.id] }
     var steps = []
     var going = []
     queue.forEach(function(song, i) { if (bridge.canRemove && later(song) && offset + i !== current) going.push(offset + i) })
@@ -1267,8 +1282,15 @@ Panel {
   }
 
   // Its rows play on the service the songs were found on, which then
-  // becomes the source; a song plays the chart from there.
+  // becomes the source; a song plays the chart from there, and Shuffle
+  // plays it in an order of its own. The Mac can take ten seconds or more
+  // to load a hundred songs, so the chart stays, saying so, until they play.
+  property bool chartStarting: false
   function activateTop100(entry, row, index, mode) {
+    if (root.chartStarting) {
+      root.say("Still starting the " + entry.title + "…")
+      return
+    }
     if (row.kind === "chartmiss") {
       root.say(row.missing ? row.title + " isn't on " + root.browseBridge.service
         : entry.service === "" ? "Switch on Apple Music or Spotify in the settings to play the chart"
@@ -1286,21 +1308,31 @@ Panel {
       return
     }
     var play = mode !== "add"
+    var whole = row.kind === "playtop" || row.kind === "shuffletop"
     var bridge = root.browseBridge
     var service = entry.service
-    bridge.playItems(row.kind === "playtop" || play ? items : [row.apple], play ? "play" : "add",
-      row.kind === "playtop" || !play ? 0 : row.position, function(data, error) {
-        if (error !== "") root.say(error)
-        else if (play && service !== "") root.setSource(service)
-      })
-    var name = row.kind === "playtop" ? entry.title : row.title
-    if (play) {
-      root.clearSearch()
-      root.leaveSearch()
-      root.say("Playing " + (row.kind === "playtop" ? entry.title : "the " + entry.title + " from " + row.title) + " on " + bridge.service)
-    } else {
-      root.say("Added " + name + " to " + bridge.service + "'s queue")
+    if (row.kind === "shuffletop") items = TimeMachine.shuffled(items, Math.random)
+    var what = whole ? entry.title + (row.kind === "shuffletop" ? ", shuffled," : "") : "the " + entry.title + " from " + row.title
+    if (!play) {
+      bridge.playItems(whole ? items : [row.apple], "add", 0, function(data, error) { if (error !== "") root.say(error) })
+      root.say("Added " + (whole ? entry.title : row.title) + " to " + bridge.service + "'s queue")
+      return
     }
+    root.chartStarting = true
+    root.say("Starting " + what + " on " + bridge.service + "…")
+    bridge.playItems(items, "play", whole ? 0 : row.position, function(data, error) {
+      root.chartStarting = false
+      if (error !== "") {
+        root.say(error)
+        return
+      }
+      if (root.browseTop === entry) {
+        root.clearSearch()
+        root.leaveSearch()
+      }
+      if (service !== "") root.setSource(service)
+      root.say("Playing " + what + " on " + bridge.service)
+    })
   }
 
   // The playing song's album, artist or genre, as a level to open, or null:
@@ -1716,9 +1748,10 @@ Panel {
     root.browseRows = entry.rows
     root.browseInfo = entry.info
     root.browseLoading = false
-    // Start on the first album or song; the Play row is just above it.
+    // Start on the first album or song; the Play row is just above it. A
+    // chart starts on its Play, above Shuffle.
     root.cursorActive = entry.rows.length > 0
-    root.cursorIndex = entry.rows.length > 1 ? 1 : 0
+    root.cursorIndex = entry.rows.length > 1 && entry.kind !== "top100" ? 1 : 0
   }
 
   function placeholderInfo(entry) {
@@ -3169,8 +3202,9 @@ Panel {
   Timer {
     id: noticeTimer
     interval: 3500
-    // "Tuning …" stays until the station answers, and mpd stuck stays said.
-    onTriggered: if (client.stalled || client.streamTuning !== "") restart(); else root.notice = ""
+    // "Tuning …" stays until the station answers, "Starting the Top 100…"
+    // until it plays, and mpd stuck stays said.
+    onTriggered: if (client.stalled || client.streamTuning !== "" || root.chartStarting) restart(); else root.notice = ""
   }
 
   Timer {

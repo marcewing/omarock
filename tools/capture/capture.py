@@ -40,7 +40,7 @@ TOOLS = Path(__file__).resolve().parent
 PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Info.js", "InfoCard.qml",
-                "Settings.js", "Hints.js", "TimeMachine.js", "ChartClient.qml", "YearPicker.qml",
+                "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartClient.qml", "YearPicker.qml",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -3548,17 +3548,18 @@ def time_machine_scenario(host, output, socket_path, failures):
     # Apple Music (the lookup's service).
     searches = len(bridge_requests("/v1/search"))
     host.call("press", "T")
-    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1985" and len(host.state()["rows"]) == 13, "the Top 100")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1985" and len(host.state()["rows"]) == 14, "the Top 100")
     wait_for(lambda: "found on Apple Music" in host.state()["subtitles"][0], "its songs looked up")
     s = host.state()
     asked = chart_requests()[-1]
     check(asked["query"].get("page") == "Billboard Year-End Hot 100 singles of 1985" and asked["agent"].startswith("omarock"),
           "T reads Billboard's chart from Wikipedia, saying who's asking: " + json.dumps(asked["query"].get("page")), failures)
-    check(s["rows"][:6] == ["playtop:Play the Top 100", "track:New Day Rising", "track:Celebrated Summer", "track:Keep On Loving You",
-                            "chartmiss:Careless Whisper", "track:Makes No Sense at All / Love Is All Around"]
-          and s["subtitles"][0] == "4 of 12 found on Apple Music" and s["lookup"] == "apple"
-          and s["subtitles"][2] == "Hüsker Dü · New Day Rising" and s["subtitles"][4].endswith("not on Apple Music"),
-          "its songs found on Apple Music, or not: " + ", ".join(s["rows"][:6]) + " | " + s["subtitles"][0], failures)
+    check(s["rows"][:7] == ["playtop:Play the Top 100", "shuffletop:Shuffle the Top 100", "track:New Day Rising",
+                            "track:Celebrated Summer", "track:Keep On Loving You", "chartmiss:Careless Whisper",
+                            "track:Makes No Sense at All / Love Is All Around"]
+          and s["subtitles"][0] == "5 of 12 found on Apple Music" and s["lookup"] == "apple" and s["cursor"] == 0
+          and s["subtitles"][3] == "Hüsker Dü · New Day Rising" and s["subtitles"][5].endswith("not on Apple Music"),
+          "its songs found on Apple Music, or not, the cursor on Play: " + ", ".join(s["rows"][:7]) + " | " + s["subtitles"][0], failures)
     check(len(bridge_requests("/v1/search")) - searches >= 12, "a search for each song", failures)
     host.grab(output / "compact-top100.png")
     host.call("expand", "true")
@@ -3566,11 +3567,34 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.grab(output / "expanded-top100.png")
     host.call("expand", "false")
     host.settle(.5)
-    host.call("activate", 2, "open")
+    # The Mac slow to load them (ten seconds and more for a hundred): the
+    # chart stays, saying so, until they play.
+    fake_bridge_info(True, "slow")
+    host.call("activate", 3, "open")
+    host.settle(1)
+    s = host.state()
+    check(s["browse"] == "top100:Top 100 of 1985" and s["notice"] == "Starting the Top 100 of 1985 from Celebrated Summer on Apple Music…",
+          "while the Mac loads the chart, it stays, saying so: " + s["notice"], failures)
     wait_for(lambda: host.state()["appleMode"], "Apple Music plays the chart")
+    fake_bridge_info(False, "slow")
     play = bridge_requests("/v1/play")[-1][2]
-    check(play["mode"] == "play" and len(play["items"]) == 4 and play["start"] == 1 and all(i["kind"] == "song" for i in play["items"]),
+    check(play["mode"] == "play" and len(play["items"]) == 5 and play["start"] == 1 and all(i["kind"] == "song" for i in play["items"]),
           "Enter on its second song plays the chart's songs on Apple Music, from that one: " + json.dumps(play), failures)
+    check(host.state()["browse"] == "" and host.state()["rows"][0].startswith("queue:"),
+          "once it plays, Apple Music's queue: " + ", ".join(host.state()["rows"][:2]), failures)
+    # Its 1989 version of a 1985 hit is the year's all the same: it stays.
+    host.settle(1.5)
+    check("queue:See a Little Light" in host.state()["rows"],
+          "the chart's songs stay in the queue, a later version too: " + ", ".join(host.state()["rows"]), failures)
+    to_source(host, "local")
+    # Shuffle: the same songs, in an order of their own.
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1985" and "found on" in host.state()["subtitles"][0], "Top 100")
+    host.call("activate", 1, "open")
+    wait_for(lambda: host.state()["appleMode"], "Apple Music plays the chart, shuffled")
+    shuffled = bridge_requests("/v1/play")[-1][2]
+    check(sorted(i["id"] for i in shuffled["items"]) == sorted(i["id"] for i in play["items"]) and shuffled["start"] == 0,
+          "Shuffle the Top 100 plays the same songs from the first of its own order: " + json.dumps([i["id"] for i in shuffled["items"]]), failures)
     to_source(host, "local")
     searches = len(bridge_requests("/v1/search"))
     charts_asked = len(chart_requests())
@@ -3591,7 +3615,7 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("activate", 0, "open")
     wait_for(lambda: host.state()["spotifyMode"], "Spotify plays the chart")
     play = spotify_requests("/v1/play")[-1][2]
-    check(play["mode"] == "play" and len(play["items"]) == 4 and play["start"] == 0,
+    check(play["mode"] == "play" and len(play["items"]) == 5 and play["start"] == 0,
           "Play the Top 100 plays them all on Spotify: " + json.dumps(play), failures)
     host.call("setSetting", "lookup", "Apple Music", "false")
     to_source(host, "local")

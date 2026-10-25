@@ -256,6 +256,19 @@ function bestMatch(entry, songs, year) {
   return best
 }
 
+// A list in an order of its own (Fisher and Yates), as a new list. random:
+// Math.random, or a stand-in for tests.
+function shuffled(items, random) {
+  var out = items.slice()
+  for (var i = out.length - 1; i > 0; i--) {
+    var j = Math.floor(random() * (i + 1))
+    var t = out[i]
+    out[i] = out[j]
+    out[j] = t
+  }
+  return out
+}
+
 // What's kept of a song found, for the cache: what its row, playing it and
 // its info card need.
 var KEPT = ["kind", "id", "source", "catalogId", "title", "artist", "album", "albumId", "artistId", "genres",
@@ -290,7 +303,10 @@ function chartView(year, chart, found, state, Apple) {
     : state.error ? "Couldn't look them up on " + service + ": " + state.error
     : known < chart.length ? "Finding them on " + service + ": " + known + " of " + chart.length
     : have + " of " + chart.length + " found on " + service
-  if (chart.length > 0) rows.push({ kind: "playtop", lead: "󰐊", title: "Play the " + name, subtitle: subtitle })
+  if (chart.length > 0) {
+    rows.push({ kind: "playtop", lead: "󰐊", title: "Play the " + name, subtitle: subtitle })
+    rows.push({ kind: "shuffletop", lead: "󰒟", title: "Shuffle the " + name, subtitle: "Its songs in an order of their own" })
+  }
   chart.forEach(function(entry) {
     var song = service !== "" ? found[entry.rank] : undefined
     if (song) {
@@ -328,6 +344,7 @@ if (typeof module !== "undefined") {
     searchText: searchText,
     searchAgain: searchAgain,
     bestMatch: bestMatch,
+    shuffled: shuffled,
     keep: keep,
     chartView: chartView
   }

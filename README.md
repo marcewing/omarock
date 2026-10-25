@@ -265,8 +265,11 @@ stay until you remove them too.
     year, from Wikipedia (a top 50 for 1956–58, a top 30 for 1949–55). omarock
     finds each song on Apple Music or Spotify: the one playing, else the
     `lookup` setting's. Enter plays the chart from that song; Play the Top 100
-    plays it all. What it found is kept in `~/.cache/omarock/charts`, so a year
-    opens at once the next time.
+    plays it all, and Shuffle the Top 100 plays it in an order of its own. The
+    Mac can take ten seconds or more to load a hundred songs: the chart stays,
+    saying so, until they play. A chart's songs stay in the queue even where
+    the version found is a later one. What it found is kept in
+    `~/.cache/omarock/charts`, so a year opens at once the next time.
 - **Playlists** are mpd's stored playlists, so `mpc` and other clients see them
   too. `A` adds the song, album, artist or genre under the cursor to one: pick a
   playlist, or type a new name. `P` lists them, with **Save the queue as a

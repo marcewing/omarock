@@ -141,13 +141,14 @@ test("the Top 100 view: Play them all, then the chart by its places, found, not 
     { rank: 3, title: "C", titles: ["C"], artist: "Z" }]
   const found = { 1: song("a1", "A", "X", 1990, { album: "Al", duration: 200, artwork: { url: "u" } }), 2: null }
   const view = TimeMachine.chartView(1990, chart, found, { service: "Apple Music" }, Apple)
-  assert.deepEqual(view.rows.map(r => r.kind + ":" + r.lead + ":" + r.title), ["playtop:󰐊:Play the Top 100", "track:1:A", "chartmiss:2:B", "chartmiss:3:C"])
+  assert.deepEqual(view.rows.map(r => r.kind + ":" + r.lead + ":" + r.title), ["playtop:󰐊:Play the Top 100",
+    "shuffletop:󰒟:Shuffle the Top 100", "track:1:A", "chartmiss:2:B", "chartmiss:3:C"])
   assert.equal(view.rows[0].subtitle, "Finding them on Apple Music: 2 of 3")
-  assert.equal(view.rows[1].subtitle, "X · Al")
-  assert.equal(view.rows[1].artwork, undefined)
-  assert.deepEqual(view.rows[1].apple, { kind: "song", id: "a1", source: "catalog" })
-  assert.equal(view.rows[2].subtitle, "Y · not on Apple Music")
-  assert.ok(view.rows[2].missing && !view.rows[3].missing)
+  assert.equal(view.rows[2].subtitle, "X · Al")
+  assert.equal(view.rows[2].artwork, undefined)
+  assert.deepEqual(view.rows[2].apple, { kind: "song", id: "a1", source: "catalog" })
+  assert.equal(view.rows[3].subtitle, "Y · not on Apple Music")
+  assert.ok(view.rows[3].missing && !view.rows[4].missing)
   assert.deepEqual(view.songItems, [{ kind: "song", id: "a1", source: "catalog" }])
   assert.equal(view.info.title, "Top 100 of 1990")
   found[3] = null
@@ -155,6 +156,16 @@ test("the Top 100 view: Play them all, then the chart by its places, found, not 
   const none = TimeMachine.chartView(1990, chart, found, { service: "" }, Apple)
   assert.match(none.rows[0].subtitle, /Switch on Apple Music or Spotify/)
   assert.deepEqual(none.songItems, [])
+})
+
+test("Shuffle: every item once, in another order, the list given untouched", () => {
+  const items = [1, 2, 3, 4, 5, 6]
+  let seed = 7
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const out = TimeMachine.shuffled(items, random)
+  assert.deepEqual([...out].sort(), items)
+  assert.notDeepEqual(out, items)
+  assert.deepEqual(items, [1, 2, 3, 4, 5, 6])
 })
 
 test("a song kept for the cache keeps what its row and Play need, not the rest", () => {

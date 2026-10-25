@@ -136,6 +136,8 @@ class Bridge:
         # before 0.4.2), and /v1/info says it isn't in the library until its
         # catalog copy is added (POST /v1/fake/orphan).
         self.orphan = False
+        # Play answering 3 s late (POST /v1/fake/slow).
+        self.slow = False
         # The machine it plays for (X-Omarock-Client), as the bridge 0.5 and
         # omarock-spotify 0.2.3 tell it: to another, while playing, the
         # status says where (and Spotify's says paused), and pause, skip and
@@ -409,6 +411,10 @@ class Handler(BaseHTTPRequestHandler):
                 while since is not None and int(since) == b.seq and time.monotonic() < deadline:
                     b.lock.wait(deadline - time.monotonic())
                 return b.status(client)
+        # A Mac slow to load what it's asked to play, as it is with a hundred
+        # songs (POST /v1/fake/slow {on}): the reply waits, the rest doesn't.
+        if method == "POST" and path == "play" and b.slow:
+            time.sleep(3)
         with b.lock:
             if method == "POST":
                 if path == "fake/elsewhere":
@@ -465,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
                         added += 1
                     b.changed()
                     return {"ok": True} if b.spotify else {"ok": True, "added": added}
-                if path in ("fake/bare", "fake/orphan"):
+                if path in ("fake/bare", "fake/orphan", "fake/slow"):
                     setattr(b, path[5:], bool(body["on"]))
                     b.changed()
                     return {"ok": True}
