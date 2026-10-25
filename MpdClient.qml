@@ -59,6 +59,12 @@ Item {
   // The queue is read in one window; a longer queue shows the first part.
   readonly property int queueWindow: 1000
 
+  // Time Machine's year (the panel's): only songs from then or before are
+  // searched, listed, shuffled or picked at random; 0 for all of them. The
+  // queue stays as it is.
+  property int yearLimit: 0
+  function withYear(filter) { return Mpd.withYear(filter, root.yearLimit) }
+
   // A command 15 s without its reply: mpd is stuck (it has deadlocked),
   // until a reply comes.
   property bool stalled: false
@@ -293,8 +299,22 @@ Item {
     })
   }
 
+  // With Time Machine on, only the playlist's songs from its year or
+  // before, one by one; start counts those.
   function queuePlaylist(name, mode, start) {
-    root.sendList(Mpd.playlistQueueCommands(name, mode, start))
+    if (root.yearLimit === 0) {
+      root.sendList(Mpd.playlistQueueCommands(name, mode, start))
+      return
+    }
+    root.playlistSongs(name, function(songs) {
+      if (songs) root.queueFiles(Mpd.filesOf(root.playlistInYear(songs)), mode, start)
+    })
+  }
+
+  // A playlist's songs that play: the ones still in the library, and with
+  // Time Machine on, from its year or before.
+  function playlistInYear(songs) {
+    return songs.filter(function(song) { return !Mpd.isMissing(song) && Mpd.inYear(song, root.yearLimit) })
   }
 
   function deletePlaylist(name, callback) {
@@ -313,7 +333,7 @@ Item {
     if (result.kind === "queue") {
       root.send(Mpd.command("save", isNew ? [name] : [name, "append"]), finish)
     } else if (result.kind === "genre") {
-      root.send(Mpd.command("searchaddpl", [name, Mpd.tagFilter("genre", "==", result.genre)]), finish)
+      root.send(Mpd.command("searchaddpl", [name, root.withYear(Mpd.tagFilter("genre", "==", result.genre))]), finish)
     } else {
       root.resultFiles(result, function(files) {
         if (!files || files.length === 0) { if (callback) callback("nothing to add"); return }
@@ -350,7 +370,8 @@ Item {
     root.coverCache = kept
   }
 
-  // Playback. Play with nothing queued plays a song picked at random.
+  // Playback. Play with nothing queued plays a song picked at random (with
+  // Time Machine on, from its year or before).
   function playPause() {
     if (root.status.state === "play") root.send("pause 1")
     else if (root.status.state === "pause") root.send("pause 0")
@@ -358,9 +379,10 @@ Item {
     else root.send("play")
   }
   function playRandomSong() {
-    root.send("stats", function(lines, error) {
+    var year = root.yearLimit
+    root.send(year > 0 ? Mpd.command("count", [Mpd.yearFilter(year)]) : "stats", function(lines, error) {
       var songs = error === "" ? parseInt(Mpd.parseObject(lines).songs) || 0 : 0
-      if (songs > 0) root.sendList(Mpd.randomSongCommands(Math.floor(Math.random() * songs), root.status.queueLength))
+      if (songs > 0) root.sendList(Mpd.randomSongCommands(Math.floor(Math.random() * songs), root.status.queueLength, year))
     })
   }
   function next() { root.send("next") }
@@ -525,7 +547,7 @@ Item {
   }
 
   function queueGenre(genre, mode) {
-    root.sendList(Mpd.genreCommands(genre, mode))
+    root.sendList(Mpd.genreCommands(genre, mode, root.yearLimit))
   }
 
   // A search result (an artist, an album, a genre, a playlist or a song)
@@ -548,7 +570,7 @@ Item {
       callback(view ? Mpd.artistFiles(view) : null)
     })
     else if (result.kind === "playlist") root.playlistSongs(result.playlist, function(songs) {
-      callback(songs ? Mpd.filesOf(songs.filter(function(song) { return !Mpd.isMissing(song) })) : null)
+      callback(songs ? Mpd.filesOf(root.playlistInYear(songs)) : null)
     })
     else callback(null)
   }
@@ -559,7 +581,7 @@ Item {
   function albumSongs(album, artist, callback) {
     var filter = album !== "" ? Mpd.tagFilter("album", "==", album)
       : Mpd.andFilter([Mpd.tagFilter("albumartist", "==", artist), Mpd.tagFilter("album", "==", "")])
-    root.send(Mpd.command("find", [filter]), function(lines, error) {
+    root.send(Mpd.command("find", [root.withYear(filter)]), function(lines, error) {
       callback(error === "" ? Mpd.albumOrder(Mpd.parseSongs(lines), artist) : null)
     })
   }
@@ -567,7 +589,7 @@ Item {
   // A genre for the genre view; callback({ songs, seconds, albums }), or
   // null when mpd fails. Albums come from one grouped list, merged by name.
   function genreAlbums(genre, callback) {
-    var filter = Mpd.tagFilter("genre", "==", genre)
+    var filter = root.withYear(Mpd.tagFilter("genre", "==", genre))
     root.send(Mpd.commandListOk([
       Mpd.command("count", [filter]),
       Mpd.command("list", ["album", filter, "group", "date", "group", "albumartist"]),
@@ -594,7 +616,7 @@ Item {
   function albumCounts(names, callback) {
     if (names.length === 0) { callback({}); return }
     root.send(Mpd.commandListOk(names.map(function(name) {
-      return Mpd.command("count", [Mpd.tagFilter("album", "==", name)])
+      return Mpd.command("count", [root.withYear(Mpd.tagFilter("album", "==", name))])
     })), function(lines, error) {
       var counts = {}
       if (error === "") Mpd.splitReplies(lines).forEach(function(reply, i) {
@@ -668,8 +690,8 @@ Item {
   // that have one ("Various Artists") come from a second find, by artist.
   function artistAlbums(artist, callback) {
     root.send(Mpd.commandListOk([
-      Mpd.command("find", [Mpd.tagFilter("albumartist", "==", artist)]),
-      Mpd.command("find", [Mpd.tagFilter("artist", "==", artist)])
+      Mpd.command("find", [root.withYear(Mpd.tagFilter("albumartist", "==", artist))]),
+      Mpd.command("find", [root.withYear(Mpd.tagFilter("artist", "==", artist))])
     ]), function(lines, error) {
       if (error !== "") { callback(null); return }
       var replies = Mpd.splitReplies(lines)
@@ -677,7 +699,7 @@ Item {
       var named = albums.filter(function(album) { return album.album !== "" })
       if (named.length === 0) { callback(Mpd.splitAppearances(albums, {})); return }
       root.send(Mpd.commandListOk(named.map(function(album) {
-        return Mpd.command("count", [Mpd.tagFilter("album", "==", album.album)])
+        return Mpd.command("count", [root.withYear(Mpd.tagFilter("album", "==", album.album))])
       })), function(lines, error) {
         var totals = {}
         if (error === "") Mpd.splitReplies(lines).forEach(function(reply, i) {
@@ -689,8 +711,9 @@ Item {
   }
 
   // Accent-insensitive search over playlist names, genres, artists, albums
-  // and song titles. The queries pipeline on the command socket; callback
-  // gets { playlists, genres, artists, albums, songs } once all have answered.
+  // and song titles (with Time Machine on, those with songs from its year or
+  // before). The queries pipeline on the command socket; callback gets
+  // { playlists, genres, artists, albums, songs } once all have answered.
   function search(query, callback) {
     var pattern = Mpd.searchPattern(query)
     if (pattern === "") { callback({ playlists: [], genres: [], artists: [], albums: [], songs: [] }); return }
@@ -727,23 +750,23 @@ Item {
       })
       done()
     })
-    root.send(Mpd.command("count", [Mpd.tagFilter("genre", "=~", pattern), "group", "genre"]), function(lines, error) {
+    root.send(Mpd.command("count", [root.withYear(Mpd.tagFilter("genre", "=~", pattern)), "group", "genre"]), function(lines, error) {
       out.genres = Mpd.parseCounts(lines, "genre").filter(function(g) { return g.name !== "" })
       done()
     })
-    root.send(Mpd.command("list", ["albumartist", Mpd.tagFilter("albumartist", "=~", pattern)]), function(lines, error) {
+    root.send(Mpd.command("list", ["albumartist", root.withYear(Mpd.tagFilter("albumartist", "=~", pattern))]), function(lines, error) {
       out.artists = Mpd.parseValues(lines, "albumartist").filter(function(a) { return a !== "" })
       done()
     })
-    root.send(Mpd.command("list", ["album", Mpd.tagFilter("album", "=~", pattern), "group", "albumartist"]), function(lines, error) {
+    root.send(Mpd.command("list", ["album", root.withYear(Mpd.tagFilter("album", "=~", pattern)), "group", "albumartist"]), function(lines, error) {
       out.albums = Mpd.parseGrouped(lines, "albumartist", "album")
       done()
     })
-    root.send(Mpd.command("list", ["album", Mpd.tagFilter("albumartist", "=~", pattern), "group", "albumartist"]), function(lines, error) {
+    root.send(Mpd.command("list", ["album", root.withYear(Mpd.tagFilter("albumartist", "=~", pattern)), "group", "albumartist"]), function(lines, error) {
       out.albumsByArtist = Mpd.parseGrouped(lines, "albumartist", "album")
       done()
     })
-    root.send(Mpd.command("search", [Mpd.tagFilter("title", "=~", pattern)]) + " window 0:40", function(lines, error) {
+    root.send(Mpd.command("search", [root.withYear(Mpd.tagFilter("title", "=~", pattern))]) + " window 0:40", function(lines, error) {
       out.songs = Mpd.parseSongs(lines)
       done()
     })

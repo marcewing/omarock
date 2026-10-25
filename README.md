@@ -33,6 +33,8 @@ media keys and any other mpd client always agree with it.
   add it to a playlist (mpd's own stored playlists).
 - **Everything about a song or album (`i`):** its tags, format, bitrate and
   size, and, on a streaming service, whether it's in your library.
+- **Time Machine:** pick a year, and only music from then or before shows, with
+  that year's Billboard Top 100 to play on Apple Music or Spotify.
 - **Keys that do what you'd guess,** and the full list is a `?` away.
 - **One volume for every source** (with omarock's optional audio bus).
 
@@ -247,6 +249,19 @@ stay until you remove them too.
   `lookup` setting picks), while the station plays on. Enter plays it there and
   switches to it; `a` adds it to that service's queue, `A` to one of its
   playlists; Esc comes back to the station.
+- **Time Machine** (switch it on in the settings): the **Time Machine: OFF** button
+  at the top (or `t`) picks a year. Then search, artists, albums, genres,
+  playlists, Shuffle and the random song on Play leave out music from after it,
+  on local music, Apple Music and Spotify, by each song's year (an album's, for
+  local songs: its Date tag); songs without a year are left out too. The queue
+  stays as it is, and SiriusXM and the radio play on. Picking Off brings
+  everything back.
+  - **Top 100** (or `T`), beside Playlists: Billboard's year-end Hot 100 for the
+    year, from Wikipedia (a top 50 for 1956–58, a top 30 for 1949–55). omarock
+    finds each song on Apple Music or Spotify: the one playing, else the
+    `lookup` setting's. Enter plays the chart from that song; Play the Top 100
+    plays it all. What it found is kept in `~/.cache/omarock/charts`, so a year
+    opens at once the next time.
 - **Playlists** are mpd's stored playlists, so `mpc` and other clients see them
   too. `A` adds the song, album, artist or genre under the cursor to one: pick a
   playlist, or type a new name. `P` lists them, with **Save the queue as a
@@ -336,7 +351,8 @@ A change saves at once.
 | `spotify` | off | Spotify ([spotify/README.md](spotify/README.md)) |
 | `appleMusic` | off | Apple Music ([bridge/README.md](bridge/README.md)) |
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |
-| `lookup` | Apple Music | Where a click on the radio's song looks it up: `Apple Music` or `Spotify` (the other one if that one is off) |
+| `lookup` | Apple Music | Where a click on the radio's song looks it up, and where Time Machine's Top 100 plays from local music or a station: `Apple Music` or `Spotify` (the other one if that one is off) |
+| `timeMachine` | off | Time Machine's button at the top, and its Top 100 |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |
 | `maxLabelWidth` | 300 | How wide the song gets on the bar, in pixels |
 | `appleIdleStop` | 60 | Seconds the Mac is paused before mpd lets go of its stream (0: never) |
@@ -347,6 +363,7 @@ A few are in the file only, for when you know you need them:
 - `appleBridge` and `appleStream`, the Apple Music bridge's address and its
   stream's, in place of `~/.config/omarock/apple.json`'s (`./install apple-music`
   writes that).
+- `timeMachineYear`: the year Time Machine's button picked (0: off).
 - `appleRejoin` (on): reconnect mpd to the Apple Music stream after each change.
   A stock libFLAC needs it; `./install apple-music` turns it off when mpd has the
   patched one ([patches/README.md](patches/README.md)).

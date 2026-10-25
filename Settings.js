@@ -16,9 +16,11 @@
 // `appleBridge` and `appleStream`, which override apple.json (./install
 // apple-music writes that); `appleRejoin` (default on: reconnect mpd to the
 // Apple Music stream after each change, for a stock libFLAC; ./install turns
-// it off when mpd has the patched one); and the addresses the test harness points at
-// its fakes, `spotifyService`, `sxmService`, `radioBrowser` and
-// `appleTokenFile`. Panel.qml gives each its default.
+// it off when mpd has the patched one); `timeMachineYear`, the year Time
+// Machine's button picked (0 or none: off); and the addresses the test
+// harness points at its fakes, `spotifyService`, `sxmService`, `radioBrowser`,
+// `chartSource` (Wikipedia, for Time Machine's charts) and `appleTokenFile`.
+// Panel.qml gives each its default.
 //
 // Spotify, SiriusXM, Apple Music and omarock's sound output are each set up
 // on their own (./install PIECE, which a button runs in a terminal). A
@@ -37,9 +39,12 @@ var schema = [
     description: "Stations from Radio Browser, played by mpd. Nothing to set up." },
   { key: "radioState", type: "string", label: "Your US state", defaultValue: "",
     description: "For the radio's local stations: a state's name, such as Maine." },
-  { key: "lookup", type: "enum", label: "Look up the radio's songs in", options: ["Apple Music", "Spotify"],
+  { key: "lookup", type: "enum", label: "Look up songs in", options: ["Apple Music", "Spotify"],
     defaultValue: "Apple Music",
-    description: "Click a song or artist playing on SiriusXM or the radio to find it there, while the station plays on. The other one if this one is off." },
+    description: "Click a song or artist playing on SiriusXM or the radio to find it there, while the station plays on. Time Machine's Top 100 plays there too, away from Apple Music and Spotify. The other one if this one is off." },
+
+  { key: "timeMachine", type: "boolean", label: "Time Machine", defaultValue: false,
+    description: "A Time Machine button at the top of the panel: pick a year, and only music from then or before shows, with that year's Top 100 from Billboard (as Wikipedia lists it)." },
 
   { key: "spotify", type: "source", source: "spotify", name: "Spotify", label: "Spotify", defaultValue: false,
     description: "Played here by Spotify's own player. Off stops it, and keeps your accounts and keys.",
@@ -95,6 +100,7 @@ var schema = [
 
 var groups = [
   { title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioState", "lookup"] },
+  { title: "TIME MACHINE", keys: ["timeMachine"] },
   { title: "SPOTIFY", keys: ["spotify", "spotifyUpdate", "spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"] },
   { title: "SIRIUSXM", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
   { title: "APPLE MUSIC", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },

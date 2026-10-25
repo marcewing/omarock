@@ -303,6 +303,28 @@ test("randomSongCommands adds one song of the library and plays it", () => {
   assert.deepEqual(Mpd.randomSongCommands(41, 0), ['findadd "(base \\"\\")" window 41:42', "play 0"])
 })
 
+test("Time Machine's year as an mpd pattern: every year up to it, from 1000, and nothing after", () => {
+  assert.equal(Mpd.yearPattern(1996), "^(1[0-8][0-9]{2}|19[0-8][0-9]|199[0-5]|1996)")
+  assert.equal(Mpd.yearPattern(2010), "^(1[0-9]{3}|200[0-9]|2010)")
+  for (const year of [1949, 1959, 1970, 1999, 2000, 2001, 2019, 2025]) {
+    const pattern = new RegExp(Mpd.yearPattern(year))
+    for (let t = 1000; t <= 2100; t++)
+      assert.equal(pattern.test(String(t)) && pattern.test(t + "-03-12T08:00:00Z"), t <= year, year + " " + t)
+    assert.ok(!pattern.test("") && !pattern.test("0999") && !pattern.test("unknown"))
+  }
+})
+
+test("withYear narrows a filter to Time Machine's year; inYear the same for a song", () => {
+  assert.equal(Mpd.withYear('(genre == "Jazz")', 0), '(genre == "Jazz")')
+  assert.equal(Mpd.withYear('(genre == "Jazz")', 1959), '((genre == "Jazz") AND (date =~ "^(1[0-8][0-9]{2}|19[0-4][0-9]|195[0-8]|1959)"))')
+  assert.ok(Mpd.inYear({ date: "1959-08-17" }, 1959) && !Mpd.inYear({ date: "1960" }, 1959))
+  assert.ok(!Mpd.inYear({ file: "x" }, 1959) && Mpd.inYear({ file: "x" }, 0))
+  assert.deepEqual(Mpd.genreCommands("Jazz", "add", 1959),
+    ['findadd "((genre == \\"Jazz\\") AND (date =~ \\"^(1[0-8][0-9]{2}|19[0-4][0-9]|195[0-8]|1959)\\"))"'])
+  assert.deepEqual(Mpd.randomSongCommands(3, 2, 1959),
+    ['findadd "(date =~ \\"^(1[0-8][0-9]{2}|19[0-4][0-9]|195[0-8]|1959)\\")" window 3:4', "play 2"])
+})
+
 test("commandWord names a command, or a list by its first", () => {
   assert.equal(Mpd.commandWord("setvol 40"), "setvol")
   assert.equal(Mpd.commandWord(Mpd.commandList(["repeat 1", "single 1"])), "repeat…")

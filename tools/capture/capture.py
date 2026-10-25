@@ -40,7 +40,8 @@ TOOLS = Path(__file__).resolve().parent
 PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Info.js", "InfoCard.qml",
-                "Settings.js", "Hints.js", "tools/omarock-account", "tools/omarock-sources"]
+                "Settings.js", "Hints.js", "TimeMachine.js", "ChartClient.qml", "YearPicker.qml",
+                "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
 # The fake Apple Music bridge, when one runs: { port, log }.
@@ -275,6 +276,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
     elsewhere_scenario(host, socket_path, failures)
+    time_machine_scenario(host, output, socket_path, failures)
 
     # mpd goes away: the panel says so instead of failing silently.
     host.call("close")
@@ -2333,8 +2335,11 @@ def lookup_scenario(host, output, socket_path, failures):
     switches. With the lookup setting on Spotify, it searches Spotify."""
     url = f"http://127.0.0.1:{BRIDGE['port']}"
     BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
-    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    # Read as the panel opens: its watch can miss a file deleted (by the last
+    # scenario) and made again at once.
+    host.call("close")
     host.call("open")
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
     wait_for(lambda: host.state()["opened"], "open")
     host.call("setSource", "sxm")
     wait_for(lambda: host.state()["sxmMode"] and host.state()["nowPlaying"] == "Take It On The Run · REO Speedwagon",
@@ -3352,6 +3357,247 @@ def favourite_follow_scenario(host, output, failures):
     host.call("close")
 
 
+def chart_requests():
+    """The fake Wikipedia's requests so far: [{path, query, agent}]."""
+    return [json.loads(line) for line in BRIDGE["charts_log"].read_text().splitlines()]
+
+
+def time_machine_scenario(host, output, socket_path, failures):
+    """Marc, 10-25: "Time Machine. The user would pick a year": a chip at the
+    top, "Time Machine: OFF" until a year is picked, then the year; music
+    after it left out of every search and list, on local music, Apple Music
+    and Spotify; a Top 100 button beside Playlists, Billboard's year-end
+    chart for the year (from Wikipedia), played on the "look up songs in"
+    service; a setting switches it all on."""
+    to_source(host, "local")
+    queue_before = mpd_files(socket_path)
+    playing_before = mpd_state(socket_path).get("song", "0")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    s = host.state()
+    check(not s["timeMachine"]["enabled"] and s["timeMachine"]["chip"] == "" and "t time machine" not in s["hint"],
+          "Time Machine is off until the setting switches it on: no chip, no t", failures)
+    host.call("press", "t")
+    host.settle(.3)
+    check(not host.state()["timeMachine"]["picker"]["open"], "t does nothing while it's off", failures)
+
+    host.call("setSetting", "timeMachine", "true", "true")
+    wait_for(lambda: host.state()["timeMachine"]["chip"] == "OFF", "the chip, off")
+    s = host.state()
+    check(s["timeMachine"]["top100"] == "" and "t time machine" in s["hint"],
+          "switched on: the chip says OFF, t picks a year, and no Top 100 yet: " + s["hint"], failures)
+    host.call("expand", "true")
+    host.settle(.5)
+    check(host.state()["timeMachine"]["chip"] == "Time Machine: OFF" and "Time Machine: OFF" in host.state()["headerButtons"],
+          "the expanded header's chip: Time Machine: OFF", failures)
+    host.grab(output / "expanded-time-machine-off.png")
+    host.call("expand", "false")
+    host.settle(.5)
+
+    def pick(typed, wanted):
+        host.call("press", "t")
+        wait_for(lambda: host.state()["timeMachine"]["picker"]["open"], "the year picker")
+        host.settle(.3)
+        host.call("typeKeys", typed)
+        wait_for(lambda: host.state()["timeMachine"]["picker"]["choices"][:1] == [wanted], typed + " finds " + wanted)
+        host.call("press", "Return")
+        wait_for(lambda: not host.state()["timeMachine"]["picker"]["open"], "the picker closes")
+
+    # t: the picker, Off then the years, newest first; "85" finds 1985.
+    host.call("press", "t")
+    wait_for(lambda: host.state()["timeMachine"]["picker"]["open"], "the year picker")
+    host.settle(.3)
+    s = host.state()
+    last = time.localtime().tm_year - 1
+    check(s["timeMachine"]["picker"]["choices"][:3] == ["Off", str(last), str(last - 1)] and s["timeMachine"]["picker"]["index"] == 1,
+          "t opens the picker: Off, then the years from last year, on the newest: " + str(s["timeMachine"]["picker"]["choices"][:3]), failures)
+    host.call("typeKeys", "85")
+    wait_for(lambda: host.state()["timeMachine"]["picker"]["choices"] == ["1985"], "85 is 1985")
+    host.grab(output / "compact-time-machine-picker.png")
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["timeMachine"]["picker"]["open"], "Esc closes it")
+    check(host.state()["timeMachine"]["year"] == 0, "Esc picks nothing", failures)
+
+    # 1988, for the local library: its 2019 and 2021 albums, and 1990's sampler, go.
+    pick("1988", "1988")
+    s = host.state()
+    check(s["timeMachine"]["year"] == 1988 and s["timeMachine"]["chip"] == "1988" and s["timeMachine"]["top100"] == "Top 100"
+          and settings_file().get("timeMachineYear") == 1988,
+          "a year picked: the chip says it, Top 100 shows, and settings.json keeps it", failures)
+    check("T top 100" in s["hint"], "and T is in the hints: " + s["hint"], failures)
+    host.grab(output / "compact-time-machine.png")
+
+    def results(query):
+        host.call("type", query)
+        wait_for(lambda: host.state()["query"] == query and not host.state()["searching"], "search " + query)
+        host.settle(.3)
+        return host.state()
+
+    s = results("glass")
+    check(s["rows"] == [], "search leaves out what's after 1988: Glass Harbor's own albums are 2019's and 2021's: "
+          + ", ".join(s["rows"]), failures)
+    check(any('date =~ \\"^(1[0-8][0-9]{2}|19[0-7][0-9]|198[0-7]|1988)\\"' in line
+              for line in BRIDGE["mpd_log"].read_text().splitlines() if line.startswith("search")),
+          "mpd's search asks for songs from 1988 or before", failures)
+    s = results("signal")
+    check("album:Left Of The Signal" in s["rows"] and not any(r.endswith("Signal Hill Sampler") for r in s["rows"]),
+          "1988's compilation shows, 1990's sampler doesn't: " + ", ".join(s["rows"]), failures)
+    s = results("quiet riots")
+    host.call("activate", s["rows"].index("artist:The Quiet Riots"), "open")
+    wait_for(lambda: host.state()["browse"] == "artist:The Quiet Riots" and not host.state()["browseLoading"], "the artist")
+    s = host.state()
+    check("album:Basement Tapes" in s["rows"] and "album:Live at the Basement" in s["rows"] and "album:Left Of The Signal" in s["rows"]
+          and "album:Signal Hill Sampler" not in s["rows"],
+          "an artist: their albums to 1988, and the 1988 compilation they're on: " + ", ".join(s["rows"]), failures)
+    host.call("back")
+    host.call("back")
+
+    # A playlist: only its songs to 1988, each removed from its own place.
+    def file_of(title):
+        return next(l[6:] for l in mpd_query(socket_path, 'find "(title == \\"%s\\")"' % title) if l.startswith("file: "))
+    mixed = [file_of(t) for t in ("Glasswork", "Fernweh", "Orbit Song", "Schnee")]
+    mpd_client(socket_path, *['playlistadd "Then and Now" "%s"' % f for f in mixed])
+    host.call("key", "P")
+    wait_for(lambda: host.state()["browse"] == "playlists:Playlists" and "playlist:Then and Now" in host.state()["rows"], "Playlists")
+    host.call("activate", host.state()["rows"].index("playlist:Then and Now"), "open")
+    wait_for(lambda: host.state()["browse"] == "playlist:Then and Now" and not host.state()["browseLoading"], "the playlist")
+    s = host.state()
+    check(s["rows"] == ["playplaylist:Play the playlist", "track:Fernweh", "track:Schnee"]
+          and "2 of 4 songs, to 1988" in s["browseInfo"]["subtitle"],
+          "a playlist lists its songs to 1988, not 2019's or 2021's: " + ", ".join(s["rows"]) + " | " + s["browseInfo"]["subtitle"], failures)
+    host.call("activate", 2, "open")
+    wait_for(lambda: mpd_files(socket_path) == [mixed[1], mixed[3]] and mpd_state(socket_path).get("song") == "1", "the playlist plays")
+    check(True, "Enter on its second song plays those two, from that one", failures)
+    host.call("key", "P")
+    wait_for(lambda: host.state()["browse"] == "playlists:Playlists" and not host.state()["browseLoading"], "Playlists again")
+    host.call("activate", host.state()["rows"].index("playlist:Then and Now"), "open")
+    wait_for(lambda: host.state()["browse"] == "playlist:Then and Now" and len(host.state()["rows"]) == 3, "the playlist again")
+    host.call("columnRemove", "current", 2)
+    wait_for(lambda: len(stored(socket_path, "Then and Now")) == 3, "Schnee removed")
+    check(stored(socket_path, "Then and Now") == mixed[:3], "x takes out the song it's on, at its own place in the playlist", failures)
+    mpd_client(socket_path, 'rm "Then and Now"')
+    host.call("back")
+    host.call("back")
+
+    # Play with an empty queue: a song from 1988 or before.
+    mpd_client(socket_path, "clear")
+    wait_for(lambda: host.state()["queueLength"] == 0, "an empty queue")
+    host.call("press", "Space")
+    wait_for(lambda: len(mpd_files(socket_path)) == 1, "a random song")
+    picked = mpd_files(socket_path)[0]
+    check(not picked.startswith("Glass Harbor/") and "Signal Hill" not in picked,
+          "Play on an empty queue picks a song from 1988 or before: " + picked, failures)
+
+    # 1985 for Apple Music and the chart. Apple Music: Bob Mould's 1989 album goes.
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    # Read as the panel opens (as in the lookup scenario).
+    host.call("hide")
+    host.call("open")
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    pick("1985", "1985")
+    host.call("setSource", "apple")
+    wait_for(lambda: host.state()["appleMode"] and host.state()["appleReady"], "Apple Music")
+    s = results("bob mould")
+    check("artist:Bob Mould" in s["rows"] and "album:Workbook" not in s["rows"] and "song:Sunspots" not in s["rows"],
+          "Apple Music's search leaves out 1989's Workbook, and keeps the artist: " + ", ".join(s["rows"]), failures)
+    s = results("husker")
+    check("album:Zen Arcade" in s["rows"] and "album:New Day Rising" in s["rows"],
+          "and keeps 1984's and 1985's albums: " + ", ".join(s["rows"]), failures)
+    host.call("back")
+    to_source(host, "local")
+
+    # Top 100, from local music: the chart from Wikipedia, its songs found on
+    # Apple Music (the lookup's service).
+    searches = len(bridge_requests("/v1/search"))
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1985" and len(host.state()["rows"]) == 13, "the Top 100")
+    wait_for(lambda: "found on Apple Music" in host.state()["subtitles"][0], "its songs looked up")
+    s = host.state()
+    asked = chart_requests()[-1]
+    check(asked["query"].get("page") == "Billboard Year-End Hot 100 singles of 1985" and asked["agent"].startswith("omarock"),
+          "T reads Billboard's chart from Wikipedia, saying who's asking: " + json.dumps(asked["query"].get("page")), failures)
+    check(s["rows"][:6] == ["playtop:Play the Top 100", "track:New Day Rising", "track:Celebrated Summer", "track:Keep On Loving You",
+                            "chartmiss:Careless Whisper", "track:Makes No Sense at All / Love Is All Around"]
+          and s["subtitles"][0] == "4 of 12 found on Apple Music" and s["lookup"] == "apple"
+          and s["subtitles"][2] == "Hüsker Dü · New Day Rising" and s["subtitles"][4].endswith("not on Apple Music"),
+          "its songs found on Apple Music, or not: " + ", ".join(s["rows"][:6]) + " | " + s["subtitles"][0], failures)
+    check(len(bridge_requests("/v1/search")) - searches >= 12, "a search for each song", failures)
+    host.grab(output / "compact-top100.png")
+    host.call("expand", "true")
+    host.settle(1)
+    host.grab(output / "expanded-top100.png")
+    host.call("expand", "false")
+    host.settle(.5)
+    host.call("activate", 2, "open")
+    wait_for(lambda: host.state()["appleMode"], "Apple Music plays the chart")
+    play = bridge_requests("/v1/play")[-1][2]
+    check(play["mode"] == "play" and len(play["items"]) == 4 and play["start"] == 1 and all(i["kind"] == "song" for i in play["items"]),
+          "Enter on its second song plays the chart's songs on Apple Music, from that one: " + json.dumps(play), failures)
+    to_source(host, "local")
+    searches = len(bridge_requests("/v1/search"))
+    charts_asked = len(chart_requests())
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1985" and "found on" in host.state()["subtitles"][0], "Top 100 again")
+    check(len(bridge_requests("/v1/search")) == searches and len(chart_requests()) == charts_asked,
+          "the second time, from what it found the first", failures)
+    host.call("back")
+    check(host.state()["lookup"] == "", "back in the queue, the rows are local music's again", failures)
+
+    # The lookup setting on Spotify: the chart's songs from Spotify.
+    host.call("setSetting", "lookup", "Spotify", "false")
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1985" and "found on Spotify" in host.state()["subtitles"][0],
+             "the Top 100 on Spotify")
+    check(host.state()["lookup"] == "spotify" and spotify_requests("/v1/search"),
+          "with the setting on Spotify, it's looked up there: " + host.state()["subtitles"][0], failures)
+    host.call("activate", 0, "open")
+    wait_for(lambda: host.state()["spotifyMode"], "Spotify plays the chart")
+    play = spotify_requests("/v1/play")[-1][2]
+    check(play["mode"] == "play" and len(play["items"]) == 4 and play["start"] == 0,
+          "Play the Top 100 plays them all on Spotify: " + json.dumps(play), failures)
+    host.call("setSetting", "lookup", "Apple Music", "false")
+    to_source(host, "local")
+
+    # A year Wikipedia has no page for says so.
+    pick("1988", "1988")
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1988" and not host.state()["browseLoading"], "1988's chart")
+    check("no page for 1988" in (host.state()["browseInfo"].get("emptyText") or ""),
+          "a chart that can't be read says why: " + str(host.state()["browseInfo"].get("emptyText")), failures)
+    host.call("back")
+
+    # Off: everything again, and no Top 100.
+    pick("off", "Off")
+    s = host.state()
+    check(s["timeMachine"]["year"] == 0 and s["timeMachine"]["chip"] == "OFF" and s["timeMachine"]["top100"] == "",
+          "Off: the chip says OFF, and Top 100 goes", failures)
+    s = results("glass")
+    check("album:Low Tide Signals" in s["rows"], "and search finds everything again", failures)
+    host.call("back")
+
+    # The setting off, from the settings screen: no chip, and the year forgotten.
+    pick("1985", "1985")
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"] and "timeMachine" in host.state()["settingsRows"], "settings")
+    settings_cursor_to(host, "timeMachine")
+    host.call("press", "Space")
+    wait_for(lambda: settings_file().get("timeMachine") is False, "Time Machine off")
+    host.call("press", ",")
+    wait_for(lambda: not host.state()["settingsOpen"], "settings closed")
+    s = host.state()
+    check(settings_file().get("timeMachineYear") == 0 and s["timeMachine"]["chip"] == "" and s["timeMachine"]["year"] == 0,
+          "switched off in the settings: no chip, and its year forgotten", failures)
+
+    saved = settings_file()
+    for key in ("timeMachine", "timeMachineYear"): saved.pop(key, None)
+    (BRIDGE["config"].parent / "settings.json").write_text(json.dumps(saved))
+    host.call("setSetting", "timeMachine", "false", "true")
+    BRIDGE["config"].unlink()
+    mpd_client(socket_path, "clear", *['add "%s"' % f for f in queue_before], "play " + playing_before)
+    host.call("close")
+
+
 def settings_file():
     """omarock's settings file in the test HOME, as saved so far."""
     path = BRIDGE["config"].parent / "settings.json"
@@ -3380,8 +3626,8 @@ def settings_scenario(host, output, failures):
     wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "settings open")
     wait_for(lambda: host.state()["sourcesState"], "what's set up, read")
     s = host.state()
-    check(s["settingsRows"][:5] == ["musicFolder", "radio", "radioState", "lookup", "spotify"],
-          ", opens the settings, your music and the radio first: " + ", ".join(s["settingsRows"][:6]), failures)
+    check(s["settingsRows"][:6] == ["musicFolder", "radio", "radioState", "lookup", "timeMachine", "spotify"],
+          ", opens the settings, your music and the radio first, then Time Machine: " + ", ".join(s["settingsRows"][:6]), failures)
     check(all(k in s["settingsRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
                                                "spotifyLogin", "bridgeToken", "spotifyRemove", "sxmRemove", "appleRemove")),
           "each source set up here has its account and keys, and Remove", failures)
@@ -4155,6 +4401,13 @@ def main():
                                   str(BRIDGE["radio_log"])], stdout=subprocess.PIPE, text=True)
         assert radio.stdout.readline().strip() == "fake radio ready"
         env["OMAROCK_RADIO"] = BRIDGE["radio"] = f"http://127.0.0.1:{int((work / 'radio.port').read_text())}"
+        # And a fake Wikipedia, for Time Machine's charts.
+        BRIDGE["charts_log"] = work / "chart-requests.log"
+        BRIDGE["charts_log"].touch()
+        charts = subprocess.Popen([sys.executable, "-I", str(TOOLS / "fake_charts.py"), str(work / "charts.port"),
+                                   str(BRIDGE["charts_log"])], stdout=subprocess.PIPE, text=True)
+        assert charts.stdout.readline().strip() == "fake charts ready"
+        env["OMAROCK_CHARTS"] = f"http://127.0.0.1:{int((work / 'charts.port').read_text())}"
         radio_config = Path(env["HOME"]) / ".config/omarock/radio.json"
         radio_config.parent.mkdir(parents=True, exist_ok=True)
         radio_config.write_text(json.dumps({"state": "Washington"}))
@@ -4238,6 +4491,7 @@ def main():
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "hover-scroll": hover_scroll_scenario(host, failures)
+                            elif name == "time-machine": time_machine_scenario(host, output, socket_path, failures)
                             elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)
                             elif name == "bus-volume": bus_volume_scenario(host, socket_path, failures)
                             elif name == "real-apple-info": real_apple_info_scenario(host, output, socket_path, failures)
@@ -4268,6 +4522,8 @@ def main():
             sxm.wait(timeout=10)
             radio.terminate()
             radio.wait(timeout=10)
+            charts.terminate()
+            charts.wait(timeout=10)
             for p in reversed(pipewire):
                 p.terminate()
                 try: p.wait(timeout=5)

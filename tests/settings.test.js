@@ -22,7 +22,8 @@ test("Spotify's sign-in row: Sign in, and once signed in, Sign out", () => {
 
 test("the file-only settings aren't on the screen, and still apply from the file", () => {
   const all = { local: { setUp: true }, spotify: { setUp: true }, sxm: { setUp: true }, apple: { setUp: true }, sound: { setUp: true } }
-  const fileOnly = ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile", "appleBridge", "appleStream", "appleRejoin"]
+  const fileOnly = ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile", "appleBridge", "appleStream", "appleRejoin",
+    "chartSource", "timeMachineYear"]
   assert.ok(!keys(Settings.shown(all)).some(k => fileOnly.includes(k)))
   assert.ok(!Settings.groups.some(g => g.title === "ADVANCED"))
   assert.equal(Settings.value({ socket: "/run/mpd/socket" }, {}, "socket", ""), "/run/mpd/socket")
@@ -44,6 +45,15 @@ test("defaults cover the stored settings only: a source's switch, not the sound 
   assert.equal(Settings.defaults.maxLabelWidth, 300)
   assert.equal(Settings.defaults.spotify, false)
   assert.ok(!("sxmPassword" in Settings.defaults) && !("musicFolder" in Settings.defaults) && !("sound" in Settings.defaults))
+})
+
+test("Time Machine is off until switched on, in a group of its own; the year is in the file only", () => {
+  assert.equal(Settings.defaults.timeMachine, false)
+  assert.equal(row(Settings.shown({}), "timeMachine").type, "boolean")
+  assert.deepEqual(Settings.groups.find(g => g.title === "TIME MACHINE").keys, ["timeMachine"])
+  assert.ok(!("timeMachineYear" in Settings.defaults))
+  assert.equal(Settings.value({ timeMachineYear: 1996 }, {}, "timeMachineYear", 0), 1996)
+  assert.match(row(Settings.shown({}), "lookup").description, /Top 100/)
 })
 
 const keys = rows => rows.map(r => r.key)

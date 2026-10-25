@@ -20,6 +20,7 @@
 | `AppleClient.qml`, `Apple.js` | A client for the bridge API (bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
 | `SxmClient.qml`, `Sxm.js` | SiriusXM, through omarock-sxm |
 | `RadioClient.qml`, `Radio.js` | Radio Browser: search, local stations, favourites (the mpd playlist "Radio"), ICY titles |
+| `TimeMachine.js`, `ChartClient.qml`, `YearPicker.qml` | Time Machine: the year filter for Apple Music and Spotify (mpd's is `Mpd.yearPattern`), Billboard's year-end chart read from Wikipedia's wikitext, its songs found on Apple Music or Spotify (cached in `~/.cache/omarock/charts`), and the year picker (`t`) |
 | `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard: "omarock's sound output" in the settings |
 | `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit, the Web API client, MPRIS |
 | `sxm/` | omarock-sxm, the SiriusXM relay |
@@ -70,6 +71,8 @@ everything else:
   for omarock-spotify, watching the fake mpd as the real service watches mpd;
 - `fake_sxm.py` for omarock-sxm;
 - `fake_radio.py` for Radio Browser;
+- `fake_charts.py` for Wikipedia: 1985's chart, in the shapes Wikipedia's pages
+  use, and no page for any other year;
 - `fake-systemctl` and `fake-terminal`, first on the panel's PATH: a systemctl
   that only logs and keeps the units "enabled" in the test HOME, and Omarchy's
   terminal launcher, which plays a setup or removal out on the test HOME's
@@ -78,8 +81,9 @@ everything else:
   pieces up and removes them through the settings.
 
 The panel finds the fakes through settings that are in no settings screen,
-only in the file (Settings.js): `spotifyService`, `sxmService`, `radioBrowser`
-and `appleTokenFile`. Pointing them elsewhere on a real machine works the same.
+only in the file (Settings.js): `spotifyService`, `sxmService`, `radioBrowser`,
+`chartSource` and `appleTokenFile`. Pointing them elsewhere on a real machine
+works the same.
 
 It drives the panel with real key presses (QtTest's event injector) and clicks,
 saves screenshots, and fails on any QML warning from the plugin, or if the panel
@@ -163,6 +167,19 @@ opened; `--only fresh-start` checks that.
   AlbumArtist tag. A compilation tagged "Various Artists" never matches an
   artist's name that way. So an artist's page also finds their songs by
   `artist`, which brings in those compilations.
+- mpd's filters can't compare tags, so Time Machine's "this year or before" is
+  a pattern on the Date tag's first four digits (`Mpd.yearPattern`: 1996 is
+  `^(1[0-8][0-9]{2}|19[0-8][0-9]|199[0-5]|1996)`), ANDed onto each query.
+
+**Time Machine's charts**
+- Wikipedia's year-end pages (Hot 100 from 1959, top 50 for 1956–58, top 30 from
+  1949) all parse with `TimeMachine.parseChart`, checked on every year to 2025:
+  `|1 || "Title" || Artist` rows, a rank as a row header on its own line
+  (2021 on), artists spanning rows, sort values, references, double A-sides
+  and ties (two songs at 50 in 1958, at 100 in 1969).
+- Checked against the real catalogs (read-only searches): 99 of 1996's 100 and
+  99 of 1965's 100 found on Apple Music, 15 of 15 sampled on Spotify. Some
+  1960s songs are only there as later re-recordings, which then stand in.
 - **Streams:**
   - mpd's HTTP input gives up on a stream that sends nothing for about 10 s, and
     moves on through the queue. So live sources play in repeat-one mode (`repeat 1`,

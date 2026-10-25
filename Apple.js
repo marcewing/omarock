@@ -237,11 +237,14 @@ function isShort(album) {
   return album.isSingle === true || / - (single|ep)$/i.test(album.title || album.name || "")
 }
 
-// Play top songs, then the first five.
+// Play top songs, then the first five. A Play row's items are the songs it
+// lists, for Time Machine, which leaves some out: those play, not the
+// artist's whole list.
 function topSongRows(top) {
   var rows = []
   if (top.length === 0) return rows
-  rows.push({ kind: "playall", lead: "󰐊", title: "Play top songs", subtitle: countText(top.length, "song") })
+  rows.push({ kind: "playall", lead: "󰐊", title: "Play top songs", subtitle: countText(top.length, "song"),
+    items: top.map(ref) })
   top.slice(0, 5).forEach(function(song, i) {
     var row = songRow(song, i === 0 ? "TOP SONGS" : "")
     row.subtitle = song.album || ""
@@ -364,7 +367,7 @@ function playlistView(playlist, tracks, note) {
   var rows = []
   if (tracks.length > 0)
     rows.push({ kind: "playplaylist", lead: "󰐊", title: "Play the playlist",
-      subtitle: countText(tracks.length, "song") + " · " + formatTotal(totalSeconds(tracks)) })
+      subtitle: countText(tracks.length, "song") + " · " + formatTotal(totalSeconds(tracks)), items: tracks.map(ref) })
   else if (note) {
     rows.push({ kind: "playplaylist", lead: "󰐊", title: "Play the playlist",
       subtitle: playlist.trackCount > 0 ? countText(playlist.trackCount, "song") : "" })

@@ -24,14 +24,16 @@ ShellRoot {
     return null
   }
 
-  // Settings always point SiriusXM and Spotify at the fake services, never the
-  // real ones (nothing listens on port 9), with every source switched on.
+  // Settings always point SiriusXM, Spotify, the radio and Time Machine's
+  // charts at the fake services, never the real ones (nothing listens on
+  // port 9), with every source switched on.
   // A setting given as null is left out, so the widget's default applies.
   function baseSettings(settings) {
     var out = Object.assign({ spotify: true, appleMusic: true, siriusXM: true, radio: true, appleRejoin: false,
       sxmService: Quickshell.env("OMAROCK_SXM") || "http://127.0.0.1:9",
       spotifyService: Quickshell.env("OMAROCK_SPOTIFY") || "http://127.0.0.1:9",
-      radioBrowser: Quickshell.env("OMAROCK_RADIO") || "http://127.0.0.1:9" }, settings)
+      radioBrowser: Quickshell.env("OMAROCK_RADIO") || "http://127.0.0.1:9",
+      chartSource: Quickshell.env("OMAROCK_CHARTS") || "http://127.0.0.1:9" }, settings)
     Object.keys(out).forEach(function(key) { if (out[key] === null) delete out[key] })
     return out
   }
@@ -166,6 +168,7 @@ ShellRoot {
       p.closeInfo()
       p.keysOpen = false
       p.settingsOpen = false
+      p.yearPickerOpen = false
       p.cursorActive = false
       p.searchFocused = false
       p.closeKeysWindow()
@@ -273,6 +276,15 @@ ShellRoot {
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
         bridgeSong: p.bridgeMode ? p.bridge.song : null, playingIds: p.bridgeMode ? p.playingIds() : null,
         lookup: p.lookupService, accounts: p.accounts,
+        // Time Machine: its year, the chip and Top 100 button as shown, the picker.
+        timeMachine: { enabled: p.timeMachineEnabled, year: p.timeYear, chartService: p.chartService,
+          chip: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "timeMachineChip")
+            ? host.findNamed(popup().contentItem[0].parent.parent, "timeMachineChip").text : "",
+          top100: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "top100Button")
+            ? host.findNamed(popup().contentItem[0].parent.parent, "top100Button").text : "",
+          picker: { open: p.yearPickerOpen, index: p.yearPicker.index,
+            choices: p.yearPicker.choices.slice(0, 12).map(function(c) { return c.label }) },
+          songItems: p.browseTop && p.browseTop.songItems ? p.browseTop.songItems.length : -1 },
         clientName: p.clientName, elsewhere: p.bridgeMode ? p.bridge.elsewhere : "",
         playerExtra: p.bridgeMode ? p.bridgeExtra : "",
         playingLibrary: p.playingLibraryText, canAddPlayingToPlaylist: p.canAddPlayingToPlaylist,

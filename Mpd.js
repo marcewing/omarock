@@ -64,6 +64,40 @@ function andFilter(filters) {
   return filters.length === 1 ? filters[0] : "(" + filters.join(" AND ") + ")"
 }
 
+// Time Machine (TimeMachine.js): songs from `year` or before, by the year
+// their Date tag starts with ("1996", "1996-03-12T08:00:00Z"); songs without
+// one are left out. mpd's filters can't compare, so it's a pattern, from the
+// year 1000: 1996 is ^(1[0-8][0-9]{2}|19[0-8][0-9]|199[0-5]|1996).
+function yearPattern(year) {
+  var y = String(year)
+  var parts = []
+  for (var i = 0; i < 4; i++) {
+    var digit = parseInt(y.charAt(i), 10)
+    var low = i === 0 ? 1 : 0
+    if (digit <= low) continue
+    var rest = 3 - i
+    parts.push(y.slice(0, i) + (digit - 1 === low ? String(low) : "[" + low + "-" + (digit - 1) + "]")
+      + (rest > 1 ? "[0-9]{" + rest + "}" : rest === 1 ? "[0-9]" : ""))
+  }
+  parts.push(y)
+  return "^(" + parts.join("|") + ")"
+}
+
+function yearFilter(year) {
+  return tagFilter("date", "=~", yearPattern(year))
+}
+
+// A filter narrowed to Time Machine's year; as it was when year is 0.
+function withYear(filter, year) {
+  return year > 0 ? andFilter([filter, yearFilter(year)]) : filter
+}
+
+// The same for a song in hand.
+function inYear(song, year) {
+  var y = songYear(song)
+  return !(year > 0) || (y !== "" && parseInt(y, 10) <= year)
+}
+
 function parsePair(line) {
   var at = line.indexOf(": ")
   if (at < 0) return null
@@ -486,17 +520,20 @@ function genreArtists(albums) {
   return { artists: artists, compilations: compilations }
 }
 
-// A whole genre into the queue. "play" shuffles it: thousands of songs in
-// folder order would just play the artists alphabetically.
-function genreCommands(genre, mode) {
-  var add = command("findadd", [tagFilter("genre", "==", genre)])
+// A whole genre into the queue (with Time Machine on, up to its year).
+// "play" shuffles it: thousands of songs in folder order would just play
+// the artists alphabetically.
+function genreCommands(genre, mode, year) {
+  var add = command("findadd", [withYear(tagFilter("genre", "==", genre), year)])
   return mode === "play" ? ["clear", add, "shuffle", "play"] : [add]
 }
 
 // Play with an empty queue: the index-th song of the whole library (in
-// database order; "stats" gives the count), added at the end and played.
-function randomSongCommands(index, queueLength) {
-  return [command("findadd", ['(base "")']) + " window " + index + ":" + (index + 1), "play " + queueLength]
+// database order; "stats" gives the count), or of Time Machine's year and
+// before (a count of yearFilter), added at the end and played.
+function randomSongCommands(index, queueLength, year) {
+  var filter = year > 0 ? yearFilter(year) : '(base "")'
+  return [command("findadd", [filter]) + " window " + index + ":" + (index + 1), "play " + queueLength]
 }
 
 // Stored playlists. mpd keeps them in its playlist directory, so mpc and
@@ -655,6 +692,10 @@ if (typeof module !== "undefined") {
     splitReplies: splitReplies,
     tagFilter: tagFilter,
     andFilter: andFilter,
+    yearPattern: yearPattern,
+    yearFilter: yearFilter,
+    withYear: withYear,
+    inYear: inYear,
     parseObject: parseObject,
     parseSongs: parseSongs,
     parseValues: parseValues,

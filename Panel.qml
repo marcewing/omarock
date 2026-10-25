@@ -12,6 +12,7 @@ import "Radio.js" as Radio
 import "Info.js" as Info
 import "Settings.js" as Settings
 import "Hints.js" as Hints
+import "TimeMachine.js" as TimeMachine
 
 // omarock's popup. Laid out like crmne.hyprmoncfg: a compact panel with an
 // Expand button, and an expanded panel in the same popup with the sources,
@@ -110,6 +111,26 @@ Panel {
     var spotify = root.spotifyEnabled ? "spotify" : ""
     return root.setting("lookup", "Apple Music") === "Spotify" ? spotify || apple : apple || spotify
   }
+  // Time Machine (TimeMachine.js), when it's switched on in the settings: a
+  // year picked at the top (t). Then search, artists, albums, genres,
+  // playlists, Shuffle and the random song leave out music from after it,
+  // on every source but the live ones, and Top 100 (T) has Billboard's
+  // year-end chart for it, played on Apple Music or Spotify. The queue stays
+  // as it is. The year is kept in settings.json (timeMachineYear).
+  readonly property bool timeMachineEnabled: root.setting("timeMachine", false) === true
+  readonly property int timeYear: {
+    if (!root.timeMachineEnabled) return 0
+    var year = parseInt(root.setting("timeMachineYear", 0), 10) || 0
+    return year >= TimeMachine.firstYear() && year <= new Date().getFullYear() ? year : 0
+  }
+  // A live station's song looked up keeps every year: it's what's on.
+  property bool lookupLive: false
+  readonly property int listYear: root.lookupLive ? 0 : root.timeYear
+  // Where Top 100 plays: the service playing, else the lookup's.
+  readonly property string chartService: root.bridgeMode ? root.bridge.serviceKey : root.lookupTarget
+  property bool yearPickerOpen: false
+  // What's listed belongs to the year it was listed for.
+  onTimeYearChanged: root.clearSearch()
   readonly property var sources: ["local"].concat(appleEnabled ? ["apple"] : []).concat(spotifyEnabled ? ["spotify"] : [])
     .concat(sxmEnabled ? ["sxm"] : []).concat(radioEnabled ? ["radio"] : [])
   readonly property var sourceNames: ({ local: "local music", apple: "Apple Music", spotify: "Spotify", sxm: "SiriusXM", radio: "the radio" })
@@ -140,7 +161,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.8.6"
+  readonly property string version: "0.9.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -161,6 +182,7 @@ Panel {
   property var searchField: null
   property var listView: null
   readonly property alias picker: playlistPicker
+  readonly property alias yearPicker: yearPicker
 
   // Browsing: from the search results, into an artist, then into an album;
   // or from the queue into Playlists (P), then into a playlist. Each level
@@ -444,6 +466,8 @@ Panel {
     if (root.opens(kind)) return typing ? hint("Enter", "open", "Open it", true) : hint("→", "open", "Open it (or Enter)", true)
     if (kind === "channel" || kind === "station") return hint("Enter", "tune", "Tune it", true)
     if (kind === "track") return hint("Enter", "play from here", "Play from this song", true)
+    if (kind === "playtop") return hint("Enter", "play them all", "Play the chart's songs, from the top", true)
+    if (kind === "chartmiss") return null
     if (kind === "shuffleall") return hint("Enter", "shuffle all", "Shuffle all the songs", true)
     if (kind === "savequeue") return hint("Enter", "save the queue", "Save the queue as a playlist", true)
     return kind !== "note" && kind !== "" ? hint("Enter", "play", "Play it", true) : null
@@ -460,6 +484,10 @@ Panel {
     var info = hint("i", "info", "Everything known about it")
     var keys = hint("?", "keys", "", true)
     var library = root.libraryHint(root.browsing ? root.browseTop : null, row)
+    // Time Machine: its year's Top 100, else picking a year.
+    var time = root.timeYear > 0 ? [hint("T", TimeMachine.chartName(root.timeYear).toLowerCase(),
+        "Billboard's " + TimeMachine.chartName(root.timeYear) + " of " + root.timeYear)]
+      : root.timeMachineEnabled ? [hint("t", "time machine", "Time Machine: pick a year")] : []
     var parts = []
     // In the search box: what the box does with Enter, ↓ and Esc.
     if (root.typing) {
@@ -478,12 +506,12 @@ Panel {
           row.favorite ? "Take it out of your favourites" : "Add it to your favourites"), info, steps]
         : [hint("Space", "play/stop", "Play or stop", true),
           hint("/", root.sxmMode ? "find a channel" : "find a station", root.sxmMode ? "Search the channels" : "Search for a station"), steps]
-      return parts.concat(source, [keys])
+      return parts.concat(root.cursorActive && row ? [] : time, source, [keys])
     }
     if (!root.searchMode && !root.browsing) {
       if (!root.cursorActive || !row)
         return [hint("Space", "play/pause", "Play or pause", true), hint("/", "search", "Search"),
-          hint("P", "playlists", "Your playlists")].concat(source, [keys])
+          hint("P", "playlists", "Your playlists")].concat(time, source, [keys])
       parts = [hint("Enter", "play", "Play from this song", true), hint("A", "add to playlist", "Add the song to a playlist")]
       if (!root.bridgeMode || root.bridge.canRemove) parts.push(hint("x", "remove", "Take the song out of the queue"))
       parts.push(info)
@@ -849,7 +877,8 @@ Panel {
 
   // The panel opening gives the keys back to where they were.
   function returnFocus() {
-    if (root.pickerOpen) playlistPicker.takeFocus()
+    if (root.yearPickerOpen) yearPicker.takeFocus()
+    else if (root.pickerOpen) playlistPicker.takeFocus()
     else if (root.searchFocused && root.searchField) root.searchField.forceActiveFocus()
     else keyCatcher.forceActiveFocus()
   }
@@ -906,6 +935,7 @@ Panel {
     root.clearPreview()
     root.lookupService = ""
     root.lookupFocus = ""
+    root.lookupLive = false
     root.query = ""
     root.resultRows = []
     root.searching = false
@@ -939,6 +969,7 @@ Panel {
       var bridge = root.browseBridge
       bridge.search(query, function(results, error) {
         if (sequence !== root.searchSequence) return
+        results = TimeMachine.filterResults(results, root.listYear)
         root.resultRows = results ? Apple.searchRows(results, Apple.matchGenres(bridge.genres, query, Mpd.fold), bridge.service) : []
         root.searching = false
         if (!results) root.say(error)
@@ -1059,6 +1090,136 @@ Panel {
     root.loadBrowse(entry)
   }
 
+  // Time Machine's year: t, or its button at the top. Switched off in the
+  // settings, it isn't there.
+  function openYearPicker() {
+    if (!root.timeMachineEnabled) {
+      root.say("Time Machine is off: switch it on in the settings (,)")
+      return
+    }
+    root.keysOpen = false
+    root.pickerItem = null
+    root.yearPickerOpen = true
+  }
+
+  function closeYearPicker() {
+    root.yearPickerOpen = false
+    keyCatcher.forceActiveFocus()
+  }
+
+  // A year (0: off), kept in settings.json.
+  function pickYear(year) {
+    root.closeYearPicker()
+    if (year === root.timeYear) return
+    root.saveSetting("timeMachineYear", year)
+    root.say(year > 0 ? "Time Machine: " + year + ". Only music from then or before; "
+      + TimeMachine.chartName(year) + " (T) has its chart" : "Time Machine is off: all your music again")
+  }
+
+  // T or the Top 100 button: Billboard's chart for Time Machine's year, from
+  // the queue like Playlists, its songs found on chartService (as a lookup
+  // finds a station's, which the level's rows then belong to).
+  function openTop100() {
+    if (root.timeYear === 0) {
+      root.say(root.timeMachineEnabled ? "Pick a year first: t, or Time Machine at the top" : "Time Machine is off: switch it on in the settings (,)")
+      return
+    }
+    if (root.browseRoot === "queue" && root.browseStack.length === 1 && root.browseTop.kind === "top100") return
+    var service = root.chartService
+    root.clearSearch()
+    root.leaveSearch()
+    root.lookupService = service
+    root.browseRoot = "queue"
+    var year = root.timeYear
+    var entry = { kind: "top100", year: year, service: service, title: TimeMachine.chartName(year) + " of " + year,
+      artist: "", album: "", genre: "", playlist: "", from: -1, rows: [], info: ({}), files: [], loaded: false }
+    root.browseStack = [entry]
+    root.loadBrowse(entry)
+  }
+
+  // The Top 100 level's rows, from the chart and what's been found so far.
+  function showTop100(entry) {
+    var target = entry.service === "apple" ? apple : entry.service === "spotify" ? spotify : null
+    var key = target ? target.serviceKey : ""
+    var state = target ? charts.stateOf(key, entry.year) : ({})
+    var view = TimeMachine.chartView(entry.year, charts.chartOf(entry.year), target ? charts.foundFor(key, entry.year) : ({}),
+      { service: target ? target.service : "", looking: !!state.looking, error: state.error || entry.error || "" }, Apple)
+    entry.rows = view.rows
+    entry.info = view.info
+    entry.songItems = view.songItems
+    entry.loaded = true
+  }
+
+  function loadTop100(entry, done) {
+    var target = entry.service === "apple" ? apple : entry.service === "spotify" ? spotify : null
+    charts.chart(entry.year, function(chart, error) {
+      if (!chart) {
+        entry.rows = []
+        entry.info = { title: entry.title, subtitle: "Billboard's year-end chart", failed: true, emptyText: error + ". ← goes back." }
+        entry.loaded = true
+        done()
+        return
+      }
+      root.showTop100(entry)
+      done()
+      if (!target) return
+      if (target.ready) charts.findSongs(entry.year, target)
+      else target.checkHealth(function(ok, healthError) {
+        if (ok) charts.findSongs(entry.year, target)
+        else {
+          entry.error = healthError || "can't reach it"
+          root.top100Changed()
+        }
+      })
+    })
+  }
+
+  // A song found (or not): the level shows it, in place.
+  function top100Changed() {
+    var entry = root.browseTop
+    if (!entry || entry.kind !== "top100" || !entry.loaded || entry.info.failed) return
+    root.showTop100(entry)
+    root.browseRows = entry.rows
+    root.browseInfo = entry.info
+  }
+
+  // Its rows play on the service the songs were found on, which then
+  // becomes the source; a song plays the chart from there.
+  function activateTop100(entry, row, index, mode) {
+    if (row.kind === "chartmiss") {
+      root.say(row.missing ? row.title + " isn't on " + root.browseBridge.service
+        : entry.service === "" ? "Switch on Apple Music or Spotify in the settings to play the chart"
+        : "Still looking for " + row.title + " on " + root.browseBridge.service)
+      return
+    }
+    if (row.playable === false) {
+      root.say(row.title + " isn't available to play")
+      return
+    }
+    var items = entry.songItems || []
+    if (items.length === 0) {
+      root.say(entry.service === "" ? "Switch on Apple Music or Spotify in the settings to play the chart"
+        : "None of the chart's songs have been found yet")
+      return
+    }
+    var play = mode !== "add"
+    var bridge = root.browseBridge
+    var service = entry.service
+    bridge.playItems(row.kind === "playtop" || play ? items : [row.apple], play ? "play" : "add",
+      row.kind === "playtop" || !play ? 0 : row.position, function(data, error) {
+        if (error !== "") root.say(error)
+        else if (play && service !== "") root.setSource(service)
+      })
+    var name = row.kind === "playtop" ? entry.title : row.title
+    if (play) {
+      root.clearSearch()
+      root.leaveSearch()
+      root.say("Playing " + (row.kind === "playtop" ? entry.title : "the " + entry.title + " from " + row.title) + " on " + bridge.service)
+    } else {
+      root.say("Added " + name + " to " + bridge.service + "'s queue")
+    }
+  }
+
   // The playing song's album, artist or genre, as a level to open, or null:
   // Apple Music's and Spotify's songs name their album and artist by id, and
   // a genre opens Apple's charts when it's one of its top genres; local songs
@@ -1114,6 +1275,7 @@ Panel {
       root.clearSearch()
       root.lookupService = service
       root.lookupFocus = kind
+      root.lookupLive = true
       root.leaveSearch()
       if (root.searchField) root.searchField.text = text
       root.setQuery(text)
@@ -1432,6 +1594,8 @@ Panel {
     root.browseStack = stack
     root.browseRows = top ? top.rows : []
     root.browseInfo = top ? top.info : ({})
+    // Out of Top 100, the source's own rows again.
+    if (!top && left.kind === "top100") root.lookupService = ""
     // Back in the queue (from Playlists), the cursor rests.
     root.cursorActive = root.rows.length > 0 && left.from >= 0
     root.cursorIndex = Math.max(0, Math.min(left.from, root.rows.length - 1))
@@ -1441,6 +1605,7 @@ Panel {
   }
 
   function resetBrowse() {
+    if (root.browseStack.length > 0 && root.browseStack[0].kind === "top100") root.lookupService = ""
     root.browseSequence++
     root.browseRoot = "search"
     root.browseStack = []
@@ -1476,7 +1641,8 @@ Panel {
   function placeholderInfo(entry) {
     return { title: entry.title, coverFile: "",
       subtitle: entry.kind === "artist" ? "Artist" : entry.kind === "genre" ? "Genre"
-        : entry.kind === "playlist" ? "Playlist" : entry.kind === "playlists" ? "" : "Album" }
+        : entry.kind === "playlist" ? "Playlist" : entry.kind === "playlists" ? ""
+        : entry.kind === "top100" ? "Billboard's year-end chart" : "Album" }
   }
 
   // The preview column (expanded panel, before anything is opened): what the
@@ -1539,16 +1705,32 @@ Panel {
       }
     }
     var ref = entry.apple
+    // Time Machine: an album from after its year has no songs here, and a
+    // playlist, an artist or a genre only those from its year or before.
+    var year = root.listYear
     if (ref.kind === "playlists") {
       bridge.refreshPlaylists(shown(function(data) { return Apple.playlistsView(data, bridge.status.queueLength, bridge.service) }))
     } else if (ref.kind === "album") {
-      bridge.album(ref.source, ref.id, shown(function(data) { return Apple.albumView(data.album, data.tracks || [], bridge.service) }))
+      bridge.album(ref.source, ref.id, shown(function(data) {
+        var after = !TimeMachine.inYear(data.album, year)
+        var view = Apple.albumView(data.album, after ? [] : data.tracks || [], bridge.service)
+        if (after) view.info.emptyText = "From " + TimeMachine.yearOf(data.album) + ", after Time Machine's " + year + "."
+        return view
+      }))
     } else if (ref.kind === "artist") {
       root.loadAppleArtist(entry, show, shown)
     } else if (ref.kind === "playlist") {
-      bridge.playlist(ref.source, ref.id, shown(function(data) { return Apple.playlistView(data.playlist, data.tracks || [], data.note) }))
+      bridge.playlist(ref.source, ref.id, shown(function(data) {
+        var tracks = (data.tracks || []).filter(function(song) { return TimeMachine.inYear(song, year) })
+        var view = Apple.playlistView(data.playlist, tracks, data.note)
+        if (tracks.length === 0 && (data.tracks || []).length > 0)
+          view.info.emptyText = "None of its songs are from " + year + " or before (Time Machine)."
+        return view
+      }))
     } else if (ref.kind === "genre") {
-      bridge.genre(ref.id, shown(function(data) { return Apple.genreView(data.genre || { name: entry.title }, data) }))
+      bridge.genre(ref.id, shown(function(data) {
+        return Apple.genreView(data.genre || { name: entry.title }, TimeMachine.filterGenre(data, year))
+      }))
     }
   }
 
@@ -1568,6 +1750,7 @@ Panel {
     var found = undefined
     var failed = shown(null)
     function merge(data) {
+      data = TimeMachine.filterArtist(data, root.listYear)
       var mine = ref.source === "library" ? main : data
       var theirs = ref.source === "library" ? data : main
       show(Apple.mergedArtistView({ artist: mine.artist, data: mine }, { artist: theirs.artist, data: theirs }, bridge.service))
@@ -1576,7 +1759,7 @@ Panel {
       var match = found ? Apple.findArtist(found, other, entry.title) : null
       if (!match) { failed(null, mainError); return }
       bridge.artist(other, match.id, function(data) {
-        if (data) show(Apple.artistView(data.artist, data, bridge.service))
+        if (data) show(Apple.artistView(data.artist, TimeMachine.filterArtist(data, root.listYear), bridge.service))
         else failed(null, mainError)
       })
     }
@@ -1596,7 +1779,7 @@ Panel {
     }
     bridge.artist(ref.source, ref.id, function(data, error) {
       if (!data) mainError = error || "The artist didn't open"
-      else main = data
+      else main = TimeMachine.filterArtist(data, root.listYear)
       both()
     })
     bridge.search(entry.title, function(results) {
@@ -1609,6 +1792,10 @@ Panel {
   function loadEntry(entry, done) {
     if (entry.apple) {
       root.loadAppleEntry(entry, done)
+      return
+    }
+    if (entry.kind === "top100") {
+      root.loadTop100(entry, done)
       return
     }
     function show(rows, info, files) {
@@ -1638,8 +1825,7 @@ Panel {
             emptyText: error.indexOf("No such playlist") >= 0 ? "This playlist is gone. ← goes back." : "" }, [])
           return
         }
-        show(root.playlistSongRows(songs), root.playlistInfo(entry, songs),
-          Mpd.filesOf(songs.filter(function(song) { return !Mpd.isMissing(song) })))
+        show(root.playlistSongRows(songs), root.playlistInfo(entry, songs), Mpd.filesOf(client.playlistInYear(songs)))
       })
     } else if (entry.kind === "genre") {
       client.genreAlbums(entry.genre, function(view) {
@@ -1768,14 +1954,18 @@ Panel {
 
   // A playlist's view: Play the playlist, then its songs in order, each with
   // its album's cover. Songs that have left the library stay listed, dimmed.
+  // With Time Machine on, only its songs from the year or before are listed
+  // (each with its place in the playlist, which x takes out).
   function playlistSongRows(songs) {
-    if (songs.length === 0) return []
+    var listed = root.timeYear > 0 ? client.playlistInYear(songs) : songs
+    if (listed.length === 0) return []
     var seconds = 0
-    songs.forEach(function(song) { seconds += Mpd.songSeconds(song) })
+    listed.forEach(function(song) { seconds += Mpd.songSeconds(song) })
     var rows = [{ kind: "playplaylist", lead: "󰐊", title: "Play the playlist",
-      subtitle: root.countText(songs.length, "song") + " · " + Mpd.formatTotal(seconds) }]
+      subtitle: root.countText(listed.length, "song") + " · " + Mpd.formatTotal(seconds) }]
     var present = 0
     songs.forEach(function(song, i) {
+      if (listed !== songs && listed.indexOf(song) < 0) return
       var missing = Mpd.isMissing(song)
       var parts = []
       if (Mpd.songArtist(song) !== "") parts.push(Mpd.songArtist(song))
@@ -1796,15 +1986,19 @@ Panel {
   }
 
   function playlistInfo(entry, songs) {
+    var listed = root.timeYear > 0 ? client.playlistInYear(songs) : songs
     var seconds = 0
     var cover = ""
-    songs.forEach(function(song) {
+    listed.forEach(function(song) {
       seconds += Mpd.songSeconds(song)
       if (cover === "" && !Mpd.isMissing(song)) cover = song.file
     })
+    var count = listed === songs ? root.countText(songs.length, "song")
+      : listed.length + " of " + root.countText(songs.length, "song") + ", to " + root.timeYear
     return { title: entry.title, coverFile: cover,
-      subtitle: "Playlist · " + root.countText(songs.length, "song") + (songs.length > 0 ? " · " + Mpd.formatTotal(seconds) : ""),
-      emptyText: "This playlist is empty. Find a song, album or artist and press A to add it." }
+      subtitle: "Playlist · " + count + (listed.length > 0 ? " · " + Mpd.formatTotal(seconds) : ""),
+      emptyText: listed.length === 0 && songs.length > 0 ? "None of its songs are from " + root.timeYear + " or before (Time Machine)."
+        : "This playlist is empty. Find a song, album or artist and press A to add it." }
   }
 
   // A row's cover, asked for when the row is created (so only rows that
@@ -1948,6 +2142,10 @@ Panel {
       root.settleOnTuned(index, function(r) { return r.channelId === row.channelId })
       return
     }
+    if (entry && entry.kind === "top100") {
+      root.activateTop100(entry, row, index, mode)
+      return
+    }
     if (row.apple || (entry && entry.apple)) {
       root.activateApple(entry, row, index, mode)
       return
@@ -2026,11 +2224,14 @@ Panel {
     var name = row.name || row.title
     var items = [row.apple]
     var start = 0
+    // With Time Machine leaving some of a playlist's songs or an artist's
+    // top songs out, the ones listed play (its Play row's items), not all.
+    var listed = root.listYear > 0 && entry && entry.rows.length > 0 && entry.rows[0].items ? entry.rows[0].items : null
     if (row.kind === "playalbum" || row.kind === "playplaylist" || row.kind === "playall") {
       name = entry.title
-      items = [entry.apple]
+      items = listed || [entry.apple]
     } else if (row.kind === "track" && mode === "play") {
-      items = [entry.apple]
+      items = listed || [entry.apple]
       start = row.position
     }
     var bridge = root.browseBridge
@@ -2161,6 +2362,8 @@ Panel {
   property bool settingsUnsaved: false
   function saveSetting(key, value) {
     root.fileSettings = Settings.withValue(root.fileSettings, key, value)
+    // Time Machine switched off forgets its year: on again, it starts off.
+    if (key === "timeMachine" && value !== true) root.fileSettings = Settings.withValue(root.fileSettings, "timeMachineYear", 0)
     root.settingsUnsaved = true
     root.writeSettings()
     // A source switched off stops its services (keeping its accounts and
@@ -2272,7 +2475,8 @@ Panel {
   // Esc: close the key list, else back out of an artist or album, else clear
   // the search, else close the panel.
   function stepBack() {
-    if (root.pickerOpen) root.closePicker()
+    if (root.yearPickerOpen) root.closeYearPicker()
+    else if (root.pickerOpen) root.closePicker()
     else if (root.confirmOpen) root.cancelConfirm()
     else if (root.settingsOpen) root.closeSettings()
     else if (root.infoOpen) root.closeInfo()
@@ -2348,6 +2552,11 @@ Panel {
   function playlistItem(entry, row) {
     if (!row || row.missing) return null
     var kind = row.kind
+    // Top 100: a song, or the chart's songs found (as a playlist of the service's).
+    if (entry && entry.kind === "top100") {
+      if (kind === "playtop") return (entry.songItems || []).length > 0 ? { result: { items: entry.songItems }, title: entry.title } : null
+      return row.apple ? { result: { items: [row.apple] }, title: row.title } : null
+    }
     if (row.apple || (entry && entry.apple)) {
       if (kind === "playall" || kind === "playalbum" || kind === "playplaylist")
         return entry ? { result: { items: [entry.apple] }, title: entry.title } : null
@@ -2588,6 +2797,8 @@ Panel {
     else if (t === ",") root.openSettings()
     else if (t === "i") root.showInfo()
     else if (t === "P") root.openPlaylists()
+    else if (t === "t" && root.timeMachineEnabled) root.openYearPicker()
+    else if (t === "T" && root.timeMachineEnabled) root.openTop100()
     else if (t === "o") root.openPlaying("album")
     else if (t === "O") root.openPlaying("artist")
     else if (t === "g") root.openPlaying("genre")
@@ -2613,6 +2824,7 @@ Panel {
   MpdClient {
     id: client
     socketPath: root.socketPath
+    yearLimit: root.timeYear
     onStalledChanged: if (stalled) root.say("mpd isn't answering. If it stays stuck: systemctl --user restart mpd")
     onCurrentSongChanged: root.updateCover()
     onMusicDirectoryChanged: root.updateCover()
@@ -2841,6 +3053,14 @@ Panel {
     onLastErrorChanged: if (root.spotifyMode && spotify.lastError !== "") root.say(spotify.lastError)
   }
 
+  // Time Machine's charts, and their songs as Apple Music and Spotify have them.
+  ChartClient {
+    id: charts
+    source: root.setting("chartSource", "") || "https://en.wikipedia.org"
+    cacheDir: Quickshell.env("HOME") + "/.cache/omarock/charts"
+    onChanged: root.top100Changed()
+  }
+
   Timer {
     id: searchDelay
     interval: 180
@@ -2899,7 +3119,7 @@ Panel {
       // The search box, the playlist picker and the delete dialog take
       // their own keys.
       blocked: (!!root.searchField && root.searchField.activeFocus) || root.pickerOpen || root.confirmOpen
-        || (root.settingsOpen && settingsView.editing !== "")
+        || root.yearPickerOpen || (root.settingsOpen && settingsView.editing !== "")
 
       // ↑↓ move, → opens an artist or album, ← goes back. Shift+←→ seek
       // (the Shortcuts below take those before this sees them).
@@ -3038,6 +3258,19 @@ Panel {
         onCanceled: root.closePicker()
       }
 
+      YearPicker {
+        id: yearPicker
+        objectName: "yearPicker"
+        anchors.fill: parent
+        z: 10
+        open: root.yearPickerOpen
+        year: root.timeYear
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onPicked: function(year) { root.pickYear(year) }
+        onCanceled: root.closeYearPicker()
+      }
+
       ConfirmDialog {
         id: confirmDialog
         anchors.fill: parent
@@ -3078,14 +3311,14 @@ Panel {
 
       Shortcut {
         sequence: "Shift+Right"
-        enabled: root.opened && !root.keysOpen && !root.pickerOpen && !root.confirmOpen && !root.infoOpen
+        enabled: root.opened && !root.keysOpen && !root.pickerOpen && !root.confirmOpen && !root.infoOpen && !root.yearPickerOpen
           && !(root.searchField && root.searchField.activeFocus)
         onActivated: root.player.seekBy(10)
       }
 
       Shortcut {
         sequence: "Shift+Left"
-        enabled: root.opened && !root.keysOpen && !root.pickerOpen && !root.confirmOpen && !root.infoOpen
+        enabled: root.opened && !root.keysOpen && !root.pickerOpen && !root.confirmOpen && !root.infoOpen && !root.yearPickerOpen
           && !(root.searchField && root.searchField.activeFocus)
         onActivated: root.player.seekBy(-10)
       }
@@ -3163,6 +3396,27 @@ Panel {
     onChanged: function(value) { root.setSource(value) }
   }
 
+  // Time Machine, once it's switched on in the settings: the year picked, or
+  // OFF. A click (or t) picks another. brief: the year alone (compact).
+  component TimeMachineChip: Button {
+    property bool brief: false
+    objectName: "timeMachineChip"
+    visible: root.timeMachineEnabled
+    width: visible ? implicitWidth : 0
+    text: (brief ? "" : "Time Machine: ") + (root.timeYear > 0 ? root.timeYear : "OFF")
+    iconText: "󰋚"
+    iconSize: fontSize
+    horizontalPadding: brief ? Math.round(Style.spacing.controlPaddingX / 2) : Style.spacing.controlPaddingX
+    bordered: true
+    selected: root.timeYear > 0
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    fontSize: Style.font.caption
+    tooltipText: root.timeYear > 0 ? "Time Machine: only music from " + root.timeYear + " or before. Another year, or off (t)"
+      : "Time Machine: pick a year, for only its music and older, and its Top 100 (t)"
+    onClicked: root.openYearPicker()
+  }
+
   component SearchBox: TextField {
     id: field
     placeholderText: root.radioMode ? "Stations: name, call sign, frequency or genre  ( / )"
@@ -3200,20 +3454,41 @@ Panel {
     }
   }
 
-  // Above the queue: its length, and the way to the playlists.
+  // Above the queue: its length, and the way to the playlists (and with
+  // Time Machine's year picked, to its Top 100).
   component QueueHeading: Item {
     implicitHeight: Math.max(queueTitle.implicitHeight, playlistsButton.implicitHeight)
 
     PanelSectionHeader {
       id: queueTitle
       anchors.left: parent.left
-      anchors.right: playlistsButton.left
+      anchors.right: top100Button.left
       anchors.rightMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
       text: root.queueHeading
       elide: Text.ElideRight
       foreground: root.foreground
       fontFamily: root.fontFamily
+    }
+
+    Button {
+      id: top100Button
+      objectName: "top100Button"
+      visible: root.timeYear > 0
+      width: visible ? implicitWidth : 0
+      anchors.right: playlistsButton.left
+      anchors.rightMargin: visible && playlistsButton.visible ? Style.space(8) : 0
+      anchors.verticalCenter: parent.verticalCenter
+      text: root.timeYear > 0 ? TimeMachine.chartName(root.timeYear) : ""
+      iconText: "󰔸"
+      iconSize: fontSize
+      bordered: true
+      foreground: root.foreground
+      fontFamily: root.fontFamily
+      fontSize: Style.font.caption
+      tooltipText: root.timeYear > 0 ? "Billboard's " + TimeMachine.chartName(root.timeYear) + " of " + root.timeYear
+        + (root.chartService !== "" ? ", on " + (root.chartService === "apple" ? "Apple Music" : "Spotify") : "") + " (T)" : ""
+      onClicked: root.openTop100()
     }
 
     Button {
@@ -3691,8 +3966,16 @@ Panel {
           brief: true
           anchors.left: compactIcon.right
           anchors.leftMargin: Style.space(14)
-          anchors.right: compactSource.visible ? compactSource.left : expandButton.left
+          anchors.right: compactChip.visible ? compactChip.left : compactSource.visible ? compactSource.left : expandButton.left
           anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+        }
+
+        TimeMachineChip {
+          id: compactChip
+          brief: true
+          anchors.right: compactSource.visible ? compactSource.left : expandButton.left
+          anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
         }
 
@@ -3708,7 +3991,8 @@ Panel {
           id: expandButton
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: "Expand"
+          // Its icon alone beside Time Machine's chip, so omarock's name fits.
+          text: compactChip.visible ? "" : "Expand"
           iconText: "󰊓"
           bordered: true
           foreground: root.foreground
@@ -3817,6 +4101,11 @@ Panel {
           anchors.right: parent.right
           anchors.verticalCenter: expandedIcon.verticalCenter
           spacing: Style.space(10)
+
+          TimeMachineChip {
+            anchors.verticalCenter: parent.verticalCenter
+            implicitHeight: compactButton.implicitHeight
+          }
 
           SourceSwitch { anchors.verticalCenter: parent.verticalCenter }
 
