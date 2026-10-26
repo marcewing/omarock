@@ -69,6 +69,24 @@ ShellRoot {
     return texts
   }
 
+  // A column heading's buttons (current, parent or preview) as drawn, by
+  // their text, the cursor's in brackets ("[Play]"), then what Play stands
+  // for where it shows ("(4 songs · 10 min)").
+  function levelButtons(role) {
+    var p = popup()
+    var card = p ? p.contentItem[0].parent.parent : null
+    var flow = host.findNamed(card, "levelButtons:" + role)
+    if (!flow) return []
+    var texts = []
+    for (var i = 0; i < flow.children.length; i++) {
+      var button = flow.children[i]
+      if (button.visible && button.text !== undefined) texts.push(button.hasCursor ? "[" + button.text + "]" : button.text)
+    }
+    var about = host.findNamed(card, "levelAbout:" + role)
+    if (about) texts.push("(" + about.text + ")")
+    return texts
+  }
+
   function keysWindowView() {
     var w = host.panel.keysWindow
     return w.visible ? host.findNamed(w.contentItem, "keysWindow") : null
@@ -254,6 +272,10 @@ ShellRoot {
         preview: p.previewEntry ? p.previewEntry.kind + ":" + p.previewEntry.title : "",
         previewRows: p.previewRows.map(function(r) { return r.kind + ":" + r.title }),
         parentRows: p.browsing ? p.parentLevel().rows.map(function(r) { return r.kind + ":" + r.title }) : [],
+        levelButtons: { current: host.levelButtons("current"), parent: host.levelButtons("parent"), preview: host.levelButtons("preview") },
+        // The open level's heading, its second line as drawn.
+        headingLine: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "headingLine:current")
+          ? host.findNamed(popup().contentItem[0].parent.parent, "headingLine:current").text : "",
         removable: p.rows.map(function(r) { return r.removable === true }),
         pickerOpen: p.pickerOpen, confirmOpen: p.confirmOpen, browseRoot: p.browseRoot,
         pickerTitle: p.picker.title, pickerIndex: p.picker.index,

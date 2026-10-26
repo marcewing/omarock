@@ -2453,6 +2453,14 @@ def browse_scenario(host, output, command_log, failures):
     check(s["rows"] == ["playalbum:Play the album", "track:Orbit Song", "track:Static Bloom",
                         "track:Long Distance", "track:Satellites"], "album view: " + ", ".join(s["rows"]), failures)
     check(s["browseInfo"]["subtitle"] == "Glass Harbor · 2021", "album heading: " + s["browseInfo"]["subtitle"], failures)
+    # Play, Add to queue and Add to playlist are buttons under the heading,
+    # and the list is the songs.
+    # (What Play stands for doesn't fit beside them here: it's on the heading's line.)
+    check(s["levelButtons"]["current"] == ["Play", "Add to queue", "Add to playlist"]
+          and s["headingLine"] == "Glass Harbor · 2021 · " + s["subtitles"][0]
+          and host.call("clickRow", 0, "false") == "not shown",
+          "the album's buttons, and only its songs in the list: " + str(s["levelButtons"]["current"])
+          + " | " + s["headingLine"], failures)
     host.grab(output / "compact-album.png")
 
     # a adds one song and stays in the album.
@@ -2463,6 +2471,20 @@ def browse_scenario(host, output, command_log, failures):
     s = host.state()
     check(s["notice"] == "Added Static Bloom to the queue" and s["browse"] == "album:Paper Satellites",
           "a adds the song and stays in the album: " + s["notice"], failures)
+    # ↑ from the first song: the cursor on the buttons, where the keys act on the album.
+    host.call("press", "Up")
+    host.call("press", "Up")
+    s = host.state()
+    check(s["cursor"] == 0 and s["levelButtons"]["current"][0] == "[Play]"
+          and s["hint"].startswith("Enter play · a add to queue · A add to playlist"),
+          "↑ from the first song goes onto Play: " + str(s["levelButtons"]["current"]) + " | " + s["hint"], failures)
+    # Add to queue (a real click) adds the album and stays in it.
+    queued = s["queueLength"]
+    check(host.call("clickPanel", "levelButton:Add to queue") == "ok", "Add to queue can be clicked", failures)
+    wait_for(lambda: host.state()["queueLength"] == queued + 4, "album added")
+    s = host.state()
+    check(s["notice"] == "Added Paper Satellites to the queue" and s["browse"] == "album:Paper Satellites",
+          "Add to queue adds the album and stays in it: " + s["notice"], failures)
 
     # ← goes back to the artist, with the cursor on the album it came from.
     host.call("press", "Left")
@@ -2472,10 +2494,11 @@ def browse_scenario(host, output, command_log, failures):
     # → on a song does nothing; Esc also goes back.
     host.call("press", "Right")
     wait_for(lambda: browsed(host, "album:Paper Satellites"), "album view again")
+    queued = host.state()["queueLength"]
     host.call("press", "Right")
     host.settle(.3)
     s = host.state()
-    check(s["browse"] == "album:Paper Satellites" and s["queueLength"] == queued + 1, "→ on a song does nothing",
+    check(s["browse"] == "album:Paper Satellites" and s["queueLength"] == queued, "→ on a song does nothing",
           failures)
     host.call("press", "Escape")
     host.settle(.3)
@@ -2496,6 +2519,10 @@ def browse_scenario(host, output, command_log, failures):
 
     host.call("expand", "true")
     host.settle(1)
+    s = host.state()
+    check(s["levelButtons"]["current"][:3] == ["Play", "Add to queue", "Add to playlist"]
+          and s["levelButtons"]["parent"][:3] == ["Play all songs", "Add to queue", "Add to playlist"],
+          "expanded, each column's heading has its buttons: " + str(s["levelButtons"]), failures)
     host.grab(output / "expanded-album.png")
     host.call("expand", "false")
     host.settle(.5)
@@ -2530,6 +2557,18 @@ def browse_scenario(host, output, command_log, failures):
     s = host.state()
     check(s["sections"][1] == "DISC 1" and s["sections"][4] == "DISC 2" and s["sections"][2] == "",
           "disc headings: " + str(s["sections"]), failures)
+    # Play (a real click) replaces the queue with the album, and plays it.
+    songs = len(s["rows"]) - 1
+    check(host.call("clickPanel", "levelButton:Play") == "ok", "Play can be clicked", failures)
+    wait_for(lambda: host.state()["browse"] == "" and host.state()["queueLength"] == songs, "album playing")
+    s = host.state()
+    check(s["notice"] == "Playing Live at the Basement" and "Playing" in s["stateText"],
+          "Play replaces the queue with the album and plays it: " + s["notice"] + " | " + s["stateText"], failures)
+    # Back to it, then Backspace.
+    host.call("type", "basement")
+    wait_for(lambda: not host.state()["searching"] and "album:Live at the Basement" in host.state()["rows"], "two-disc search again")
+    host.call("activate", host.state()["rows"].index("album:Live at the Basement"), "open")
+    wait_for(lambda: browsed(host, "album:Live at the Basement"), "two-disc album again")
     host.call("press", "Backspace")
     host.settle(.3)
     s = host.state()
@@ -2677,6 +2716,8 @@ def playlists_scenario(host, output, socket_path, failures):
     check(s["rows"] == ["savequeue:Save the queue as a playlist", "playlist:Late Night"] and s["cursor"] == 1
           and s["subtitles"][1] == "4 songs · 10 min" and s["browseRoot"] == "queue",
           "P opens Playlists: " + ", ".join(s["rows"]) + " | " + s["subtitles"][1], failures)
+    check(s["levelButtons"]["current"][0] == "Save the queue as a playlist",
+          "Save the queue is a button: " + str(s["levelButtons"]["current"]), failures)
     host.grab(output / "compact-playlists.png")
 
     # → opens it: Play the playlist, then its songs; one has left the library.
@@ -2688,6 +2729,8 @@ def playlists_scenario(host, output, socket_path, failures):
                         "track:Schnee"] and s["subtitles"][3] == "Not in the library any more"
           and s["browseInfo"]["subtitle"] == "Playlist · 4 songs · 10 min",
           "the playlist view: " + ", ".join(s["rows"]), failures)
+    check(s["levelButtons"]["current"][:3] == ["Play", "Add to queue", "Add to playlist"],
+          "the playlist's buttons: " + str(s["levelButtons"]["current"]), failures)
     check(s["hint"] == "Enter play from here · a add to queue · A add to playlist · x remove · i info · ← back · ? keys",
           "hint on a playlist song: " + s["hint"], failures)
     host.grab(output / "compact-playlist.png")
@@ -2815,8 +2858,10 @@ def playlists_scenario(host, output, socket_path, failures):
     check(stored(socket_path, "Road Trip") == [] and s["notice"] == "Deleted the playlist Road Trip",
           "x, Enter deletes it: " + s["notice"], failures)
 
-    # Save the queue: the top row, then a name.
+    # Save the queue: its button (↑ onto it, Enter), then a name.
     host.call("press", "Up")
+    check(host.state()["levelButtons"]["current"][0] == "[Save the queue as a playlist]",
+          "↑ goes onto Save the queue: " + str(host.state()["levelButtons"]["current"]), failures)
     host.call("press", "Return")
     wait_for(lambda: host.state()["pickerOpen"], "picker")
     check(host.state()["pickerTitle"] == "The queue", "Save the queue opens the picker", failures)
@@ -3561,6 +3606,8 @@ def time_machine_scenario(host, output, socket_path, failures):
           and s["subtitles"][3] == "Hüsker Dü · New Day Rising" and s["subtitles"][5].endswith("not on Apple Music"),
           "its songs found on Apple Music, or not, the cursor on Play: " + ", ".join(s["rows"][:7]) + " | " + s["subtitles"][0], failures)
     check(len(bridge_requests("/v1/search")) - searches >= 12, "a search for each song", failures)
+    check(s["levelButtons"]["current"][:4] == ["[Play]", "Shuffle", "Add to queue", "Add to playlist"],
+          "the chart's buttons, the cursor on Play: " + str(s["levelButtons"]["current"]), failures)
     host.grab(output / "compact-top100.png")
     host.call("expand", "true")
     host.settle(1)
@@ -3590,7 +3637,7 @@ def time_machine_scenario(host, output, socket_path, failures):
     # Shuffle: the same songs, in an order of their own.
     host.call("press", "T")
     wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1985" and "found on" in host.state()["subtitles"][0], "Top 100")
-    host.call("activate", 1, "open")
+    check(host.call("clickPanel", "levelButton:Shuffle") == "ok", "Shuffle can be clicked", failures)
     wait_for(lambda: host.state()["appleMode"], "Apple Music plays the chart, shuffled")
     shuffled = bridge_requests("/v1/play")[-1][2]
     check(sorted(i["id"] for i in shuffled["items"]) == sorted(i["id"] for i in play["items"]) and shuffled["start"] == 0,

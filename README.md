@@ -219,12 +219,16 @@ stay until you remove them too.
 - **Search** finds genres, artists, albums, songs and playlists, ignoring case and
   accents ("husker" finds Hüsker Dü). A space also matches punctuation, so "ac dc"
   finds AC/DC. A compilation is one result, not one per artist on it.
-- **Browse** from a result: →, Enter or a click opens a genre (Shuffle all songs,
-  then its artists), an artist (their albums by year, then the compilations they
-  appear on) or an album (its songs, by disc). ←, Esc or **Back** goes back. ▶ plays
-  anything at once, replacing the queue; `a` or + adds it to the end. Enter on a
-  song in an album plays the album from that song. In the expanded panel, the left
-  column holds the results, and the right one previews what → would open.
+- **Browse** from a result: →, Enter or a click opens a genre (its artists), an
+  artist (their albums by year, then the compilations they appear on) or an album
+  (its songs, by disc). ←, Esc or **Back** goes back. Under the heading, buttons
+  act on all of it: **Play** (or Shuffle, for a genre) replaces the queue with it
+  and plays; **Add to queue** adds it to the end; **Add to playlist** adds it to
+  one of your playlists. ↑ from the first song puts the cursor on them, where
+  Enter, `a` and `A` do the same. On a row, ▶ plays it at once, replacing the
+  queue, and `a` or + adds it to the end. Enter on a song in an album or playlist
+  plays it from that song. In the expanded panel, the left column holds the
+  results, and the right one previews what → would open.
 - **What's playing:** click the artist's name to open the artist, the album
   line or the cover to open the album, on the song playing, or the genre to open
   it (`O`, `o` and `g` do the same). ← goes back to the queue. On Apple Music, a
@@ -264,8 +268,8 @@ stay until you remove them too.
   - **Top 100** (or `T`), beside Playlists: Billboard's year-end Hot 100 for the
     year, from Wikipedia (a top 50 for 1956–58, a top 30 for 1949–55). omarock
     finds each song on Apple Music or Spotify: the one playing, else the
-    `lookup` setting's. Enter plays the chart from that song; Play the Top 100
-    plays it all, and Shuffle the Top 100 plays it in an order of its own. The
+    `lookup` setting's. Enter plays the chart from that song; the Play button
+    plays it all, and Shuffle plays it in an order of its own. The
     Mac can take ten seconds or more to load a hundred songs: the chart stays,
     saying so, until they play. A chart's songs stay in the queue even where
     the version found is a later one. What it found is kept in

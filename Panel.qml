@@ -168,7 +168,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.2"
+  readonly property string version: "0.9.3"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1063,6 +1063,53 @@ Panel {
     return !!row && root.queues(row.kind) && !row.missing && row.noQueue !== true
   }
 
+  // The rows at the top of a level that stand for all of it (Play the album,
+  // Shuffle all songs, Save the queue as a playlist): its heading shows them
+  // as buttons, and the list leaves them out. The cursor still goes up onto
+  // them from the first song, so Enter, a and A act on the whole of it there.
+  readonly property var buttonKinds: ["playalbum", "playplaylist", "playall", "shuffleall", "playtop", "shuffletop", "savequeue"]
+
+  function buttonRows(rows) {
+    var count = 0
+    while (rows && count < rows.length && root.buttonKinds.indexOf(rows[count].kind) >= 0) count++
+    return count
+  }
+
+  // A column's heading buttons: one for each of those rows, then Add to queue
+  // and Add to playlist for the first. Each is { index, mode, icon, label, tip }.
+  function levelButtons(role) {
+    if (role === "") return []
+    var level = root.columnLevel(role)
+    var rows = level.rows || []
+    var count = root.buttonRows(rows)
+    var buttons = []
+    // about: what the first stands for, beside them ("12 songs · 48:10").
+    for (var i = 0; i < count; i++)
+      buttons.push({ index: i, mode: "play", icon: rows[i].lead, label: root.buttonLabel(rows[i]), tip: root.buttonTip(rows[i]),
+        about: rows[i].subtitle || "" })
+    if (count > 0 && root.rowQueues(rows[0]))
+      buttons.push({ index: 0, mode: "add", icon: "󰐕", label: "Add to queue", tip: "Add its songs to the end of the queue" })
+    if (count > 0 && root.playlistItem(level.entry, rows[0]))
+      buttons.push({ index: 0, mode: "playlist", icon: "󰐒", label: "Add to playlist", tip: "Add its songs to a playlist, or to a new one" })
+    return buttons
+  }
+
+  function buttonLabel(row) {
+    if (row.kind === "savequeue") return "Save the queue as a playlist"
+    if (row.kind === "shuffleall" || row.kind === "shuffletop") return "Shuffle"
+    if (row.kind === "playall") return row.title
+    return "Play"
+  }
+
+  function buttonTip(row) {
+    if (row.kind === "savequeue") return "Save the songs in the queue as a playlist"
+    var what = row.kind === "playalbum" ? "the album" : row.kind === "playplaylist" ? "the playlist"
+      : row.kind === "shuffleall" ? "the genre's songs, shuffled,"
+      : row.kind === "playtop" ? "the chart's songs" : row.kind === "shuffletop" ? "the chart's songs, shuffled,"
+      : row.items ? "their top songs" : "all their songs"
+    return "Replace the queue with " + what + " and play " + (row.kind === "playalbum" || row.kind === "playplaylist" ? "it" : "them")
+  }
+
   function makeEntry(row, index) {
     if (row.apple) {
       return { kind: row.kind, apple: row.apple, title: row.name || row.title, artist: "", album: "", genre: "",
@@ -1748,10 +1795,11 @@ Panel {
     root.browseRows = entry.rows
     root.browseInfo = entry.info
     root.browseLoading = false
-    // Start on the first album or song; the Play row is just above it. A
-    // chart starts on its Play, above Shuffle.
+    // Start on the first album or song; the heading's buttons are just above
+    // it. A chart starts on its Play button.
+    var first = root.buttonRows(entry.rows)
     root.cursorActive = entry.rows.length > 0
-    root.cursorIndex = entry.rows.length > 1 && entry.kind !== "top100" ? 1 : 0
+    root.cursorIndex = first < entry.rows.length && entry.kind !== "top100" ? first : 0
   }
 
   function placeholderInfo(entry) {
@@ -3655,6 +3703,8 @@ Panel {
     // start at the top whenever their rows change.
     property string listKey: listRoot.role === "current" ? root.listKey : ""
     property string shownKey: ""
+    // The rows its heading shows as buttons (root.buttonRows), left out here.
+    readonly property int buttonRows: root.buttonRows(listRoot.model)
     onMarkIndexChanged: Qt.callLater(listRoot.keepMarkVisible)
     // Not the row under the pointer: the pointer put the cursor there, and
     // scrolling a row half off the edge into view moved the list under the
@@ -3734,9 +3784,12 @@ Panel {
         // The row, read by index (the model is the count).
         readonly property var modelData: listRoot.model[entryColumn.index] || ({})
         readonly property bool pointerOver: trackRow.pointerOver
+        readonly property bool asButton: entryColumn.index < listRoot.buttonRows
         onModelDataChanged: root.requestCover(entryColumn.modelData)
         Component.onCompleted: root.requestCover(entryColumn.modelData)
         width: ListView.view.width
+        visible: !entryColumn.asButton
+        height: entryColumn.asButton ? 0 : implicitHeight
         spacing: Style.space(2)
 
         // A section title ("ALBUMS") above the first row of a section. Its
@@ -3794,8 +3847,8 @@ Panel {
   }
 
   // Above each column of the expanded panel: what it shows, with Back on the
-  // left column once something is open. One height for all, so the columns
-  // line up.
+  // left column once something is open, and the level's buttons under it.
+  // The columns set one height for both, so their lists line up.
   component ColumnHeading: Item {
     id: heading
     property string title: ""
@@ -3804,62 +3857,146 @@ Panel {
     property var library: null
     property string cover: ""
     property bool showBack: false
-    implicitHeight: Math.max(Style.space(44), headingBack.implicitHeight, headingLabels.implicitHeight)
+    // The column (root.columnLevel) whose buttons it shows.
+    property string role: "current"
+    implicitHeight: headingTop.height + (headingButtons.visible ? Style.space(8) + headingButtons.implicitHeight : 0)
 
-    Button {
-      id: headingBack
-      visible: heading.showBack
+    Item {
+      id: headingTop
       anchors.left: parent.left
-      anchors.verticalCenter: parent.verticalCenter
-      width: visible ? implicitWidth : 0
-      text: "Back"
-      iconText: "󰁍"
-      iconSize: fontSize
-      bordered: true
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-      fontSize: Style.font.caption
-      tooltipText: root.backLabel + " (← or Esc)"
-      onClicked: root.goBack()
-    }
-
-    CoverArt {
-      id: headingCover
-      visible: heading.cover !== ""
-      anchors.left: headingBack.right
-      anchors.leftMargin: heading.showBack ? Style.space(12) : 0
-      anchors.verticalCenter: parent.verticalCenter
-      width: visible ? Style.space(44) : 0
-      height: Style.space(44)
-      source: heading.cover
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-    }
-
-    Column {
-      id: headingLabels
-      anchors.left: headingCover.right
-      anchors.leftMargin: heading.showBack || headingCover.visible ? Style.space(12) : 0
       anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.space(1)
+      anchors.top: parent.top
+      height: Math.max(Style.space(44), headingBack.implicitHeight, headingLabels.implicitHeight)
 
-      Text {
-        textFormat: Text.PlainText
-        width: parent.width
-        text: heading.title
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: true
-        elide: Text.ElideRight
+      Button {
+        id: headingBack
+        visible: heading.showBack
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        width: visible ? implicitWidth : 0
+        text: "Back"
+        iconText: "󰁍"
+        iconSize: fontSize
+        bordered: true
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        fontSize: Style.font.caption
+        tooltipText: root.backLabel + " (← or Esc)"
+        onClicked: root.goBack()
       }
 
-      SubtitleLine {
-        width: parent.width
-        text: heading.subtitle
-        library: heading.library
+      CoverArt {
+        id: headingCover
+        visible: heading.cover !== ""
+        anchors.left: headingBack.right
+        anchors.leftMargin: heading.showBack ? Style.space(12) : 0
+        anchors.verticalCenter: parent.verticalCenter
+        width: visible ? Style.space(44) : 0
+        height: Style.space(44)
+        source: heading.cover
+        foreground: root.foreground
+        fontFamily: root.fontFamily
       }
+
+      Column {
+        id: headingLabels
+        anchors.left: headingCover.right
+        anchors.leftMargin: heading.showBack || headingCover.visible ? Style.space(12) : 0
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(1)
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          text: heading.title
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+          elide: Text.ElideRight
+        }
+
+        SubtitleLine {
+          objectName: "headingLine:" + heading.role
+          width: parent.width
+          text: [heading.subtitle, headingButtons.elsewhere].filter(function(part) { return part !== "" }).join(" · ")
+          library: heading.library
+        }
+      }
+    }
+
+    LevelButtons {
+      id: headingButtons
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: headingTop.bottom
+      anchors.topMargin: Style.space(8)
+      role: heading.role
+    }
+  }
+
+  // A level's buttons (root.levelButtons): Play, Add to queue, Add to
+  // playlist. They wrap onto a second line where a column is too narrow, and
+  // what Play stands for ("12 songs · 48:10") follows them where it fits
+  // (else the heading's second line has it: elsewhere). The cursor on that
+  // row (↑ from the first song) shows on the button Enter presses.
+  component LevelButtons: Item {
+    id: levelButtons
+    property string role: "current"
+    readonly property var buttons: root.levelButtons(levelButtons.role)
+    readonly property string about: levelButtons.buttons.length > 0 ? levelButtons.buttons[0].about : ""
+    property Item lastButton: null
+    readonly property real aboutX: levelButtons.lastButton ? levelButtons.lastButton.x + levelButtons.lastButton.width + Style.space(10) : 0
+    readonly property string elsewhere: levelButtons.about !== "" && !aboutText.visible ? levelButtons.about : ""
+    visible: levelButtons.buttons.length > 0
+    implicitHeight: visible ? buttonFlow.implicitHeight : 0
+
+    Flow {
+      id: buttonFlow
+      objectName: "levelButtons:" + levelButtons.role
+      width: parent.width
+      spacing: Style.space(8)
+
+      Repeater {
+        model: levelButtons.buttons
+        onItemAdded: function(index, item) { if (index === levelButtons.buttons.length - 1) levelButtons.lastButton = item }
+        onItemRemoved: function(index, item) { if (levelButtons.lastButton === item) levelButtons.lastButton = null }
+
+        Button {
+          required property var modelData
+          objectName: "levelButton:" + modelData.label
+          text: modelData.label
+          iconText: modelData.icon
+          iconSize: fontSize
+          bordered: true
+          hasCursor: levelButtons.role === "current" && modelData.mode === "play" && root.cursorActive
+            && root.cursorIndex === modelData.index
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          fontSize: Style.font.caption
+          tooltipText: modelData.tip
+          onClicked: {
+            if (modelData.mode === "playlist") root.columnAddToPlaylist(levelButtons.role, modelData.index)
+            else root.columnActivate(levelButtons.role, modelData.index, modelData.mode)
+          }
+        }
+      }
+    }
+
+    Text {
+      id: aboutText
+      objectName: "levelAbout:" + levelButtons.role
+      textFormat: Text.PlainText
+      x: levelButtons.aboutX
+      y: levelButtons.lastButton ? levelButtons.lastButton.y : 0
+      height: levelButtons.lastButton ? levelButtons.lastButton.height : implicitHeight
+      visible: levelButtons.about !== "" && !!levelButtons.lastButton && levelButtons.aboutX + implicitWidth <= levelButtons.width
+      verticalAlignment: Text.AlignVCenter
+      text: levelButtons.about
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
     }
   }
 
@@ -3912,63 +4049,80 @@ Panel {
   }
 
   // Above the list while browsing: Back, the cover (for an album), and what
-  // is open.
+  // is open, with its buttons under them.
   component BrowseHeading: Item {
-    // One height with or without a cover, so the popup keeps its size.
-    implicitHeight: Math.max(backButton.implicitHeight, Style.space(44), browseLabels.implicitHeight)
+    implicitHeight: browseTop.height + (browseButtons.visible ? Style.space(8) + browseButtons.implicitHeight : 0)
 
-    Button {
-      id: backButton
+    Item {
+      id: browseTop
       anchors.left: parent.left
-      anchors.verticalCenter: parent.verticalCenter
-      text: "Back"
-      iconText: "󰁍"
-      iconSize: fontSize
-      bordered: true
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-      fontSize: Style.font.caption
-      tooltipText: root.backLabel + " (Esc)"
-      onClicked: root.goBack()
-    }
-
-    CoverArt {
-      id: browseCover
-      visible: !!root.browseInfo.coverFile || !!root.browseInfo.artwork
-      anchors.left: backButton.right
-      anchors.leftMargin: Style.space(12)
-      anchors.verticalCenter: parent.verticalCenter
-      width: visible ? Style.space(44) : 0
-      height: width
-      source: root.infoCover(root.browseInfo)
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-    }
-
-    Column {
-      id: browseLabels
-      anchors.left: browseCover.visible ? browseCover.right : backButton.right
-      anchors.leftMargin: Style.space(12)
       anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.space(1)
+      anchors.top: parent.top
+      // One height with or without a cover, so the popup keeps its size.
+      height: Math.max(backButton.implicitHeight, Style.space(44), browseLabels.implicitHeight)
 
-      Text {
-        textFormat: Text.PlainText
-        width: parent.width
-        text: root.browseInfo.title || ""
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: true
-        elide: Text.ElideRight
+      Button {
+        id: backButton
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Back"
+        iconText: "󰁍"
+        iconSize: fontSize
+        bordered: true
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        fontSize: Style.font.caption
+        tooltipText: root.backLabel + " (Esc)"
+        onClicked: root.goBack()
       }
 
-      SubtitleLine {
-        width: parent.width
-        text: root.infoSubtitle(root.browseInfo)
-        library: root.browseAlbumLibrary
+      CoverArt {
+        id: browseCover
+        visible: !!root.browseInfo.coverFile || !!root.browseInfo.artwork
+        anchors.left: backButton.right
+        anchors.leftMargin: Style.space(12)
+        anchors.verticalCenter: parent.verticalCenter
+        width: visible ? Style.space(44) : 0
+        height: width
+        source: root.infoCover(root.browseInfo)
+        foreground: root.foreground
+        fontFamily: root.fontFamily
       }
+
+      Column {
+        id: browseLabels
+        anchors.left: browseCover.visible ? browseCover.right : backButton.right
+        anchors.leftMargin: Style.space(12)
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(1)
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          text: root.browseInfo.title || ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+          elide: Text.ElideRight
+        }
+
+        SubtitleLine {
+          objectName: "headingLine:current"
+          width: parent.width
+          text: [root.infoSubtitle(root.browseInfo), browseButtons.elsewhere].filter(function(part) { return part !== "" }).join(" · ")
+          library: root.browseAlbumLibrary
+        }
+      }
+    }
+
+    LevelButtons {
+      id: browseButtons
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: browseTop.bottom
+      anchors.topMargin: Style.space(8)
     }
   }
 
@@ -4364,6 +4518,8 @@ Panel {
 
         readonly property real gap: Style.space(16)
         readonly property real columnWidth: Math.floor((width - gap) / 2)
+        // Both headings as tall as the taller, so the lists line up.
+        readonly property real headingHeight: Math.max(leftHeading.implicitHeight, rightHeading.implicitHeight)
         readonly property var parentInfo: root.browseStack.length >= 2
           ? root.browseStack[root.browseStack.length - 2].info
           : root.browseRoot === "queue" ? { title: "Queue", subtitle: root.queueSummary, coverFile: "" }
@@ -4374,6 +4530,8 @@ Panel {
           anchors.left: parent.left
           anchors.top: parent.top
           width: columnsArea.columnWidth
+          height: columnsArea.headingHeight
+          role: root.browsing ? "parent" : ""
           showBack: root.browsing
           title: root.browsing ? columnsArea.parentInfo.title : "Results"
           subtitle: root.browsing ? columnsArea.parentInfo.subtitle
@@ -4407,6 +4565,8 @@ Panel {
           anchors.right: parent.right
           anchors.top: parent.top
           width: columnsArea.columnWidth
+          height: columnsArea.headingHeight
+          role: root.browsing ? "current" : "preview"
           title: root.browsing ? (root.browseInfo.title || "") : (root.previewInfo.title || "")
           subtitle: root.infoSubtitle(root.browsing ? root.browseInfo : root.previewInfo)
           library: root.browsing ? root.browseAlbumLibrary : root.previewAlbumLibrary
