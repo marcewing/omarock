@@ -4231,6 +4231,9 @@ def setup_scenario(host, output, failures):
     open_window("siriusXM", "siriusxm")
     check(window()["blocker"] == "Needs a tick that you understand the risk" and not window()["canStart"],
           "SiriusXM's window: its risk has to be ticked first", failures)
+    folder = window()["folder"]
+    check(folder.startswith("file:///") and folder.endswith("/plugin/"),
+          "its guide opens from omarock's folder (" + folder + "sxm/README.md), not GitHub", failures)
     # The tick by the keys: Tab brings it, Space flips it.
     host.call("setupFocus", "setupCheck:sxmTerms")
     host.call("press", "Space")

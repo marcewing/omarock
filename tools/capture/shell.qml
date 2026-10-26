@@ -139,7 +139,7 @@ ShellRoot {
     return { open: true, piece: v.piece, title: w.title, values: values, notes: notes, blocker: v.blocker,
       canStart: v.canStart, notice: v.notice, busy: v.busy, otherMac: v.otherMac,
       macs: v.macs.map(function(m) { return m.name + " " + m.address }), outputs: v.outputs.map(function(o) { return o.name }),
-      resizable: w.minimumSize.width < w.maximumSize.width, footer: host.findNamed(v, "setupFooter").text }
+      resizable: w.minimumSize.width < w.maximumSize.width, footer: host.findNamed(v, "setupFooter").text, folder: v.folder }
   }
 
   // The settings view, while it's open.

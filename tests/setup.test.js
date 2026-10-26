@@ -2,6 +2,8 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 const Setup = require("../Setup.js")
 const Settings = require("../Settings.js")
+const fs = require("node:fs")
+const path = require("node:path")
 
 test("each piece set up from the settings has a setup window", () => {
   for (const piece of ["spotify", "siriusxm", "apple-music", "sound"]) {
@@ -111,4 +113,17 @@ test("the outputs, as ./install offers them", () => {
     { name: "alsa_output.b", label: "USB Audio (alsa_output.b)" },
     { name: "alsa_output.c", label: "USB Audio (alsa_output.c)" }])
   assert.deepEqual(Setup.outputList(""), [])
+})
+
+test("a guide link opens omarock's own copy, which is there", () => {
+  const links = Object.values(Setup.pages).flatMap(p => p.steps.flatMap(s => s.links || []))
+  const guides = links.filter(l => l.guide)
+  assert.ok(guides.length >= 2)
+  for (const l of guides) {
+    assert.ok(fs.existsSync(path.join(__dirname, "..", l.guide)), l.guide)
+    assert.equal(Setup.linkUrl(l, "file:///plugins/mre.omarock/"), "file:///plugins/mre.omarock/" + l.guide)
+  }
+  // The web's pages stay as they are.
+  for (const l of links.filter(l => l.url)) assert.ok(l.url.startsWith("https://"), l.url)
+  assert.ok(!links.some(l => (l.url || "").includes("github.com/marcewing")))
 })

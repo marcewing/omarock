@@ -38,6 +38,8 @@ Rectangle {
   property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
+  // omarock's folder, where its guides are.
+  readonly property string folder: Qt.resolvedUrl(".")
 
   // key -> what's in the field; key -> true once changed by hand (what's set
   // already, arriving late, fills in only the rest).
@@ -400,7 +402,7 @@ Rectangle {
 
               Button {
                 required property var modelData
-                objectName: "setupLink:" + modelData.url
+                objectName: "setupLink:" + (modelData.url || modelData.guide)
                 text: modelData.label
                 iconText: ""
                 bordered: true
@@ -408,8 +410,8 @@ Rectangle {
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
-                tooltipText: modelData.url
-                onClicked: Qt.openUrlExternally(modelData.url)
+                tooltipText: modelData.url || modelData.guide + ", in omarock's folder"
+                onClicked: Qt.openUrlExternally(Setup.linkUrl(modelData, root.folder))
               }
             }
           }
