@@ -18,11 +18,8 @@
 // `pattern` and `wrong`: what a text has to look like, and what's said when
 // it doesn't. `checked` (a secret): the window checks it live, against the
 // bridge.
-//
-// A link is { label, url } for a page on the web, or { label, guide } for
-// one of omarock's own guides: the copy in its folder, which opens in the
-// machine's Markdown viewer, offline too, and is the version installed.
 
+var GUIDES = "https://github.com/marcewing/omarock/blob/main/"
 var REDIRECT = "http://127.0.0.1:8730/callback"
 var BRIDGE_PORT = 8710
 
@@ -63,7 +60,7 @@ var pages = {
       { title: "It's unofficial",
         warning: true,
         text: ["omarock-sxm signs in as SiriusXM's web player does. SiriusXM's terms forbid that, so your account could be limited or closed, and it may stop working whenever SiriusXM changes its player."],
-        links: [{ label: "More in sxm/README.md", guide: "sxm/README.md" }],
+        links: [{ label: "More in sxm/README.md", url: GUIDES + "sxm/README.md" }],
         fields: [{ key: "sxmTerms", type: "check", label: "I understand: set it up anyway", required: true,
           needs: "a tick that you understand the risk", arg: "terms" }] },
       { title: "Your SiriusXM login",
@@ -93,7 +90,7 @@ var pages = {
         text: ["It's built with your own Apple Developer membership. On the Mac, clone omarock and run ./install there: it builds the bridge, and starts it at login."],
         copies: ["git clone https://github.com/marcewing/omarock.git && cd omarock && ./install"],
         links: [
-          { label: "The bridge's guide", guide: "bridge/README.md" },
+          { label: "The bridge's guide", url: GUIDES + "bridge/README.md" },
           { label: "Apple Developer Program", url: "https://developer.apple.com/programs/" },
           { label: "Tailscale", url: "https://tailscale.com/download" }
         ] },
@@ -139,12 +136,6 @@ var pages = {
       "omarock's volume knob is the volume then (mpc volume no longer applies)."
     ]
   }
-}
-
-// Where a link goes: its page, or its guide in omarock's folder (base, a
-// file:// URL ending in /).
-function linkUrl(link, base) {
-  return link.url || String(base || "") + link.guide
 }
 
 // The window's title.
@@ -284,6 +275,6 @@ function outputList(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { pages: pages, REDIRECT: REDIRECT, linkUrl: linkUrl, title: title, fields: fields, bridgeUrl: bridgeUrl, initial: initial,
+  module.exports = { pages: pages, REDIRECT: REDIRECT, title: title, fields: fields, bridgeUrl: bridgeUrl, initial: initial,
     problem: problem, blocker: blocker, writes: writes, args: args, tailnetMacs: tailnetMacs, outputList: outputList }
 }
