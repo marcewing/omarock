@@ -282,6 +282,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     hints_scenario(host, output, failures)
     list_tuning_scenario(host, failures)
     hover_scroll_scenario(host, failures)
+    search_covers_scenario(host, failures)
     scrolling_scenario(host, output, socket_path, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
@@ -3440,6 +3441,22 @@ def list_tuning_scenario(host, failures):
     host.call("close")
 
 
+def search_covers_scenario(host, failures):
+    """An album found by search shows its cover, looked up by its name and
+    album artist, as a genre's albums are (Marc, 10-26: Scratch Acid's one
+    album showed none until it was opened)."""
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    to_source(host, "local")
+    host.call("press", "/")
+    host.call("typeKeys", "basement")
+    wait_for(lambda: host.state()["query"] == "basement" and not host.state()["searching"], "search")
+    album_at = host.state()["rows"].index("album:Basement Tapes")
+    wait_for(lambda: host.state()["rowCovers"][album_at], "the album's cover in search", timeout=8)
+    check(True, "an album found by search shows its cover", failures)
+    host.call("close")
+
+
 def hover_scroll_scenario(host, failures):
     """The pointer on a row that the list's edge cuts in half puts the cursor
     there and leaves the list where it is. It used to scroll that row into
@@ -4962,6 +4979,7 @@ def main():
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "scrolling": scrolling_scenario(host, output, socket_path, failures)
                             elif name == "hover-scroll": hover_scroll_scenario(host, failures)
+                            elif name == "search-covers": search_covers_scenario(host, failures)
                             elif name == "time-machine": time_machine_scenario(host, output, socket_path, failures)
                             elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)
                             elif name == "bus-volume": bus_volume_scenario(host, socket_path, failures)

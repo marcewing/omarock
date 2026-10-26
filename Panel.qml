@@ -169,7 +169,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.10.5"
+  readonly property string version: "0.10.6"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1037,10 +1037,12 @@ Panel {
       rows.push({ kind: "artist", section: i === 0 ? "ARTISTS" : "", lead: "󰠃",
         title: artist, subtitle: "", artist: artist })
     })
+    // Albums are known by name here, so their covers are looked up as the
+    // rows come into view, as a genre's are.
     results.albums.forEach(function(album, i) {
       rows.push({ kind: "album", section: i === 0 ? "ALBUMS" : "", lead: "󰀥",
         title: album.album, subtitle: root.albumSubtitle(album, false),
-        artist: album.albumartist, album: album.album })
+        artist: album.albumartist, album: album.album, cover: { album: album.album, artist: album.albumartist } })
     })
     results.songs.forEach(function(song, i) {
       var parts = []

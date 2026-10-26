@@ -300,6 +300,8 @@ ShellRoot {
         stateText: p.stateText, nowPlaying: p.nowPlayingText, coverUrl: p.coverUrl,
         query: p.query, searching: p.searching, rows: p.rows.map(function(r) { return r.kind + ":" + r.title }),
         subtitles: p.rows.map(function(r) { return r.subtitle || "" }),
+        // Whether each row has its cover (or logo) to show yet.
+        rowCovers: p.rows.map(function(r) { return p.rowCoverUrl(r) !== "" }),
         sections: p.rows.map(function(r) { return r.section || "" }),
         cursor: p.cursorActive ? p.cursorIndex : -1, notice: p.notice,
         hint: p.hintParts.map(function(h) { return h.key + " " + h.what }).join(" · "),
