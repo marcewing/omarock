@@ -92,6 +92,7 @@ def main():
     album_library()
     renewal()
     sign_out()
+    queue_jump()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
 
@@ -285,6 +286,66 @@ def sign_out():
         check("sign out: requests then need a new sign-in", True)
     check("sign out: twice is fine", service.post("logout", ["logout"], {}) == {"ok": True})
 
+
+
+
+def queue_jump():
+    """Marc, 10-26: a click on the top of the queue played the song under it,
+    the bar flashing through every song. The jump stepped back with
+    skip_prev, which restarts a song a few seconds in. Now one Web API call:
+    the album or playlist from that song, else the queue's songs from it."""
+    def track(name): return {"item": {"uri": "spotify:track:" + name, "entity_type": "track"}}
+    plays = []
+    real_play = service.web_play
+
+    def queue(context):
+        s = fresh()
+        s.handle({"type": "playback_state", "status": "playing", "item": track("plows")["item"], "is_active": True,
+                  "context": context})
+        s.handle({"type": "queue_changed", "previous": [track("rome"), track("first")], "upcoming": [track("compute"), track("luau")]})
+        return s
+
+    def fake_play(fails=False):
+        def play(body):
+            plays.append(body)
+            if fails and "context_uri" in body:
+                raise service.ApiError(404, {"error": {"message": "not in the album"}})
+            uri = body["offset"].get("uri") or body["uris"][body["offset"]["position"]]
+            threading.Timer(0.05, service.SOLOIST.handle, [{"type": "track_changed", "item": {"uri": uri}}]).start()
+        return play
+    try:
+        s = queue({"uri": "spotify:album:yankcrime"})
+        names = [uri.split(":")[-1] for uri, _ in s.queue_list()[0]]
+        check("the queue as the status lists it: before, playing, after",
+              names == ["first", "rome", "plows", "compute", "luau"] and s.queue_list()[1] == 2, str(names))
+        service.web_play = fake_play()
+        out = service.post("queue/jump", ["queue", "jump"], {"index": 0})
+        check("a jump back plays the album from that song, in one go, with no skips",
+              plays == [{"context_uri": "spotify:album:yankcrime", "offset": {"uri": "spotify:track:first"}}]
+              and not any(c.startswith("skip") for c in s.ws.sent) and out["song"]["id"] == "first", f"{plays} {s.ws.sent}")
+
+        plays.clear()
+        s = queue(None)
+        service.web_play = fake_play()
+        service.post("queue/jump", ["queue", "jump"], {"index": 4})
+        check("from no album or playlist: the queue's songs, from that one",
+              plays == [{"uris": ["spotify:track:" + n for n in ["first", "rome", "plows", "compute", "luau"]], "offset": {"position": 4}}],
+              str(plays))
+
+        plays.clear()
+        s = queue({"uri": "spotify:playlist:mix"})
+        service.web_play = fake_play(fails=True)
+        service.post("queue/jump", ["queue", "jump"], {"index": 1})
+        check("a song not in the playlist (queued by hand): the queue's songs instead",
+              len(plays) == 2 and plays[1]["offset"] == {"position": 1}, str(plays))
+
+        plays.clear()
+        s = queue({"uri": "spotify:album:yankcrime"})
+        service.web_play = fake_play()
+        service.post("queue/jump", ["queue", "jump"], {"index": 2})
+        check("the song playing: back to its start", plays == [] and s.ws.sent == ["seek"], f"{plays} {s.ws.sent}")
+    finally:
+        service.web_play = real_play
 
 if __name__ == "__main__":
     main()

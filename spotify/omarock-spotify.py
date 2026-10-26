@@ -44,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 # omarock's sound output (audio/, ./install sound): Soloist plays into it
@@ -377,16 +377,35 @@ class Soloist:
         tid = uri_id(entity.get("uri"))
         return self.tracks.get(tid) or song_from_entity(entity)
 
+    def queue_list(self):
+        """The queue as the status lists it, as (uri, song): the songs before
+        the one playing, it, then those to come; and where it is (0 without
+        one). A queue jump's index is a place in it."""
+        listed, index = [], 0
+        for entity in [e.get("item") for e in reversed(self.previous)]:
+            song = self.song_for(entity)
+            if song: listed.append((entity.get("uri"), song))
+        current = self.song_for(self.item)
+        if current:
+            index = len(listed)
+            listed.append((self.item.get("uri"), current))
+        for entity in [e.get("item") for e in self.upcoming]:
+            song = self.song_for(entity)
+            if song: listed.append((entity.get("uri"), song))
+        return listed, index
+
+    def context_uri(self):
+        """What it plays from ("spotify:album:…"), or ""."""
+        c = self.context
+        return (c.get("uri") if isinstance(c, dict) else c if isinstance(c, str) else "") or ""
+
     def status_json(self):
         state = {"playing": "playing", "buffering": "playing", "paused": "paused"}.get(self.heard(), "stopped")
         if not self.item:
             state = "stopped"
         current = self.song_for(self.item)
-        queue = [self.song_for(e.get("item")) for e in reversed(self.previous)]
-        index = len(queue)
-        queue.append(current) if current else None
-        queue += [self.song_for(e.get("item")) for e in self.upcoming]
-        queue = [q for q in queue if q]
+        listed, index = self.queue_list()
+        queue = [song for _, song in listed]
         repeat = (self.options or {}).get("repeat", "off")
         out = {"seq": self.seq, "state": state, "current": not self.yielded, "position": round(self.position_now(), 2), "positionAt": time.time(),
                "queue": queue, "queueIndex": index if current else 0, "queueOffset": 0, "queueLength": len(queue),
@@ -920,12 +939,30 @@ def post(path, parts, body):
             SOLOIST.play_here()
             SOLOIST.wait(seq, lambda: SOLOIST.active, 6)
             seq = SOLOIST.seq
-        status = SOLOIST.status_json()
-        steps = int(body["index"]) - status["queueIndex"]
-        for _ in range(abs(steps)):
-            SOLOIST.command("skip_next" if steps > 0 else "skip_prev")
-            time.sleep(0.15)
-        return settled(seq)
+        # Straight there with the Web API, not a skip a song: skip_prev
+        # restarts a song a few seconds in, so stepping back landed one
+        # short (Marc, 10-26), and each step showed on the bar.
+        listed, current = SOLOIST.queue_list()
+        index = int(body["index"])
+        if not 0 <= index < len(listed):
+            raise ValueError("no song at that place in the queue")
+        uris = [uri for uri, _ in listed]
+        if SOLOIST.item and index == current:
+            # The song playing: from its start.
+            SOLOIST.command("seek", position_ms=0)
+            return settled(seq, timeout=1.5)
+        context, played = SOLOIST.context_uri(), False
+        if context.startswith(("spotify:album:", "spotify:playlist:")):
+            try:
+                web_play({"context_uri": context, "offset": {"uri": uris[index]}})
+                played = True
+            except ApiError as e:
+                log(f"queue jump: {uris[index]} isn't in {context} ({e}): playing the queue's songs instead")
+        if not played:
+            # Not from an album or playlist, or queued by hand: the queue as
+            # omarock lists it, from there.
+            web_play({"uris": uris[:500], "offset": {"position": index}})
+        return settled(seq, lambda: (SOLOIST.item or {}).get("uri") == uris[index], 6)
     if path == "queue/remove":
         raise RuntimeError("Spotify can't take songs out of its queue")
     if path == "volume":
