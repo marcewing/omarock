@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """A fake Radio Browser (radio-browser.info's JSON API), for testing the
-panel's radio: a few stations, search by name, tag and state, lookup by uuid,
+panel's radio: a few stations, search by name, tag, region, country and
+distance (as Radio Browser does, any part of the name, tag or region), lookup by uuid,
 the click counter, and logos it draws itself. No audio (the fake mpd never
 fetches the streams). Every request is logged (path) for the tests.
 
@@ -8,6 +9,7 @@ fetches the streams). Every request is logged (path) for the tests.
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 from pathlib import Path
 import sys
 import tempfile
@@ -28,16 +30,36 @@ STATIONS = [
     # Enough local stations for the list to scroll, each listened to less.
     (f"st-w{n}", f"KW{n:02d} 8{n % 10}.{n % 7} FM", "Washington", "community", "MP3", 128, 0, 90 - n, "4a6a4a")
     for n in range(1, 21)
+] + [
+    # For "Your area": Portland, Oregon (by coordinates, by its region field,
+    # by name), the other Portland, and Vancouver across the border.
+    ("st-kopb", "KOPB 91.5 Portland", "Oregon", "area-test", "MP3", 128, 0, 500, "2a6a9a"),
+    ("st-kboo", "KBOO 90.7 Portland, OR", "Oregon", "area-test", "MP3", 128, 0, 350, "9a2a6a"),
+    ("st-pdxjazz", "Portland Jazz", "Portland, OR", "area-test", "MP3", 128, 0, 200, "6a9a2a"),
+    ("st-wmpg", "WMPG Portland", "Portland, ME", "area-test", "MP3", 128, 0, 250, "aa6a2a"),
+    ("st-cbc", "CBC Radio One Vancouver", "British Columbia", "area-test", "AAC", 96, 0, 600, "c02020"),
 ]
+# Where some are, beyond the US and its region field.
+EXTRA = {
+    "st-kopb": {"geo_lat": 45.52, "geo_long": -122.68},
+    "st-cbc": {"geo_lat": 49.28, "geo_long": -123.12, "countrycode": "CA", "country": "Canada", "iso_3166_2": "CA-BC"},
+}
+
+
+def km(a, b, c, d):
+    p = math.pi / 180
+    h = math.sin((c - a) * p / 2) ** 2 + math.cos(a * p) * math.cos(c * p) * math.sin((d - b) * p / 2) ** 2
+    return 12742 * math.asin(math.sqrt(min(1, h)))
 
 
 def station(row):
     uuid, name, state, tags, codec, bitrate, hls, clicks, colour = row
-    return {"stationuuid": uuid, "name": name, "url": f"http://radio.example/{uuid}",
-            "url_resolved": f"http://radio.example/{uuid}" + ("/hls.m3u8" if hls else ""),
-            "homepage": "", "favicon": f"http://127.0.0.1:{PORT}/logo/{colour}.png", "tags": tags,
-            "country": "The United States Of America", "countrycode": "US", "state": state, "codec": codec,
-            "bitrate": bitrate, "hls": hls, "lastcheckok": 1, "clickcount": clicks, "votes": clicks // 10}
+    return dict({"stationuuid": uuid, "name": name, "url": f"http://radio.example/{uuid}",
+                 "url_resolved": f"http://radio.example/{uuid}" + ("/hls.m3u8" if hls else ""),
+                 "homepage": "", "favicon": f"http://127.0.0.1:{PORT}/logo/{colour}.png", "tags": tags,
+                 "country": "The United States Of America", "countrycode": "US", "state": state, "codec": codec,
+                 "bitrate": bitrate, "hls": hls, "lastcheckok": 1, "clickcount": clicks, "votes": clicks // 10,
+                 "geo_lat": None, "geo_long": None, "iso_3166_2": None}, **EXTRA.get(uuid, {}))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -71,7 +93,14 @@ class Handler(BaseHTTPRequestHandler):
             found = all_stations
             if query.get("name"): found = [s for s in found if query["name"].lower() in s["name"].lower()]
             if query.get("tag"): found = [s for s in found if query["tag"].lower() in s["tags"].lower().split(",")]
-            if query.get("state"): found = [s for s in found if s["state"] == query["state"]]
+            if query.get("state"):
+                if query.get("stateExact") == "true": found = [s for s in found if s["state"] == query["state"]]
+                else: found = [s for s in found if query["state"].lower() in s["state"].lower()]
+            if query.get("countrycode"): found = [s for s in found if s["countrycode"] == query["countrycode"].upper()]
+            if query.get("geo_lat"):
+                lat, lon, metres = float(query["geo_lat"]), float(query["geo_long"]), float(query.get("geo_distance", 0))
+                found = [s for s in found if s["geo_lat"] is not None
+                         and km(lat, lon, s["geo_lat"], s["geo_long"]) * 1000 <= metres]
             found.sort(key=lambda s: -s["clickcount"])
             return self.reply(200, found[:int(query.get("limit", 100))])
         if url.path == "/json/stations/byuuid":

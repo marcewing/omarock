@@ -2,12 +2,16 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "Mpd.js" as Mpd
+import "Places.js" as Places
 import "Radio.js" as Radio
 
 // Internet radio: stations from Radio Browser (radio-browser.info, free and
 // keyless), played by mpd straight from the station's stream. Favourites are
-// the mpd stored playlist "Radio", so mpc sees them too; local stations come
-// from a US state: the radioState setting, else ~/.config/omarock/radio.json.
+// the mpd stored playlist "Radio", so mpc sees them too; local stations are
+// those of the radioArea setting (a city, region or country, found in
+// places.tsv on this machine, Places.js), else of the US state the older
+// radioState setting or ~/.config/omarock/radio.json named. They're kept in
+// ~/.cache/omarock/radio-local.json for a day.
 // Where the player card and the bar read the player it has MpdClient's shape;
 // changing station is asked of the panel (tuneRequested), which retunes mpd.
 Item {
@@ -23,16 +27,35 @@ Item {
   property string server: ""
   property string lastError: ""
   // Every station seen, by uuid; the favourites in the playlist's order; the
-  // most listened stations in `place`.
+  // area's stations (Radio.localStations).
   property var stations: ({})
   property var favorites: []
   property var local: []
-  // Where "local" is: a US state, from the radioState setting, else from
-  // ~/.config/omarock/radio.json ({ "state": "Washington" }).
+  // Where "local" is: the radioArea setting, else (before 0.9.7) a US state
+  // from the radioState setting or ~/.config/omarock/radio.json ({ "state":
+  // "Washington" }).
+  property string setArea: ""
   property string setPlace: ""
   property string filePlace: ""
-  readonly property string place: root.setPlace !== "" ? root.setPlace : root.filePlace
-  onPlaceChanged: root.refreshLocal()
+  readonly property bool legacyArea: root.setArea === ""
+  readonly property string areaText: root.setArea !== "" ? root.setArea : root.setPlace !== "" ? root.setPlace : root.filePlace
+  // The time zone that says which country a place is likelier in (the
+  // timeZone setting, else TZ, else the machine's); and where the cache goes.
+  property string timeZone: ""
+  property string cacheDir: ""
+  // The area found (Places.area), and how finding it goes: "" (none set),
+  // "finding", "found" or "unknown" (no place by that name).
+  property var area: null
+  property string areaState: ""
+  // When the local stations were last searched for (ms), 0 never.
+  property double localMade: 0
+  property bool localSearching: false
+  // The local section's name ("near Portland"), and the area in full
+  // ("Portland, Maine, United States, with New Hampshire").
+  readonly property string place: Radio.localPlace(root.area)
+  readonly property string areaLabel: Places.describe(root.area)
+  onAreaTextChanged: if (root.cacheRead) root.findArea()
+  onTimeZoneChanged: if (root.cacheRead) root.findArea()
   readonly property string playlist: "Radio"
   // Logo and artwork URLs checked before an Image loads them: url -> "ok",
   // "bad" or "pending". Radio Browser's logos are often dead links, and a
@@ -131,32 +154,180 @@ Item {
     root.get("/json/stations/search?tag=" + q + order + "&limit=15", function(data) { byTag = data; done() })
   }
 
-  // The most listened stations in `place`. The directory's state field is
-  // filled in by volunteers and often left out, so stations with the state's
-  // name in their name or tags count too.
-  function refreshLocal() {
-    if (root.place === "") {
+  // ---------- Local stations ----------
+
+  // Where the area is: the cache's, when it's for the same words; else
+  // looked up in places.tsv (read for this only, then let go), in the time
+  // zone's country first. The old setting was a US state, so it's looked
+  // for in the US.
+  // The newest lookup and search win: one still under way is dropped.
+  property int findSeq: 0
+  property int localSeq: 0
+  function findArea() {
+    var text = root.areaText.trim()
+    var seq = ++root.findSeq
+    root.localSeq++
+    root.localSearching = false
+    if (text === "") {
+      root.area = null
+      root.areaState = ""
       root.local = []
       return
     }
-    var place = encodeURIComponent(root.place)
-    var common = "&countrycode=US&hidebroken=true&order=clickcount&reverse=true&limit=40"
-    var found = [], pending = 3
-    function done(data) {
-      if (data) found = found.concat(data)
-      if (--pending > 0) return
-      var seen = {}
-      var stations = found.filter(function(s) {
-        if (seen[s.stationuuid]) return false
-        seen[s.stationuuid] = true
-        return true
-      }).sort(function(a, b) { return (b.clickcount || 0) - (a.clickcount || 0) })
-      root.remember(stations)
-      root.local = stations
+    if (root.cached && root.cached.text === text && root.cached.legacy === root.legacyArea && root.cached.zone === root.timeZone
+        && root.cached.area) {
+      root.area = root.cached.area
+      root.areaState = "found"
+      root.local = root.cached.stations || []
+      root.localMade = root.cached.made || 0
+      root.remember(root.local)
+      root.refreshLocal(false)
+      return
     }
-    root.get("/json/stations/search?state=" + place + "&stateExact=true" + common, done)
-    root.get("/json/stations/search?name=" + place + common, done)
-    root.get("/json/stations/search?tag=" + place.toLowerCase() + common, done)
+    root.areaState = "finding"
+    root.area = null
+    root.local = []
+    root.localMade = 0
+    root.withZone(function(zone) {
+      root.withPlaces(function(index) {
+        if (seq !== root.findSeq) return
+        var prefer = root.legacyArea ? "US" : Places.countryOfZone(index, zone)
+        var place = Places.find(index, text, prefer)
+        root.area = place ? Places.area(index, place) : null
+        root.areaState = place ? "found" : "unknown"
+        if (place) root.refreshLocal(true)
+      })
+    })
+  }
+
+  // The time zone: the setting, else TZ, else /etc/localtime's link.
+  function withZone(callback) {
+    var zone = root.timeZone !== "" ? root.timeZone : Quickshell.env("TZ") || ""
+    if (zone !== "") return callback(zone)
+    zoneReader.callbacks = zoneReader.callbacks.concat([callback])
+    zoneReader.running = true
+  }
+  Process {
+    id: zoneReader
+    property var callbacks: []
+    command: ["readlink", "/etc/localtime"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var zone = String(text || "").trim().replace(/^.*zoneinfo\//, "")
+        var callbacks = zoneReader.callbacks
+        zoneReader.callbacks = []
+        callbacks.forEach(function(callback) { callback(zone) })
+      }
+    }
+    stderr: StdioCollector {}
+  }
+
+  // places.tsv, beside this file, parsed; read when an area is looked up.
+  property var placesWaiting: []
+  function withPlaces(callback) {
+    root.placesWaiting = root.placesWaiting.concat([callback])
+    placesFile.path = decodeURIComponent(Qt.resolvedUrl("places.tsv").toString().replace(/^file:\/\//, ""))
+  }
+  FileView {
+    id: placesFile
+    printErrors: false
+    onLoaded: {
+      var index = Places.parse(text())
+      var waiting = root.placesWaiting
+      root.placesWaiting = []
+      path = ""
+      waiting.forEach(function(callback) { callback(index) })
+    }
+    // Only a lookup that was waiting failed: letting go of the file isn't one.
+    onLoadFailed: {
+      if (root.placesWaiting.length === 0) return
+      root.placesWaiting = []
+      root.areaState = "unknown"
+    }
+  }
+
+  // The area's stations, searched for again once they're a day old (or
+  // when force). The searches (Radio.localQueries) go one after another.
+  function refreshLocal(force) {
+    if (!root.area) {
+      if (root.areaState !== "finding") root.local = []
+      return
+    }
+    if (!force && (root.localSearching || Date.now() - root.localMade < 24 * 3600 * 1000)) return
+    var area = root.area
+    var queries = Radio.localQueries(area)
+    var found = [], answered = 0
+    var seq = ++root.localSeq
+    root.localSearching = true
+    function next(i) {
+      if (seq !== root.localSeq) return
+      if (i >= queries.length) {
+        root.localSearching = false
+        // Nothing answered (Radio Browser down): keep what there was.
+        if (answered === 0) return
+        var stations = Radio.localStations(area, found, Places)
+        root.remember(stations)
+        root.local = stations
+        root.localMade = Date.now()
+        root.writeCache()
+        return
+      }
+      root.get("/json/stations/search?" + queries[i], function(data) {
+        if (data) {
+          answered++
+          found = found.concat(data)
+        }
+        next(i + 1)
+      })
+    }
+    next(0)
+  }
+
+  // ~/.cache/omarock/radio-local.json: the area found for those words and
+  // its stations, so a restart needs neither places.tsv nor a search.
+  property bool cacheRead: false
+  property var cached: null
+  readonly property var cacheFields: ["stationuuid", "name", "url", "url_resolved", "favicon", "tags", "country",
+    "countrycode", "state", "iso_3166_2", "language", "homepage", "codec", "bitrate", "hls", "lastcheckok",
+    "lastchecktime_iso8601", "clickcount", "votes", "geo_lat", "geo_long"]
+  function writeCache() {
+    if (root.cacheDir === "" || !root.area) return
+    var stations = root.local.map(function(s) {
+      var out = {}
+      root.cacheFields.forEach(function(k) { if (s[k] !== undefined) out[k] = s[k] })
+      return out
+    })
+    root.cached = { text: root.areaText.trim(), legacy: root.legacyArea, zone: root.timeZone, area: root.area, stations: stations,
+      made: root.localMade }
+    cacheWriter.command = ["sh", "-c", 'mkdir -p "$1" && printf "%s" "$2" > "$1/radio-local.json.new" && mv "$1/radio-local.json.new" "$1/radio-local.json"',
+      "sh", root.cacheDir, JSON.stringify(root.cached)]
+    cacheWriter.running = true
+  }
+  Process {
+    id: cacheWriter
+    stderr: StdioCollector {}
+  }
+  Process {
+    id: cacheReader
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try { root.cached = text ? JSON.parse(text) : null } catch (e) { root.cached = null }
+        root.cacheRead = true
+        root.findArea()
+      }
+    }
+    stderr: StdioCollector {}
+  }
+  Component.onCompleted: {
+    if (root.cacheDir === "") {
+      root.cacheRead = true
+      root.findArea()
+      return
+    }
+    cacheReader.command = ["cat", root.cacheDir + "/radio-local.json"]
+    cacheReader.running = true
   }
 
   // The favourites: the "Radio" playlist's stations, looked up by uuid.
@@ -255,7 +426,7 @@ Item {
   // A different server (the setting changed): start over with it.
   onApiChanged: {
     root.server = ""
-    root.refreshLocal()
+    root.refreshLocal(true)
   }
 
   // The now playing card's art: the song's, else the station's logo.

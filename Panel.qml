@@ -168,7 +168,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.6"
+  readonly property string version: "0.9.7"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -291,7 +291,7 @@ Panel {
   }
   // What an empty text setting means.
   readonly property var settingPlaceholders: ({
-    radioState: "none: no local stations"
+    radioArea: "none: no local stations"
   })
   // Under each source: a setup running in a terminal (or one that didn't
   // finish), else off, else what's wrong, else how it's doing.
@@ -315,8 +315,15 @@ Panel {
     return {
       localSetUp: flowNote("local", states.local.setUp) || note(""),
       radio: !root.radioEnabled ? note("Off")
-        : radio.place !== "" ? note("Local stations from " + radio.place, "ok")
-        : note("No state set (below): no local stations"),
+        : radio.area ? note("Local stations " + (radio.area.kind === "city" ? "near " : "from ") + radio.area.name, "ok")
+        : note("No area set (below): no local stations"),
+      // Where the area was found, or why not.
+      radioArea: radio.areaState === "finding" ? note("Finding it…")
+        : radio.areaState === "unknown" ? note("No city, region or country called " + radio.areaText.trim()
+          + " here. A city of 15,000 people or more, or your state, region or country.", "bad")
+        : radio.areaState === "found" ? note(radio.areaLabel + (radio.localSearching ? " · looking for stations…"
+          : radio.localMade > 0 ? " · " + root.countText(radio.local.length, "station") : ""), "ok")
+        : note(""),
       spotify: sourceNote("spotify", states.spotify, root.spotifyEnabled,
         "Off: its services are stopped. Your accounts and keys are kept.",
         !spotify.healthKnown ? note("Checking…")
@@ -859,7 +866,7 @@ Panel {
     sxm.watching = root.opened && root.sxmEnabled
     if (root.opened && root.sxmEnabled) sxm.checkHealth()
     radio.watching = root.opened
-    if (root.opened && root.radioMode) radio.refreshLocal()
+    if (root.opened && root.radioMode) radio.refreshLocal(false)
     if (root.opened && root.appleConfigured && !root.appleMode) apple.checkHealth()
     // Apple's genres need the catalog; fetch them again if they didn't come before.
     if (root.opened && root.appleMode && apple.genres.length === 0) apple.refreshGenres()
@@ -3159,7 +3166,10 @@ Panel {
   RadioClient {
     id: radio
     api: root.radioBrowser
+    setArea: root.setting("radioArea", "")
     setPlace: root.setting("radioState", "")
+    timeZone: root.setting("timeZone", "")
+    cacheDir: Quickshell.env("HOME") + "/.cache/omarock"
     mpd: client
     active: root.radioMode
     onCurrentUuidChanged: if (currentUuid !== "") root.lastStation = currentUuid

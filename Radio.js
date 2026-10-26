@@ -50,7 +50,8 @@ function stationRow(station, section, playingUuid, favoriteUuids) {
 
 // The list: the station playing when it's neither a favourite nor local
 // (one found by search, so A can keep it), the favourites, then the most
-// listened stations near you.
+// listened stations near you. place: the local section's name ("near
+// Portland"), or "" when no area is set.
 function listRows(favorites, local, playingUuid, place, playing) {
   var ids = favorites.map(function(s) { return s.stationuuid })
   var rows = []
@@ -60,11 +61,151 @@ function listRows(favorites, local, playingUuid, place, playing) {
   local.filter(function(s) { return ids.indexOf(s.stationuuid) < 0 }).forEach(function(s, i) {
     rows.push(stationRow(s, i === 0 ? "LOCAL · " + place.toUpperCase() : "", playingUuid, ids))
   })
-  // No state set: say how, as the local stations are otherwise just missing.
+  // No area set: say how, as the local stations are otherwise just missing.
   if (!place)
-    rows.push({ kind: "note", section: "LOCAL", lead: "󰋼", title: "Set your US state for its local stations",
-      subtitle: "In omarock's settings (,): Your US state" })
+    rows.push({ kind: "note", section: "LOCAL", lead: "󰋼", title: "Set your area for its local stations",
+      subtitle: "In omarock's settings (,): Your area, a city or region" })
   return rows
+}
+
+// ---------- Local stations: those of an area (Places.area) ----------
+//
+// Radio Browser's stations say where they are in their own words: a
+// region field typed by volunteers ("Maine", "Portland, OR", "Bayern"),
+// often left out, and coordinates on a fifth of them. So an area's stations
+// are searched for several ways (localQueries), and each one found is
+// weighed (localTier): near (within the radius by its coordinates, or a
+// city near by name) comes before the rest of the area's regions.
+
+var LOCAL_LIMIT = 40
+
+// The local section's name: "near Portland", "Maine", "Germany".
+function localPlace(area) {
+  if (!area) return ""
+  return area.kind === "city" ? "near " + area.name : area.name
+}
+
+// The searches (Radio Browser's /json/stations/search) that find an area's
+// stations: by coordinates; by each region's names (the region field
+// holds any of them, "Lewiston, Maine" too) and the city's; and stations
+// named or tagged for its region, or for a city no other shares its name with.
+function localQueries(area) {
+  if (!area) return []
+  var common = "hidebroken=true&order=clickcount&reverse=true"
+  var out = []
+  function add(field, value, cc, limit) {
+    out.push(field + "=" + encodeURIComponent(value) + (cc ? "&countrycode=" + cc : "") + "&" + common + "&limit=" + limit)
+  }
+  if (area.kind === "country") {
+    out.push("countrycode=" + area.cc + "&" + common + "&limit=" + LOCAL_LIMIT)
+    return out
+  }
+  if (area.lat !== null && area.lat !== undefined)
+    out.push("geo_lat=" + area.lat + "&geo_long=" + area.lon + "&geo_distance=" + area.radius * 1000 + "&" + common + "&limit=100")
+  area.regions.forEach(function(r) { r.names.slice(0, 2).forEach(function(n) { add("state", n, r.cc, 100) }) })
+  var home = area.regions[0]
+  if (area.kind === "city") add("state", area.name, area.cc, 100)
+  if (home) {
+    add("name", home.names[0], home.cc, 50)
+    add("tag", home.names[0].toLowerCase(), home.cc, 50)
+  }
+  if (area.kind === "city" && !area.ambiguous) {
+    add("name", area.name, area.cc, 50)
+    add("tag", area.name.toLowerCase(), area.cc, 50)
+  }
+  return out
+}
+
+// Folded text as words: punctuation is a space ("St.Louis" is "st louis").
+function wordsOf(text, Places) {
+  return " " + Places.fold(text).replace(/[^a-z0-9]+/g, " ").trim() + " "
+}
+
+// Whether words (wordsOf) have a name (folded) among them, whole.
+function hasWord(words, name) {
+  name = String(name || "").replace(/[^a-z0-9]+/g, " ").trim()
+  return name !== "" && words.indexOf(" " + name + " ") >= 0
+}
+
+// How local a station is to an area: 1 near, 2 elsewhere in its regions,
+// 0 not local. Places: Places.js. crowded: coordinates many stations share
+// (one operator's address), which say nothing about where each one plays.
+function localTier(area, station, Places, crowded) {
+  var cc = String(station.countrycode || "").toUpperCase()
+  if (area.kind === "country") return cc === area.cc ? 2 : 0
+  var mine = area.regions
+  var known = mine.some(function(r) { return r.cc === cc })
+  var lat = station.geo_lat, lon = station.geo_long
+  var placed = lat !== null && lat !== undefined && lon !== null && lon !== undefined && !crowded[lat + "," + lon]
+  var tooFar = false
+  if (placed && area.lat !== null && area.lat !== undefined) {
+    var d = Places.km(area.lat, area.lon, lat, lon)
+    if (d <= area.radius) return 1
+    // A little past the radius, its region can still count it; far past, not.
+    if (d > area.radius * 1.5) return 0
+    tooFar = true
+  }
+  if (!known) return 0
+  function named(r, part) {
+    return r.cc === cc && (r.names.some(function(n) { return Places.fold(n) === part }) || (r.short !== "" && Places.fold(r.short) === part))
+  }
+  var whole = Places.fold(station.state)
+  var parts = whole === "" ? [] : [whole].concat(whole.split(/[,\/;]/).map(function(p) { return p.trim() }).filter(function(p) { return p !== "" }))
+  var region = false, near = false
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i]
+    if (mine.some(function(r) { return named(r, part) })) region = true
+    else if (area.near.indexOf(part) >= 0) near = true
+    else if (area.others.some(function(r) { return r.cc === cc && (r.names.indexOf(part) >= 0 || (r.short !== "" && r.short === part)) }))
+      // Another region's: "Portland, OR" isn't Portland, Maine.
+      return 0
+    // A city of its regions, but far away: "St. Louis, Missouri".
+    else if ((area.far || []).indexOf(part) >= 0) return 0
+  }
+  // ISO 3166-2 ("US-ME", "CA-ON"), where it's filled in.
+  var iso = String(station.iso_3166_2 || "").toUpperCase().split("-")
+  if (iso.length === 2 && iso[0] === cc) {
+    var sub = iso[1]
+    if (mine.some(function(r) { return r.cc === cc && (r.short === sub || r.code === cc + "." + sub) })) region = true
+  }
+  if (near && !tooFar) return 1
+  // Its name and tags, unless they name a big city far off ("Z107.7 St. Louis").
+  var words = wordsOf((station.name || "") + " " + (station.tags || ""), Places)
+  if (!near && (area.farBig || []).some(function(n) { return hasWord(words, n) })) return 0
+  // The city's name; one another city shares, with its region ("Portland, OR").
+  var city = Places.fold(area.name)
+  var home = mine[0]
+  if (area.kind === "city" && cc === area.cc && (!area.ambiguous ? hasWord(words, city)
+      : home && home.names.concat(home.short ? [home.short] : []).some(function(n) { return hasWord(words, city + " " + Places.fold(n)) })))
+    return tooFar ? 2 : 1
+  if (near || region) return 2
+  if (home && cc === home.cc && home.names.some(function(n) { return hasWord(words, Places.fold(n)) })) return 2
+  return 0
+}
+
+// An area's stations, from what its searches found: near ones first, then
+// the rest of its regions, each by how much they're listened to.
+function localStations(area, found, Places, limit) {
+  if (!area) return []
+  var seen = {}
+  var stations = found.filter(function(s) {
+    if (!s || seen[s.stationuuid]) return false
+    seen[s.stationuuid] = true
+    return true
+  })
+  var at = {}
+  stations.forEach(function(s) {
+    if (s.geo_lat === null || s.geo_lat === undefined) return
+    var key = s.geo_lat + "," + s.geo_long
+    at[key] = (at[key] || 0) + 1
+  })
+  var crowded = {}
+  for (var key in at) if (at[key] >= 8) crowded[key] = true
+  return stations.map(function(s) { return { station: s, tier: localTier(area, s, Places, crowded) } })
+    .filter(function(t) { return t.tier > 0 })
+    .sort(function(a, b) { return a.tier - b.tier || (b.station.clickcount || 0) - (a.station.clickcount || 0) })
+    .slice(0, limit || LOCAL_LIMIT)
+    .map(function(t) { return t.station })
 }
 
 function searchRows(stations, playingUuid, favoriteUuids) {
@@ -130,6 +271,10 @@ if (typeof module !== "undefined") {
     playable: playable,
     describe: describe,
     listRows: listRows,
+    localPlace: localPlace,
+    localQueries: localQueries,
+    localTier: localTier,
+    localStations: localStations,
     searchRows: searchRows,
     parseTitle: parseTitle,
     songAsMpd: songAsMpd,

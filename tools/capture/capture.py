@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS = Path(__file__).resolve().parent
 PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
-                "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Info.js", "InfoCard.qml",
+                "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartClient.qml", "YearPicker.qml",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
@@ -267,6 +267,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     sxm_scenario(host, output, socket_path, failures)
     radio_scenario(host, output, socket_path, failures)
     radio_tuning_scenario(host, socket_path, failures)
+    radio_area_scenario(host, output, failures)
     info_scenario(host, output, socket_path, failures)
     library_scenario(host, output, socket_path, failures)
     keep_state_scenario(host, output, failures)
@@ -1586,6 +1587,95 @@ def radio_tuning_scenario(host, socket_path, failures):
     host.call("close")
 
 
+def radio_area_scenario(host, output, failures):
+    """Marc, 10-26: local stations by city, "to be more accurate", for users
+    outside the US too, with the next state's ("many big cities are near the
+    border of their state, or even sort of straddle a border"). "Your area"
+    is found in places.tsv on this machine (the time zone says which country
+    first); its stations by coordinates, by the region field and by name,
+    near ones first, then the rest of its regions; kept for a day."""
+    home = BRIDGE["config"].parents[2]
+    cache = home / ".cache/omarock/radio-local.json"
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    to_source(host, "radio")
+
+    def local(s):
+        """The local section's name, and its stations."""
+        at = next((i for i, sec in enumerate(s["sections"]) if sec.startswith("LOCAL")), None)
+        return (s["sections"][at], s["rows"][at:]) if at is not None else ("", [])
+
+    def area_is(section):
+        wait_for(lambda: local(host.state())[0] == section, section, timeout=10)
+        return host.state()
+
+    s = area_is("LOCAL · WASHINGTON")
+    check(s["radioLocal"][:2] == ["KEXP 90.3 FM", "KUOW 94.9"],
+          "the old setting, a US state in radio.json, still counts: " + ", ".join(s["radioLocal"][:3]), failures)
+
+    # A city: Portland, Oregon. Near first (by coordinates, by "Portland,
+    # OR"), then Washington's, the state across the river; not the other
+    # Portland's, nor Canada's.
+    searches = len(radio_requests("/json/stations/search"))
+    host.call("settings", json.dumps({"radioArea": "Portland, Oregon"}))
+    s = area_is("LOCAL · NEAR PORTLAND")
+    wait_for(lambda: "station" in host.state()["settingNotes"]["radioArea"]["text"], "its stations counted")
+    s = host.state()
+    rows = s["radioLocal"]
+    check(rows[:5] == ["KOPB 91.5 Portland", "KBOO 90.7 Portland, OR", "Portland Jazz", "KEXP 90.3 FM", "KUOW 94.9"]
+          and "WMPG Portland" not in rows and "CBC Radio One Vancouver" not in rows,
+          "near Portland: its own first, then Washington's; not Portland, Maine's: " + ", ".join(rows[:6]), failures)
+    queries = [r["query"] for r in radio_requests("/json/stations/search")[searches:]]
+    check(any("geo_lat" in q for q in queries) and {"Oregon", "Washington", "Portland"} <= {q.get("state") for q in queries},
+          "found by coordinates, and by Oregon's, Washington's and Portland's names", failures)
+    notes = s["settingNotes"]
+    check(notes["radioArea"]["text"].startswith("Portland, Oregon, United States, with Washington · ")
+          and notes["radioArea"]["kind"] == "ok" and notes["radio"]["text"] == "Local stations near Portland",
+          "the settings say where that is: " + notes["radioArea"]["text"], failures)
+    host.grab(output / "compact-radio-area.png")
+
+    # Kept for a day: opening again searches nothing, and the cache has it.
+    searches = len(radio_requests("/json/stations/search"))
+    host.call("close")
+    host.call("open")
+    host.settle(1.5)
+    check(len(radio_requests("/json/stations/search")) == searches and host.state()["radioLocal"][:1] == ["KOPB 91.5 Portland"],
+          "opened again, the stations come from the cache, with no search", failures)
+    kept = json.loads(cache.read_text()) if cache.exists() else {}
+    check(kept.get("text") == "Portland, Oregon" and len(kept.get("stations", [])) == len(rows),
+          "~/.cache/omarock/radio-local.json keeps the area and its stations", failures)
+
+    # One word: the time zone says which Vancouver.
+    host.call("settings", json.dumps({"radioArea": "Vancouver", "timeZone": "America/Vancouver"}))
+    wait_for(lambda: host.state()["settingNotes"]["radioArea"]["text"].startswith("Vancouver, British Columbia"), "Vancouver, BC")
+    s = area_is("LOCAL · NEAR VANCOUVER")
+    wait_for(lambda: "station" in host.state()["settingNotes"]["radioArea"]["text"], "its stations counted")
+    rows = host.state()["radioLocal"]
+    check(host.state()["settingNotes"]["radioArea"]["text"].startswith("Vancouver, British Columbia, Canada, with Washington")
+          and rows[:2] == ["CBC Radio One Vancouver", "KEXP 90.3 FM"],
+          "in Canada's time zone, Vancouver is BC's, and Washington's across the border count: " + ", ".join(rows[:3]), failures)
+    host.call("settings", json.dumps({"radioArea": "Vancouver"}))
+    wait_for(lambda: host.state()["settingNotes"]["radioArea"]["text"].startswith("Vancouver, Washington"), "Vancouver, WA")
+    wait_for(lambda: "station" in host.state()["settingNotes"]["radioArea"]["text"], "its stations counted")
+    rows = host.state()["radioLocal"]
+    check(host.state()["settingNotes"]["radioArea"]["text"].startswith("Vancouver, Washington, United States, with Oregon")
+          and rows[:1] == ["KOPB 91.5 Portland"] and "CBC Radio One Vancouver" not in rows,
+          "in the US's, it's Washington's, with Portland across the river: " + ", ".join(rows[:3]), failures)
+
+    # A place it doesn't know: says so.
+    host.call("settings", json.dumps({"radioArea": "Nowhereville"}))
+    wait_for(lambda: host.state()["settingNotes"]["radioArea"]["kind"] == "bad", "not found")
+    s = host.state()
+    check(s["settingNotes"]["radioArea"]["text"].startswith("No city, region or country called Nowhereville")
+          and local(s)[1][:1] == ["note:Set your area for its local stations"],
+          "a place it doesn't know: the settings say so: " + s["settingNotes"]["radioArea"]["text"], failures)
+
+    host.call("settings", "{}")
+    area_is("LOCAL · WASHINGTON")
+    to_source(host, "local")
+    host.call("close")
+
+
 def real_radio_scenario(host, output, socket_path, failures):
     """The panel against the real Radio Browser, with the fake mpd (which never
     fetches the stream, so nothing plays). Local stations: Washington's."""
@@ -2147,17 +2237,17 @@ def keep_state_scenario(host, output, failures):
     host.call("press", ",")
     wait_for(lambda: host.state()["settingsOpen"], "settings")
     s = host.state()
-    for _ in range(s["settingsRows"].index("radioState") - s["settingsCursor"]): host.call("press", "Down")
-    was = host.state()["settingValues"].get("radioState")
+    for _ in range(s["settingsRows"].index("radioArea") - s["settingsCursor"]): host.call("press", "Down")
+    was = host.state()["settingValues"].get("radioArea")
     host.call("press", "Return")
-    wait_for(lambda: host.state()["settingsEditing"] == "radioState", "editing radioState")
+    wait_for(lambda: host.state()["settingsEditing"] == "radioArea", "editing radioArea")
     host.call("typeKeys", "Nevad")
     reopen()
     s = host.state()
-    check(s["settingsOpen"] and s["settingsEditing"] == "" and s["settingValues"].get("radioState") == was
-          and settings_file().get("radioState") in (None, was),
+    check(s["settingsOpen"] and s["settingsEditing"] == "" and s["settingValues"].get("radioArea") == was
+          and settings_file().get("radioArea") in (None, was),
           "settings still open; the half-typed state wasn't saved: " + json.dumps([s["settingsOpen"], s["settingsEditing"], was,
-          s["settingValues"].get("radioState"), settings_file().get("radioState")]), failures)
+          s["settingValues"].get("radioArea"), settings_file().get("radioArea")]), failures)
     host.call("press", ",")
     wait_for(lambda: not host.state()["settingsOpen"], "settings closed")
 
@@ -3757,7 +3847,7 @@ def settings_scenario(host, output, failures):
     # timemachine, panel and bar".
     check([t.removesuffix(" •") for t in s["settingsTabs"]] == ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
           and s["settingsTab"] == "omarock"
-          and s["settingsRows"] == ["musicFolder", "radio", "radioState", "lookup", "timeMachine", "closeOnLeave", "maxLabelWidth"],
+          and s["settingsRows"] == ["musicFolder", "radio", "radioArea", "lookup", "timeMachine", "closeOnLeave", "maxLabelWidth"],
           ", opens the settings on the omarock tab: your music and the radio, Time Machine, the panel and the bar: "
           + str(s["settingsTabs"]) + " | " + ", ".join(s["settingsRows"]), failures)
     check(all(k in s["settingsAllRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
@@ -3808,22 +3898,26 @@ def settings_scenario(host, output, failures):
     wait_for(lambda: "enable --now omarock-soloist omarock-spotify" in systemctl_log.read_text(), "its services started")
     check("spotify" in host.state()["sources"], "and on again, its services started", failures)
 
-    # Enter on the radio's state: type it, Enter saves it as text.
-    settings_cursor_to(host, "radioState")
+    # Enter on the radio's area: type it, Enter saves it as text, and says
+    # where it is.
+    settings_cursor_to(host, "radioArea")
     host.call("press", "Return")
-    wait_for(lambda: host.state()["settingsEditing"] == "radioState", "editing")
+    wait_for(lambda: host.state()["settingsEditing"] == "radioArea", "editing")
     host.call("typeKeys", "Oregon")
     host.call("press", "Return")
-    wait_for(lambda: host.state()["settingValues"]["radioState"] == "Oregon", "radioState saved")
-    check(settings_file().get("radioState") == "Oregon" and host.state()["settingsEditing"] == ""
-          and host.state()["settingNotes"]["radio"]["text"] == "Local stations from Oregon",
-          "Enter edits the radio's state, and Enter saves it: " + host.state()["settingNotes"]["radio"]["text"], failures)
+    wait_for(lambda: host.state()["settingValues"]["radioArea"] == "Oregon", "radioArea saved")
+    wait_for(lambda: "station" in host.state()["settingNotes"]["radioArea"]["text"], "Oregon found, and its stations")
+    check(settings_file().get("radioArea") == "Oregon" and host.state()["settingsEditing"] == ""
+          and host.state()["settingNotes"]["radio"]["text"] == "Local stations from Oregon"
+          and host.state()["settingNotes"]["radioArea"]["text"].startswith("Oregon, United States · "),
+          "Enter edits the radio's area, Enter saves it, and it says where that is: "
+          + host.state()["settingNotes"]["radioArea"]["text"], failures)
     # Esc drops an edit.
     host.call("press", "Return")
     host.call("typeKeys", "Texas")
     host.call("press", "Escape")
     wait_for(lambda: host.state()["settingsEditing"] == "", "edit dropped")
-    check(host.state()["settingValues"]["radioState"] == "Oregon" and host.state()["settingsOpen"],
+    check(host.state()["settingValues"]["radioArea"] == "Oregon" and host.state()["settingsOpen"],
           "Esc drops an edit, and the settings stay open", failures)
 
     # ← → on a number: one step each way.
@@ -4631,6 +4725,7 @@ def main():
                             elif name == "radio": radio_scenario(host, output, socket_path, failures)
                             elif name == "real-radio": real_radio_scenario(host, output, socket_path, failures)
                             elif name == "radio-tuning": radio_tuning_scenario(host, socket_path, failures)
+                            elif name == "radio-area": radio_area_scenario(host, output, failures)
                             elif name == "info": info_scenario(host, output, socket_path, failures)
                             elif name == "now-playing": now_playing_scenario(host, output, socket_path, failures)
                             elif name == "lookup": lookup_scenario(host, output, socket_path, failures)

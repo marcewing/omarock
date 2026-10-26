@@ -57,11 +57,11 @@ test("stepStation goes round the playable favourites", () => {
   assert.equal(Radio.stepStation([], "u1", 1), null)
 })
 
-test("listRows without a state ends with how to set one", () => {
+test("listRows without an area ends with how to set one", () => {
   const rows = Radio.listRows([kexp], [], "u2", "")
   assert.deepEqual(rows.map(r => r.kind), ["station", "note"])
   assert.equal(rows[1].section, "LOCAL")
-  assert.match(rows[1].subtitle, /settings.*Your US state/)
-  // With a state, no note.
+  assert.match(rows[1].subtitle, /settings.*Your area/)
+  // With an area, no note.
   assert.ok(Radio.listRows([kexp], [wjrr], "u2", "Florida").every(r => r.kind === "station"))
 })

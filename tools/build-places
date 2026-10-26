@@ -1,0 +1,165 @@
+#!/usr/bin/python3
+"""Build places.tsv: the places the radio's "Your area" setting can name,
+for finding local stations without asking anyone where you live.
+
+    tools/build-places [DOWNLOADS_DIR]
+
+From GeoNames (https://www.geonames.org, CC BY 4.0): every city of 15,000
+people or more (cities15000.txt), the regions they're in (admin1: a state,
+province, Land or canton; admin1CodesASCII.txt), the countries and their
+languages (countryInfo.txt), and which country each time zone is in
+(timeZones.txt). Fetched from download.geonames.org unless DOWNLOADS_DIR has
+them already.
+
+Radio Browser's stations name their region in their own words ("Bayern" as
+often as GeoNames' "Bavaria", "München" for Munich), so each place gets its
+other names too:
+  - a region's, from Wikidata (CC0): its name in its country's languages
+    ("Kanton Zürich" kept as "Zürich");
+  - a city's, from GeoNames' alternate names: those Radio Browser's stations
+    use for their region (its /json/states list).
+
+The file, one place a line, tab-separated, the first field its kind:
+    Z  time zone, country code
+    K  country code, name, other names…
+    R  region code (US.ME), name, other names…, its postal abbreviation (if any) last after "="
+    C  city name, country code, region code, latitude, longitude, thousands of people, other names…
+"""
+import io
+import json
+import sys
+import tempfile
+import time
+import unicodedata
+import urllib.parse
+import urllib.request
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "places.tsv"
+GEONAMES = "https://download.geonames.org/export/dump/"
+RADIO = "https://de1.api.radio-browser.info/json/"
+WIKIDATA = "https://query.wikidata.org/sparql"
+AGENT = {"User-Agent": "omarock-build-places/1.0 (https://github.com/marcewing/omarock)"}
+
+# Short names people type for their country.
+COUNTRY_NAMES = {"US": ["USA", "US", "America", "United States of America"], "GB": ["UK", "Britain", "Great Britain"],
+                 "AE": ["UAE"], "NL": ["Holland"], "KR": ["Korea"], "CZ": ["Czech Republic"]}
+# Postal abbreviations GeoNames doesn't use as codes (the US's are its codes).
+ABBREVIATIONS = {
+    "CA": {"01": "AB", "02": "BC", "03": "MB", "04": "NB", "13": "NT", "07": "NS", "14": "NU", "08": "ON", "09": "PE",
+           "10": "QC", "11": "SK", "12": "YT", "05": "NL"},
+    "AU": {"01": "ACT", "02": "NSW", "03": "NT", "04": "QLD", "05": "SA", "06": "TAS", "07": "VIC", "08": "WA"},
+}
+# The languages a region's other names are asked for in; each region keeps
+# those of its own country.
+LANGUAGES = ["de", "fr", "it", "es", "pt", "nl", "pl", "cs", "sv", "da", "nb", "fi", "hu", "ro", "tr", "el", "ru", "uk",
+             "ja", "zh", "ko", "hr", "sk", "sl", "bg", "ca", "eu", "gl", "ga", "cy", "is", "et", "lv", "lt", "sr", "he",
+             "ar", "hi", "id", "vi", "th", "ms"]
+# What a region's official name starts with, and stations leave off.
+PREFIXES = ["kanton ", "canton de ", "canton d'", "canton du ", "cantone ", "canton ", "région de ", "région ",
+            "region ", "województwo ", "provincia de ", "provincia di ", "província de ", "comunidad de ",
+            "comunidad autónoma de ", "comunitat ", "freistaat ", "land ", "estado de ", "état de "]
+
+
+def fold(text):
+    """Lower case, accents off: how names are compared."""
+    text = unicodedata.normalize("NFKD", text.strip().lower())
+    return "".join(c for c in text if not unicodedata.combining(c))
+
+
+def fetch(url, timeout=300):
+    with urllib.request.urlopen(urllib.request.Request(url, headers=AGENT), timeout=timeout) as reply:
+        return reply.read()
+
+
+def download(folder, name, url):
+    path = folder / name
+    if not path.exists():
+        print("fetching", name, file=sys.stderr)
+        path.write_bytes(fetch(url))
+    return path
+
+
+def geonames(folder, name):
+    path = folder / name
+    if not path.exists():
+        print("fetching", name, file=sys.stderr)
+        data = fetch(GEONAMES + (name.replace(".txt", ".zip") if name.startswith("cities") else name))
+        if name.startswith("cities"):
+            data = zipfile.ZipFile(io.BytesIO(data)).read(name)
+        path.write_bytes(data)
+    return [line.split("\t") for line in path.read_text(encoding="utf-8").splitlines() if line and not line.startswith("#")]
+
+
+def main():
+    folder = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(tempfile.mkdtemp(prefix="omarock-places-"))
+    info = geonames(folder, "countryInfo.txt")
+    countries = {f[0]: f[4] for f in info}
+    languages = {f[0]: {lang.split("-")[0] for lang in f[15].split(",") if lang} for f in info}
+    regions = {f[0]: {"name": f[1], "id": f[3]} for f in geonames(folder, "admin1CodesASCII.txt")}
+    zones = {f[1]: f[0] for f in geonames(folder, "timeZones.txt")[1:]}
+    cities = [{"name": f[1], "others": [n for n in f[3].split(",") if n], "cc": f[8], "region": f[10],
+               "lat": float(f[4]), "lon": float(f[5]), "people": int(f[14] or 0)}
+              for f in geonames(folder, "cities15000.txt")]
+
+    # A region's names in its country's languages, from Wikidata.
+    query = ("SELECT ?gid ?label WHERE { ?item wdt:P1566 ?gid; wdt:P300 ?iso. ?item rdfs:label ?label. "
+             "FILTER(LANG(?label) IN (" + ",".join(f'"{lang}"' for lang in LANGUAGES) + ")) }")
+    labels = download(folder, "wikidata-regions.json",
+                      WIKIDATA + "?format=json&query=" + urllib.parse.quote(query))
+    by_id = {r["id"]: code for code, r in regions.items()}
+    names = {code: [r["name"]] for code, r in regions.items()}
+    for row in json.loads(labels.read_text(encoding="utf-8"))["results"]["bindings"]:
+        code = by_id.get(row["gid"]["value"])
+        if not code or row["label"].get("xml:lang") not in languages.get(code.split(".")[0], ()): continue
+        name = row["label"]["value"]
+        for prefix in PREFIXES:
+            if fold(name).startswith(fold(prefix)):
+                name = name[len(prefix):]
+                break
+        if fold(name) not in {fold(n) for n in names[code]}: names[code].append(name)
+
+    # A city's other names: those stations use for their region.
+    by_country = {c["name"]: c["iso_3166_1"].upper() for c in json.loads(download(folder, "radio-countries.json", RADIO + "countries?limit=100000").read_text())}
+    used = {}
+    for state in json.loads(download(folder, "radio-states.json", RADIO + "states?limit=100000").read_text()):
+        cc = by_country.get(state["country"])
+        for part in state["name"].replace("/", ",").split(","):
+            if cc and fold(part): used.setdefault(cc, set()).add(fold(part))
+    # A region's name stays its region's, in its own country.
+    region_words = {}
+    for code, region_names in names.items():
+        region_words.setdefault(code.split(".")[0], set()).update(fold(n) for n in region_names)
+    for city in cities:
+        own = fold(city["name"])
+        keep = []
+        for other in city["others"]:
+            word = fold(other)
+            if (len(word) >= 3 and word != own and word in used.get(city["cc"], ()) and word not in region_words.get(city["cc"], ())
+                    and word not in {fold(k) for k in keep}):
+                keep.append(other)
+        city["others"] = keep
+
+    lines = ["# omarock's places, for the radio's \"Your area\": cities of 15,000 people or more, their regions",
+             "# and countries, and each time zone's country. From GeoNames (https://www.geonames.org), licensed",
+             "# CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/); regions' local names from Wikidata (CC0).",
+             "# Made by tools/build-places on " + time.strftime("%Y-%m-%d") + "."]
+    lines += [f"Z\t{zone}\t{cc}" for zone, cc in sorted(zones.items())]
+    lines += ["\t".join(["K", cc, name] + COUNTRY_NAMES.get(cc, [])) for cc, name in sorted(countries.items())]
+    for code, region_names in sorted(names.items()):
+        cc, sub = code.split(".", 1)
+        short = sub if cc == "US" else ABBREVIATIONS.get(cc, {}).get(sub, "")
+        lines.append("\t".join(["R", code] + region_names + (["=" + short] if short else [])))
+    for c in cities:
+        lines.append("\t".join(["C", c["name"], c["cc"], c["region"], f"{c['lat']:.3f}", f"{c['lon']:.3f}",
+                                str(round(c["people"] / 1000))] + c["others"]))
+    OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"{OUT}: {len(cities)} cities, {len(names)} regions, "
+          f"{sum(len(v) - 1 for v in names.values())} other region names, "
+          f"{sum(len(c['others']) for c in cities)} other city names; {OUT.stat().st_size // 1024} KB", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

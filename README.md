@@ -300,8 +300,14 @@ stay until you remove them too.
 
 ### The other sources
 
-- **Internet radio:** the station playing, your favourites, then the most
-  listened stations in your US state (set it in the settings). `/` finds stations by name, call sign, frequency
+- **Internet radio:** the station playing, your favourites, then your local
+  stations: set **Your area** in the settings to your city, or your state,
+  region or country ("Portland, Maine", "Manchester, UK", "Bayern"). Stations
+  within 80 km (50 miles) come first, the next state's or country's too
+  (Kansas City has Kansas's, Detroit Windsor's), then the rest of those
+  states, the most listened first. omarock finds the place on your machine,
+  in `places.tsv` (from [GeoNames](https://www.geonames.org)), so nothing
+  but Radio Browser's searches leaves it. `/` finds stations by name, call sign, frequency
   or genre; Enter tunes; `A` keeps a favourite (in the mpd playlist "Radio", so
   `mpc load Radio` plays them); `n`/`p` step through the favourites. Stations that
   send their song show it. HLS-only stations are dimmed: mpd can't play them.
@@ -362,7 +368,7 @@ change saves at once.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `radio` | on | Internet radio |
-| `radioState` | none | Your US state, for the radio's local stations |
+| `radioArea` | none | Your area, for the radio's local stations: a city, or a state, region or country (`radioState`, the US state it replaced, still counts while it's empty) |
 | `spotify` | off | Spotify ([spotify/README.md](spotify/README.md)) |
 | `appleMusic` | off | Apple Music ([bridge/README.md](bridge/README.md)) |
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |
@@ -396,4 +402,7 @@ A few are in the file only, for when you know you need them:
 ## Contributing
 
 [DEVELOPING.md](DEVELOPING.md) has the layout, the tests and how omarock works
-inside. omarock is under the MIT License ([LICENSE](LICENSE)).
+inside. omarock is under the MIT License ([LICENSE](LICENSE)). `places.tsv` is
+GeoNames' data ([geonames.org](https://www.geonames.org)), under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with regions' local
+names from Wikidata (CC0); `tools/build-places` makes it again.

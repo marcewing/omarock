@@ -577,13 +577,14 @@ step_plugin() {
 
 step_radio() {
   step "Internet radio"
-  local state
-  state=$(setting radioState "")
-  [[ -z $state && -f $config/radio.json ]] && state=$(jq -r '.state // empty' "$config/radio.json" 2>/dev/null)
-  if [[ -n $state ]]; then ok "local stations from $state"; done_[radio]=1; return; fi
-  explain "Radio comes from Radio Browser, a free directory of stations; mpd plays them. With your US state, the list starts with your local stations."
-  state=$(ask "Your US state (Enter to skip):" "" "Maine") || exit 1
-  [[ -n $state ]] && pending[radioState]=$(jq -cn --arg s "$state" '$s')
+  local area
+  area=$(setting radioArea "")
+  [[ -z $area ]] && area=$(setting radioState "")
+  [[ -z $area && -f $config/radio.json ]] && area=$(jq -r '.state // empty' "$config/radio.json" 2>/dev/null)
+  if [[ -n $area ]]; then ok "local stations for $area"; done_[radio]=1; return; fi
+  explain "Radio comes from Radio Browser, a free directory of stations; mpd plays them. With your area, the list starts with your local stations, those nearest first."
+  area=$(ask "Your area, a city or your state, region or country (Enter to skip):" "" "Portland, Maine") || exit 1
+  [[ -n $area ]] && pending[radioArea]=$(jq -cn --arg s "$area" '$s')
   done_[radio]=1
 }
 

@@ -33,7 +33,9 @@ ShellRoot {
       sxmService: Quickshell.env("OMAROCK_SXM") || "http://127.0.0.1:9",
       spotifyService: Quickshell.env("OMAROCK_SPOTIFY") || "http://127.0.0.1:9",
       radioBrowser: Quickshell.env("OMAROCK_RADIO") || "http://127.0.0.1:9",
-      chartSource: Quickshell.env("OMAROCK_CHARTS") || "http://127.0.0.1:9" }, settings)
+      chartSource: Quickshell.env("OMAROCK_CHARTS") || "http://127.0.0.1:9",
+      // Which country "Your area" is likelier in: not the machine's.
+      timeZone: "America/Los_Angeles" }, settings)
     Object.keys(out).forEach(function(key) { if (out[key] === null) delete out[key] })
     return out
   }
@@ -302,6 +304,8 @@ ShellRoot {
         playlists: p.picker.playlists.map(function(pl) { return pl.name }),
         pointerArmed: p.pointerArmed, listY: p.listView ? Math.round(p.listView.contentY) : -1, listIndex: p.listView ? p.listView.currentIndex : -2, appleMode: p.appleMode, appleConfigured: p.appleConfigured,
         sxmMode: p.sxmMode, radioMode: p.radioMode, source: p.source, sources: p.sources,
+        // The radio's local stations (favourites among them), in radio mode.
+        radioLocal: p.radioMode && p.player.local ? p.player.local.map(function(st) { return String(st.name).trim() }) : [],
         spotifyMode: p.spotifyMode, spotifyError: p.spotifyMode ? p.player.lastError : "",
         settingsOpen: p.settingsOpen, settingsEditing: p.settingsOpen ? host.settingsView().editing : "",
         settingsCursor: p.settingsOpen ? host.settingsView().cursor : -1,

@@ -17,7 +17,10 @@
 // apple-music writes that); `appleRejoin` (default on: reconnect mpd to the
 // Apple Music stream after each change, for a stock libFLAC; ./install turns
 // it off when mpd has the patched one); `timeMachineYear`, the year Time
-// Machine's button picked (0 or none: off); and the addresses the test
+// Machine's button picked (0 or none: off); `radioState`, the US state
+// "Your area" replaced (still read while radioArea is empty); `timeZone`,
+// the time zone that says which country an area is likelier in (else the
+// machine's: the harness sets it); and the addresses the test
 // harness points at its fakes, `spotifyService`, `sxmService`, `radioBrowser`,
 // `chartSource` (Wikipedia, for Time Machine's charts) and `appleTokenFile`.
 // Panel.qml gives each its default.
@@ -37,8 +40,8 @@ var schema = [
     description: "Where mpd finds your music. Changing it restarts mpd (after asking) and reads the new folder." },
   { key: "radio", type: "boolean", label: "Internet radio", defaultValue: true,
     description: "Stations from Radio Browser, played by mpd. Nothing to set up." },
-  { key: "radioState", type: "string", label: "Your US state", defaultValue: "",
-    description: "For the radio's local stations: a state's name, such as Maine." },
+  { key: "radioArea", type: "string", label: "Your area", defaultValue: "",
+    description: "For the radio's local stations: your city, or your state, region or country, such as Portland, Maine or Manchester, UK. Stations within 80 km (50 miles) come first, from the states and countries next door too. Found on this machine, from GeoNames' places." },
   { key: "lookup", type: "enum", label: "Look up songs in", options: ["Apple Music", "Spotify"],
     defaultValue: "Apple Music",
     description: "Click a song or artist playing on SiriusXM or the radio to find it there, while the station plays on. Time Machine's Top 100 plays there too, away from Apple Music and Spotify. The other one if this one is off." },
@@ -103,7 +106,7 @@ var schema = [
 var tabs = ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
 
 var groups = [
-  { tab: "omarock", title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioState", "lookup"] },
+  { tab: "omarock", title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioArea", "lookup"] },
   { tab: "omarock", title: "TIME MACHINE", keys: ["timeMachine"] },
   { tab: "omarock", title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth"] },
   { tab: "Apple Music", title: "", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },
