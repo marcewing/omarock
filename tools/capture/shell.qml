@@ -354,7 +354,16 @@ ShellRoot {
                width: host.widget.implicitWidth, indicatorWidth: host.widget.openPanelIndicatorWidth,
                coverWidth: host.findNamed(host.widget, "cover") ? host.findNamed(host.widget, "cover").width : 0,
                songWidth: host.findNamed(host.widget, "song") ? host.findNamed(host.widget, "song").width : 0,
-               tooltip: host.widget.tooltipText }
+               tooltip: host.widget.tooltipText,
+               // Its song: cut short or scrolling, and how far along.
+               scrolling: host.findNamed(host.widget, "songLabel") ? host.findNamed(host.widget, "songLabel").scrolling : false,
+               overflowing: host.findNamed(host.widget, "songLabel") ? host.findNamed(host.widget, "songLabel").overflowing : false,
+               scrolled: host.findNamed(host.widget, "songLabel") ? host.findNamed(host.widget, "songLabel").offset : 0 },
+        // The now playing card's lines that scroll: [title, artist, album], each { scrolling, offset }.
+        cardScrolling: ["playingTitle", "playingArtist", "playingAlbum"].map(function(name) {
+          var item = popup() ? host.findNamed(popup().contentItem[0].parent.parent, name) : null
+          return item ? { scrolling: item.scrolling, overflowing: item.overflowing, offset: item.offset } : null
+        }),
       })
     }
     function grab(path: string): string {

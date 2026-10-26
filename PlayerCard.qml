@@ -21,6 +21,8 @@ Item {
   // Live radio (SiriusXM): no shuffle or repeat.
   property bool live: false
   property bool large: false
+  // Whether it's on screen (its panel open): only then does a long line scroll.
+  property bool active: true
   property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
@@ -75,19 +77,17 @@ Item {
   component SongLabels: Column {
     spacing: Style.space(3)
 
-    Text {
+    // The song, its artist and its album scroll when they don't fit.
+    ScrollingText {
       objectName: "playingTitle"
-      textFormat: Text.PlainText
       width: Math.min(implicitWidth, parent.width)
+      active: root.active
       text: root.titleText
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: root.large ? Style.font.heading : Style.font.subtitle
       font.bold: true
       font.underline: root.canOpenTitle && titleLink.containsMouse
-      wrapMode: Text.WordWrap
-      maximumLineCount: 2
-      elide: Text.ElideRight
 
       MouseArea {
         id: titleLink
@@ -99,18 +99,17 @@ Item {
       }
     }
 
-    Text {
+    ScrollingText {
       objectName: "playingArtist"
-      textFormat: Text.PlainText
       // As wide as the name, so only the name is the link.
       width: Math.min(implicitWidth, parent.width)
       visible: text !== ""
+      active: root.active
       text: root.artistText
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.body
       font.underline: root.canOpenArtist && artistLink.containsMouse
-      elide: Text.ElideRight
 
       MouseArea {
         id: artistLink
@@ -122,19 +121,16 @@ Item {
       }
     }
 
-    Text {
+    ScrollingText {
       objectName: "playingAlbum"
-      textFormat: Text.PlainText
       width: Math.min(implicitWidth, parent.width)
       visible: text !== ""
+      active: root.active
       text: root.albumText
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.underline: root.canOpenAlbum && albumLink.containsMouse
-      wrapMode: Text.WordWrap
-      maximumLineCount: 2
-      elide: Text.ElideRight
 
       MouseArea {
         id: albumLink

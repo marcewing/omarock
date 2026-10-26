@@ -40,6 +40,8 @@ BarWidget {
   readonly property string songText: artist !== "" && title !== "" ? artist + " — " + title : title
   // omarock's settings file first, as the panel reads it.
   readonly property int maxLabelWidth: Math.max(80, Number(panel ? panel.setting("maxLabelWidth", 300) : setting("maxLabelWidth", 300)))
+  // A song wider than that scrolls, if the setting says so; else it ends in ….
+  readonly property bool scrollSong: (panel ? panel.setting("scrollBarSong", false) : setting("scrollBarSong", false)) === true
   readonly property int artSize: Math.min(18, Math.max(12, barSize - Style.space(6)))
   readonly property color barForeground: bar ? bar.barForeground : Commons.Color.foreground
   readonly property string barFont: bar ? bar.fontFamily : Style.font.family
@@ -156,18 +158,19 @@ BarWidget {
       anchors.verticalCenter: parent.verticalCenter
       clip: true
 
-      Text {
+      ScrollingText {
         id: label
+        objectName: "songLabel"
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        textFormat: Text.PlainText
+        height: implicitHeight
+        scroll: root.scrollSong
         text: root.songText
         color: root.barForeground
         opacity: root.playing ? 0.92 : 0.58
         font.family: root.barFont
         font.pixelSize: Style.font.body
-        elide: Text.ElideRight
 
         Behavior on opacity { NumberAnimation { duration: 140 } }
       }

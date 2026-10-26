@@ -205,11 +205,13 @@ stay until you remove them too.
 ## Using omarock
 
 - **The bar:** the album cover and "Artist — Song" (up to 300 px: the
-  `maxLabelWidth` setting). A click opens the panel; a middle click plays or
+  `maxLabelWidth` setting; longer, it ends in …, or scrolls with
+  `scrollBarSong` on). A click opens the panel; a middle click plays or
   pauses. With nothing queued it shows a boombox, and a middle click on it
   plays a song picked at random from your library (so does Play in the panel).
-- **The panel:** now playing, with the cover, a seek bar, transport (shuffle,
-  previous, play/pause, next, repeat) and volume, then search and the queue.
+- **The panel:** now playing, with the cover (a song, artist or album too
+  long for its line scrolls), a seek bar, transport (shuffle, previous,
+  play/pause, next, repeat) and volume, then search and the queue.
   **Expand** (`e`) makes it a bigger, two-column view in the same popup. It
   closes 3 seconds after the pointer leaves it, unless it comes back (the `closeOnLeave` setting).
   Open it again and it's as you left it: the search, where you'd browsed to, the
@@ -376,6 +378,7 @@ change saves at once.
 | `timeMachine` | off | Time Machine's button at the top, and its Top 100 |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |
 | `maxLabelWidth` | 300 | How wide the song gets on the bar, in pixels |
+| `scrollBarSong` | off | A song wider than that scrolls on the bar now and then, instead of ending in … (in the panel a long song always scrolls) |
 | `appleIdleStop` | 60 | Seconds the Mac is paused before mpd lets go of its stream (0: never) |
 
 A few are in the file only, for when you know you need them:

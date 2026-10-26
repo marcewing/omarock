@@ -98,7 +98,9 @@ var schema = [
   { key: "closeOnLeave", type: "boolean", label: "Close the panel when the pointer leaves it", defaultValue: true,
     description: "3 seconds after it leaves, unless it comes back." },
   { key: "maxLabelWidth", type: "integer", label: "How wide the song gets on the bar",
-    min: 80, max: 600, step: 10, defaultValue: 300, description: "In pixels." }
+    min: 80, max: 600, step: 10, defaultValue: 300, description: "In pixels." },
+  { key: "scrollBarSong", type: "boolean", label: "Scroll a long song on the bar", defaultValue: false,
+    description: "Wider than that, it scrolls now and then instead of ending in …. In the panel, a long song always scrolls." }
 ]
 
 // The settings screen's tabs, and the groups on each. A tab with one group
@@ -108,7 +110,7 @@ var tabs = ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
 var groups = [
   { tab: "omarock", title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioArea", "lookup"] },
   { tab: "omarock", title: "TIME MACHINE", keys: ["timeMachine"] },
-  { tab: "omarock", title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth"] },
+  { tab: "omarock", title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "scrollBarSong"] },
   { tab: "Apple Music", title: "", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },
   { tab: "SiriusXM", title: "", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
   { tab: "Spotify", title: "", keys: ["spotify", "spotifyUpdate", "spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"] },

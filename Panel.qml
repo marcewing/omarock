@@ -168,7 +168,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.7"
+  readonly property string version: "0.9.8"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -4309,6 +4309,7 @@ Panel {
         checkText: root.spotifyMode ? "Check it with: systemctl --user status omarock-spotify" : ""
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
         live: root.live
+        active: root.opened
         canOpenAlbum: root.playingEntry("album") !== null
         canOpenArtist: root.live ? root.liveSong && root.lookupTarget !== "" : root.playingEntry("artist") !== null
         canOpenTitle: root.liveSong && root.lookupTarget !== ""
@@ -4456,6 +4457,7 @@ Panel {
         checkText: root.spotifyMode ? "Check it with: systemctl --user status omarock-spotify" : ""
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
         live: root.live
+        active: root.opened
         canOpenAlbum: root.playingEntry("album") !== null
         canOpenArtist: root.live ? root.liveSong && root.lookupTarget !== "" : root.playingEntry("artist") !== null
         canOpenTitle: root.liveSong && root.lookupTarget !== ""

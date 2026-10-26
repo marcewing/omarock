@@ -20,6 +20,7 @@
 | `AppleClient.qml`, `Apple.js` | A client for the bridge API (bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
 | `SxmClient.qml`, `Sxm.js` | SiriusXM, through omarock-sxm |
 | `RadioClient.qml`, `Radio.js` | Radio Browser: search, local stations, favourites (the mpd playlist "Radio"), ICY titles |
+| `ScrollingText.qml` | One line that scrolls when it doesn't fit: the bar's song (a setting) and the now playing card's song, artist and album |
 | `Places.js`, `places.tsv` | Where "Your area" is, and the regions near it, from GeoNames' cities of 15,000 people or more (`tools/build-places` makes the file) |
 | `TimeMachine.js`, `ChartClient.qml`, `YearPicker.qml`, `Keeper.js` | Time Machine: the year filter for Apple Music and Spotify (mpd's is `Mpd.yearPattern`), Billboard's year-end chart read from Wikipedia's wikitext, its songs found on Apple Music or Spotify (cached in `~/.cache/omarock/charts`), and the box that asks for the year (`t`); the panel keeps the queue to the year (`Panel.keepQueueInYear`, `MpdClient.removeAfterYear`); with a panel on each bar, one keeps the queue (`Keeper.js`, shared by them all) |
 | `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard: "omarock's sound output" in the settings |

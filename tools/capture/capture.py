@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS = Path(__file__).resolve().parent
 PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
-                "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "Info.js", "InfoCard.qml",
+                "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartClient.qml", "YearPicker.qml",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
@@ -274,6 +274,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     hints_scenario(host, output, failures)
     list_tuning_scenario(host, failures)
     hover_scroll_scenario(host, failures)
+    scrolling_scenario(host, output, socket_path, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
     elsewhere_scenario(host, socket_path, failures)
@@ -3459,6 +3460,45 @@ def hover_scroll_scenario(host, failures):
               f"then {key} scrolls to row {after['cursor']} ({s['listY']} -> {after['listY']})", failures)
 
 
+def scrolling_scenario(host, output, socket_path, failures):
+    """Marc, 10-26: "an option to scroll long song names in the bar ... We
+    should scroll them in the panels automatically, no option." On the bar a
+    song too wide ends in … unless Scroll a long song (scrollBarSong) is on;
+    in the now playing card a long title, artist or album scrolls, while the
+    panel is open. Each rests at its start a moment first."""
+    host.call("open")
+    wait_for(lambda: host.state()["opened"] and host.state()["bar"]["showSong"], "a song on the bar")
+    host.call("settings", json.dumps({"maxLabelWidth": 80}))
+    wait_for(lambda: host.state()["bar"]["songWidth"] == 80, "the song 80 px wide")
+    bar = host.state()["bar"]
+    check(bar["overflowing"] and not bar["scrolling"], "a song too wide for the bar ends in …, by default", failures)
+    host.call("settings", json.dumps({"maxLabelWidth": 80, "scrollBarSong": True}))
+    wait_for(lambda: host.state()["bar"]["scrolling"], "the bar's song scrolls")
+    check(host.state()["bar"]["scrolled"] == 0, "it rests at the start first", failures)
+    wait_for(lambda: host.state()["bar"]["scrolled"] > 5, "it moves", timeout=6)
+    check(True, "with Scroll a long song on, the bar's song scrolls", failures)
+    host.call("settings", "{}")
+    wait_for(lambda: not host.state()["bar"]["scrolling"] and host.state()["bar"]["scrolled"] == 0, "back to …")
+
+    # The card: a station's long song title.
+    to_source(host, "radio")
+    wait_for(lambda: host.state()["radioMode"] and host.state()["nowPlaying"] != "", "the radio")
+    mpd_client(socket_path, 'fake_stream_title "Godspeed You! Black Emperor - Storm (Lift Yr. Skinny Fists Like Antennas To Heaven), Part One"')
+    wait_for(lambda: (host.state()["cardScrolling"][0] or {}).get("scrolling"), "the card's title scrolls")
+    wait_for(lambda: host.state()["cardScrolling"][0]["offset"] > 5, "it moves", timeout=6)
+    check(True, "the card's long title scrolls, with no setting", failures)
+    host.grab(output / "compact-scrolling.png")
+    host.call("hide")
+    wait_for(lambda: not host.state()["opened"], "closed")
+    card = host.state()["cardScrolling"][0]
+    check(card is None or (not card["scrolling"] and card["offset"] == 0), "closed, it stops, back at its start", failures)
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open again")
+    wait_for(lambda: (host.state()["cardScrolling"][0] or {}).get("scrolling"), "opened again, it scrolls again")
+    to_source(host, "local")
+    host.call("close")
+
+
 def favourite_follow_scenario(host, output, failures):
     """A on a station used to move it to the favourites while the list stayed
     put. A in the list: the cursor follows the station or channel
@@ -3847,7 +3887,7 @@ def settings_scenario(host, output, failures):
     # timemachine, panel and bar".
     check([t.removesuffix(" •") for t in s["settingsTabs"]] == ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
           and s["settingsTab"] == "omarock"
-          and s["settingsRows"] == ["musicFolder", "radio", "radioArea", "lookup", "timeMachine", "closeOnLeave", "maxLabelWidth"],
+          and s["settingsRows"] == ["musicFolder", "radio", "radioArea", "lookup", "timeMachine", "closeOnLeave", "maxLabelWidth", "scrollBarSong"],
           ", opens the settings on the omarock tab: your music and the radio, Time Machine, the panel and the bar: "
           + str(s["settingsTabs"]) + " | " + ", ".join(s["settingsRows"]), failures)
     check(all(k in s["settingsAllRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
@@ -4741,6 +4781,7 @@ def main():
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
+                            elif name == "scrolling": scrolling_scenario(host, output, socket_path, failures)
                             elif name == "hover-scroll": hover_scroll_scenario(host, failures)
                             elif name == "time-machine": time_machine_scenario(host, output, socket_path, failures)
                             elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)
