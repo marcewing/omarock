@@ -1,5 +1,5 @@
-// omarock's settings: what each one is, the groups the settings screen shows
-// them in, and how a value is found. The values live in omarock's own file,
+// omarock's settings: what each one is, the tabs and groups the settings
+// screen shows them in, and how a value is found. The values live in omarock's own file,
 // ~/.config/omarock/settings.json; one not in it falls back to the widget's
 // entry in Omarchy's shell.json (where omarock kept them before 0.6), then
 // to its default here.
@@ -98,14 +98,18 @@ var schema = [
     min: 80, max: 600, step: 10, defaultValue: 300, description: "In pixels." }
 ]
 
+// The settings screen's tabs, and the groups on each. A tab with one group
+// needs no heading: the tab names it.
+var tabs = ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
+
 var groups = [
-  { title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioState", "lookup"] },
-  { title: "TIME MACHINE", keys: ["timeMachine"] },
-  { title: "SPOTIFY", keys: ["spotify", "spotifyUpdate", "spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"] },
-  { title: "SIRIUSXM", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
-  { title: "APPLE MUSIC", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },
-  { title: "SOUND", keys: ["sound", "soundUpdate", "soundRemove"] },
-  { title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth"] }
+  { tab: "omarock", title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioState", "lookup"] },
+  { tab: "omarock", title: "TIME MACHINE", keys: ["timeMachine"] },
+  { tab: "omarock", title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth"] },
+  { tab: "Apple Music", title: "", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },
+  { tab: "SiriusXM", title: "", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
+  { tab: "Spotify", title: "", keys: ["spotify", "spotifyUpdate", "spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"] },
+  { tab: "Sound", title: "", keys: ["sound", "soundUpdate", "soundRemove"] }
 ]
 
 // The piece ./install sets up for a row's source, and back.
@@ -191,6 +195,6 @@ function shown(states) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { schema: schema, groups: groups, pieces: pieces, defaults: defaults, stored: stored, value: value,
+  module.exports = { schema: schema, tabs: tabs, groups: groups, pieces: pieces, defaults: defaults, stored: stored, value: value,
     parse: parse, withValue: withValue, shown: shown }
 }

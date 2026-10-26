@@ -102,3 +102,17 @@ test("local music's Set up shows only while mpd can't be reached; every row is i
   assert.deepEqual([...grouped].sort(), Settings.schema.map(f => f.key).sort())
   assert.deepEqual(Object.keys(Settings.pieces).sort(), ["apple", "local", "sound", "spotify", "sxm"])
 })
+
+test("the settings' tabs: omarock's own groups first, then a tab for each piece set up on its own", () => {
+  assert.deepEqual(Settings.tabs, ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"])
+  assert.ok(Settings.groups.every(g => Settings.tabs.includes(g.tab)))
+  assert.deepEqual(Settings.groups.filter(g => g.tab === "omarock").map(g => g.title),
+    ["YOUR MUSIC AND THE RADIO", "TIME MACHINE", "THE PANEL AND THE BAR"])
+  // A source's own tab names it: its group has no heading.
+  for (const [tab, first] of [["Apple Music", "appleMusic"], ["SiriusXM", "siriusXM"], ["Spotify", "spotify"], ["Sound", "sound"]]) {
+    const groups = Settings.groups.filter(g => g.tab === tab)
+    assert.equal(groups.length, 1)
+    assert.equal(groups[0].title, "")
+    assert.equal(groups[0].keys[0], first)
+  }
+})

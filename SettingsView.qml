@@ -4,16 +4,18 @@ import qs.Commons as Commons
 import qs.Ui
 import "Settings.js" as Settings
 
-// The settings (the gear, or ,): omarock's settings (Settings.js), in
-// groups, each with its value and, for a source, how its service is doing,
-// or the button that sets it up.
+// The settings (the gear, or ,): omarock's settings (Settings.js), on tabs
+// (omarock's own, then one for each piece set up on its own), in groups, each
+// with its value and, for a source, how its service is doing, or the button
+// that sets it up.
 // A change is saved at once, by the panel: a setting into omarock's settings
 // file (changeRequested); an account, a key or the music folder through
 // tools/omarock-account (accountRequested, folderRequested). A secret is
 // never shown: a set one shows a row of dots (the panel only knows that it's
-// set), and a new one is typed into an empty, masked field. ↑↓ move,
-// Space or Enter toggles, edits, presses or takes the next choice, ←→ change
-// a number or a choice, Esc closes (or drops an edit).
+// set), and a new one is typed into an empty, masked field. Tab and
+// Shift+Tab change tabs, ↑↓ move, Space or Enter toggles, edits, presses or
+// takes the next choice, ←→ change a number or a choice, Esc closes (or drops
+// an edit).
 Rectangle {
   id: root
 
@@ -52,8 +54,12 @@ Rectangle {
   }
 
   readonly property var groups: Settings.groups
-  // The schema's fields in the groups' order; any the groups don't name go last.
-  readonly property var rows: {
+  readonly property var tabs: Settings.tabs
+  // The tab showing.
+  property string tab: Settings.tabs[0]
+  // The schema's fields in the groups' order, each with its tab; any the
+  // groups don't name go last, on the first tab.
+  readonly property var allRows: {
     var byKey = {}
     root.schema.forEach(function(f) { byKey[f.key] = f })
     var out = []
@@ -63,12 +69,21 @@ Rectangle {
       g.keys.forEach(function(key) {
         named[key] = true
         if (!byKey[key]) return
-        out.push(Object.assign({ section: first ? g.title : "" }, byKey[key]))
+        out.push(Object.assign({ section: first ? g.title : "", tab: g.tab }, byKey[key]))
         first = false
       })
     })
-    root.schema.forEach(function(f) { if (!named[f.key]) out.push(Object.assign({ section: "" }, f)) })
+    root.schema.forEach(function(f) { if (!named[f.key]) out.push(Object.assign({ section: "", tab: root.tabs[0] }, f)) })
     return out
+  }
+  // The rows on the tab showing.
+  readonly property var rows: root.allRows.filter(function(r) { return r.tab === root.tab })
+  onRowsChanged: if (root.cursor >= root.rows.length) root.cursor = Math.max(0, root.rows.length - 1)
+
+  // A tab with an Update or Fix button on it is marked, so it's seen
+  // without opening every tab.
+  function needsAttention(tab) {
+    return root.allRows.some(function(r) { return r.tab === tab && r.when === "fix" })
   }
 
   // The panel closing mid-edit: nothing is saved, as with Esc.
@@ -77,9 +92,24 @@ Rectangle {
     if (root.editing !== "" && item) item.cancelEditor()
   }
 
-  // Opening: at the top, nothing being edited.
+  // Another tab, from its top. An edit going on is dropped, as with Esc.
+  function showTab(tab) {
+    root.cancelEdit()
+    root.tab = tab
+    root.cursor = 0
+    flick.contentY = 0
+  }
+
+  // Tab and Shift+Tab: the next or previous tab, going round.
+  function nextTab(dx) {
+    var at = root.tabs.indexOf(root.tab)
+    root.showTab(root.tabs[((at + dx) % root.tabs.length + root.tabs.length) % root.tabs.length])
+  }
+
+  // Opening: on the first tab, at the top, nothing being edited.
   function reset() {
     root.editing = ""
+    root.tab = root.tabs[0]
     root.cursor = 0
     flick.contentY = 0
   }
@@ -212,13 +242,43 @@ Rectangle {
     font.bold: true
   }
 
+  Flow {
+    id: tabBar
+    objectName: "settingsTabs"
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: closeButton.bottom
+    anchors.margins: Style.space(4)
+    anchors.topMargin: Style.space(8)
+    spacing: Style.space(6)
+
+    Repeater {
+      model: root.tabs
+
+      Button {
+        required property string modelData
+        readonly property bool attention: root.needsAttention(modelData)
+        objectName: "settingsTab:" + modelData
+        text: modelData + (attention ? " •" : "")
+        selected: root.tab === modelData
+        bordered: true
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        fontSize: Style.font.caption
+        tooltipText: attention ? "Something here needs updating or fixing" : ""
+        onClicked: root.showTab(modelData)
+      }
+    }
+  }
+
   Flickable {
     id: flick
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.top: closeButton.bottom
+    anchors.top: tabBar.bottom
     anchors.bottom: footer.top
     anchors.margins: Style.space(4)
+    anchors.topMargin: Style.space(10)
     contentHeight: content.implicitHeight
     clip: true
     boundsBehavior: Flickable.StopAtBounds
@@ -467,7 +527,7 @@ Rectangle {
     textFormat: Text.PlainText
     text: root.notice !== "" ? root.notice
       : root.editing !== "" ? "Enter save · Esc cancel"
-      : "↑↓ move · Space or Enter change · ←→ a number or a choice · Esc close · saved in ~/.config/omarock"
+      : "Tab next tab · ↑↓ move · Space or Enter change · ←→ a number or a choice · Esc close · saved in ~/.config/omarock"
     color: root.notice !== "" ? root.foreground : root.dim
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption

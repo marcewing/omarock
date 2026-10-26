@@ -168,7 +168,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.5"
+  readonly property string version: "0.9.6"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -3329,7 +3329,8 @@ Panel {
       }
       onDeleteRequested: if (root.cursorActive && !root.keysOpen && !root.infoOpen && !root.settingsOpen) root.removeRow(root.cursorIndex)
       onCloseRequested: root.stepBack()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
+      // Tab and Shift+Tab: the settings' tabs; nothing elsewhere.
+      onTabRequested: function(direction) { if (root.settingsOpen) settingsView.nextTab(direction) }
       onTextKey: function(text) {
         if (root.settingsOpen) {
           if (text === ",") root.closeSettings()

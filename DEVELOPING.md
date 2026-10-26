@@ -6,7 +6,7 @@
 | --- | --- |
 | `install` | The guided installer (bash and gum): mpd, the plugin, then each source, using the `tools/install-*` scripts |
 | `manifest.json` | The plugin's manifest |
-| `Settings.js` | omarock's settings: what each is, the settings screen's groups, and how a value is found (`~/.config/omarock/settings.json`, else the widget's entry in shell.json, as before 0.6, else its default) |
+| `Settings.js` | omarock's settings: what each is, the settings screen's tabs and groups, and how a value is found (`~/.config/omarock/settings.json`, else the widget's entry in shell.json, as before 0.6, else its default) |
 | `BarWidget.qml` | The bar: cover and song; loads the panel once |
 | `Panel.qml` | The popup: compact and expanded layouts, keys, search, browsing, the sources |
 | `MpdClient.qml` | The mpd connection: an idle socket for change events, a command socket; the volume (mpd's, or the audio bus's) |

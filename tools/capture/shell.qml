@@ -122,6 +122,14 @@ ShellRoot {
     return p ? host.findNamed(p.contentItem[0].parent.parent, "settingsView") : null
   }
 
+  function settingsTabs() {
+    var bar = host.findNamed(host.settingsView(), "settingsTabs")
+    var out = []
+    for (var i = 0; bar && i < bar.children.length; i++)
+      if (bar.children[i].visible && bar.children[i].text !== undefined) out.push(bar.children[i].text)
+    return out
+  }
+
   function popup() {
     var data = host.panel ? host.panel.data : []
     for (var i = 0; i < data.length; i++)
@@ -297,11 +305,16 @@ ShellRoot {
         spotifyMode: p.spotifyMode, spotifyError: p.spotifyMode ? p.player.lastError : "",
         settingsOpen: p.settingsOpen, settingsEditing: p.settingsOpen ? host.settingsView().editing : "",
         settingsCursor: p.settingsOpen ? host.settingsView().cursor : -1,
+        // The rows on the tab showing; settingsAllRows, every tab's.
         settingsRows: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key }) : [],
-        // Each row's key, type and button: "spotify:action:Set up…".
-        settingKinds: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key + ":" + r.type + (r.button ? ":" + r.button : "") }) : [],
-        // The secrets showing their dots.
-        settingMasked: p.settingsOpen ? host.settingsView().rows.filter(function(r) { return host.settingsView().masked(r) }).map(function(r) { return r.key }) : [],
+        settingsAllRows: p.settingsOpen ? host.settingsView().allRows.map(function(r) { return r.key }) : [],
+        settingsTab: p.settingsOpen ? host.settingsView().tab : "",
+        // The tabs as shown, a marked one with its •.
+        settingsTabs: p.settingsOpen ? host.settingsTabs() : [],
+        // Each row's key, type and button, on every tab: "spotify:action:Set up…".
+        settingKinds: p.settingsOpen ? host.settingsView().allRows.map(function(r) { return r.key + ":" + r.type + (r.button ? ":" + r.button : "") }) : [],
+        // The secrets showing their dots, on every tab.
+        settingMasked: p.settingsOpen ? host.settingsView().allRows.filter(function(r) { return host.settingsView().masked(r) }).map(function(r) { return r.key }) : [],
         sourcesState: p.sourcesState, setupLaunched: p.setupLaunched,
         playerVolume: p.player.status.volume, ownVolume: p.player.ownVolume === true,
         settingValues: p.settingValues, settingNotes: p.settingNotes, widgetSettings: host.widget.settings,

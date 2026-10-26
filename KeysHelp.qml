@@ -76,7 +76,7 @@ Rectangle {
     { title: "PANEL", keys: [
       ["m", "Next source: local music, Apple Music, Spotify, SiriusXM, the radio (the ones set up)"],
       ["e", "Expand or compact"],
-      [",", "Settings: the sources, and how the panel behaves"],
+      [",", "Settings, on tabs: omarock's own, then Apple Music, SiriusXM, Spotify and the sound output (Tab goes between them)"],
       ["?", "Show or hide these keys"],
       ["w", "With the keys showing: keep them open in a window of their own"],
       ["Tab", "Next panel on the bar"]

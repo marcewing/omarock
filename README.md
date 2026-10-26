@@ -82,8 +82,8 @@ asks before changing anything: packages (with sudo), your mpd config, systemd
 units. Run it again any time: what's done is skipped.
 
 **Spotify, SiriusXM and Apple Music** come afterwards, one at a time, from
-omarock's settings (press `,` in the panel, or the gear in the expanded view).
-Each has a **Set up…** button, which opens a terminal that walks you through it,
+omarock's settings (press `,` in the panel, or the gear in the expanded view),
+each on its own tab. Each has a **Set up…** button, which opens a terminal that walks you through it,
 as Omarchy's own installs do. Passwords and keys go into hidden prompts, and
 from there into files only you can read. Once it's set up, the source has a
 switch (off stops its services and keeps your accounts and keys), its settings,
@@ -100,7 +100,7 @@ else. Most don't need it; it matters if some output must never carry music.
 
 Keep the clone: the plugin and the services install from it. When the plugin
 has a newer version of a service than the one running, its settings offer
-**Update…**.
+**Update…**, and its tab is marked •.
 
 **Using Claude Code?** Open the clone in it and ask it to set omarock up. Its
 `omarock-setup` skill knows the steps and the usual snags, and checks before it
@@ -335,9 +335,12 @@ stay until you remove them too.
 ## Settings
 
 Press `,` in the panel, or the gear in the expanded view, for the settings
-screen. Everything is there: the sources (each says how its service is doing),
-your music folder, each source's account and keys, and how the panel behaves.
-A change saves at once.
+screen. Everything is there, on tabs: **omarock** (your music folder, the
+radio, Time Machine, the panel and the bar), then **Apple Music**,
+**SiriusXM**, **Spotify** and **Sound**, each with its switch and how its
+service is doing, its account and keys, and Remove. Tab and Shift+Tab go
+between the tabs, and a tab that needs an update or a fix is marked •. A
+change saves at once.
 
 - **Settings** are kept in `~/.config/omarock/settings.json`, which you can also
   edit by hand; omarock follows it as it changes:

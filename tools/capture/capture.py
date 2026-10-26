@@ -3723,7 +3723,10 @@ def settings_file():
 
 
 def settings_cursor_to(host, key):
-    """Move the settings' cursor to a row, up or down."""
+    """Move the settings' cursor to a row: Tab to its tab, then up or down."""
+    for _ in range(len(host.state()["settingsTabs"])):
+        if key in host.state()["settingsRows"]: break
+        host.call("press", "Tab")
     s = host.state()
     to, at = s["settingsRows"].index(key), s["settingsCursor"]
     for _ in range(abs(to - at)): host.call("press", "Down" if to > at else "Up")
@@ -3740,15 +3743,44 @@ def settings_scenario(host, output, failures):
     host.call("settings", "{}")
     host.call("open")
     wait_for(lambda: host.state()["opened"], "open")
+    # Tab in the list does nothing (before 0.9.6 it called a function that
+    # wasn't there: a QML warning, which fails the run).
+    host.call("press", "Tab")
+    host.settle(.3)
+    check(host.state()["opened"] and not host.state()["settingsOpen"], "Tab outside the settings does nothing", failures)
     host.call("press", ",")
     wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "settings open")
     wait_for(lambda: host.state()["sourcesState"], "what's set up, read")
     s = host.state()
-    check(s["settingsRows"][:6] == ["musicFolder", "radio", "radioState", "lookup", "timeMachine", "spotify"],
-          ", opens the settings, your music and the radio first, then Time Machine: " + ", ".join(s["settingsRows"][:6]), failures)
-    check(all(k in s["settingsRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
-                                               "spotifyLogin", "bridgeToken", "spotifyRemove", "sxmRemove", "appleRemove")),
+    # Marc, 10-26: "split the settings panel into a few tabs, "omarock",
+    # apple, xm, spotify, and sound. In omarock we put the your music, radio,
+    # timemachine, panel and bar".
+    check([t.removesuffix(" •") for t in s["settingsTabs"]] == ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
+          and s["settingsTab"] == "omarock"
+          and s["settingsRows"] == ["musicFolder", "radio", "radioState", "lookup", "timeMachine", "closeOnLeave", "maxLabelWidth"],
+          ", opens the settings on the omarock tab: your music and the radio, Time Machine, the panel and the bar: "
+          + str(s["settingsTabs"]) + " | " + ", ".join(s["settingsRows"]), failures)
+    check(all(k in s["settingsAllRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
+                                                  "spotifyLogin", "bridgeToken", "spotifyRemove", "sxmRemove", "appleRemove")),
           "each source set up here has its account and keys, and Remove", failures)
+    # Tab goes round the tabs, each from its top; Shift+Tab goes back.
+    shown = []
+    for _ in range(5):
+        host.call("press", "Down")
+        host.call("press", "Tab")
+        shown.append((host.state()["settingsTab"], host.state()["settingsRows"][0], host.state()["settingsCursor"]))
+    check(shown == [("Apple Music", "appleMusic", 0), ("SiriusXM", "siriusXM", 0), ("Spotify", "spotify", 0), ("Sound", "sound", 0),
+                    ("omarock", "musicFolder", 0)],
+          "Tab goes round the tabs, each from its top: " + str(shown), failures)
+    host.call("press", "Shift+Tab")
+    check(host.state()["settingsTab"] == "Sound", "Shift+Tab goes back, round to Sound: " + host.state()["settingsTab"], failures)
+    check(host.call("clickPanel", "settingsTab:Spotify") == "ok", "a tab is a button", failures)
+    wait_for(lambda: host.state()["settingsTab"] == "Spotify", "the Spotify tab")
+    check(host.state()["settingsRows"][0] == "spotify" and "sxmUser" not in host.state()["settingsRows"],
+          "a click shows its tab, and only it: " + ", ".join(host.state()["settingsRows"]), failures)
+    host.grab(output / "compact-settings-spotify.png")
+    host.call("press", "Tab")
+    host.call("press", "Tab")
     kinds = s["settingKinds"]
     check("spotify:boolean" in kinds and "siriusXM:boolean" in kinds and "sound:action:Set up…" in kinds
           and "localSetUp" not in s["settingsRows"],
@@ -3828,7 +3860,7 @@ def settings_scenario(host, output, failures):
     # Marc, 10-24: a set secret shows as dots, "standard for most password
     # style fields"; one not set says so.
     s = host.state()
-    secrets = [k for k in ("sxmPassword", "soloistKey", "bridgeToken") if k in s["settingsRows"]]
+    secrets = [k for k in ("sxmPassword", "soloistKey", "bridgeToken") if k in s["settingsAllRows"]]
     check(sorted(s["settingMasked"]) == sorted(k for k in secrets if s["settingValues"].get(k) is True)
           and "sxmPassword" in s["settingMasked"],
           "each secret that's set shows dots, and only those: " + ", ".join(s["settingMasked"]), failures)
@@ -3885,7 +3917,8 @@ def settings_scenario(host, output, failures):
     host.settle(1)
     check(host.call("clickPanel", "settingsButton") == "ok", "the expanded panel has a gear", failures)
     wait_for(lambda: host.state()["settingsOpen"], "gear opens settings")
-    check(host.state()["settingsCursor"] == 0, "and they open at the top, whatever was chosen last time", failures)
+    check(host.state()["settingsCursor"] == 0 and host.state()["settingsTab"] == "omarock",
+          "and they open at the top of the omarock tab, whatever was chosen last time", failures)
     host.grab(output / "expanded-settings.png")
     host.call("press", ",")
     wait_for(lambda: not host.state()["settingsOpen"], ", closes them")
@@ -3990,7 +4023,7 @@ def setup_scenario(host, output, failures):
     finished()
     wait_for(lambda: "spotify:action:Set up…" in host.state()["settingKinds"], "back to Set up")
     s = host.state()
-    check(not any(k in s["settingsRows"] for k in ("spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"))
+    check(not any(k in s["settingsAllRows"] for k in ("spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"))
           and "spotify" not in s["sources"],
           "removed: the section is its Set up button again, and Spotify is gone from the panel", failures)
     host.grab(output / "compact-settings-removed.png")
@@ -4002,7 +4035,7 @@ def setup_scenario(host, output, failures):
     finished()
     wait_for(lambda: "spotify:boolean" in host.state()["settingKinds"], "its switch")
     s = host.state()
-    check(all(k in s["settingsRows"] for k in ("spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"))
+    check(all(k in s["settingsAllRows"] for k in ("spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"))
           and s["settingValues"]["spotify"] is True and "spotify" in s["sources"],
           "Set up… runs ./install spotify; done, the section has its switch, on, and its settings", failures)
 
@@ -4031,7 +4064,7 @@ def setup_scenario(host, output, failures):
     open_settings()
     finished()
     wait_for(lambda: "sound:info" in host.state()["settingKinds"], "its line")
-    check("alsa_output.test-speakers" in host.state()["settingNotes"]["sound"]["text"] and "soundRemove" in host.state()["settingsRows"],
+    check("alsa_output.test-speakers" in host.state()["settingNotes"]["sound"]["text"] and "soundRemove" in host.state()["settingsAllRows"],
           "the sound output set up: a line saying where it plays, and Remove: " + host.state()["settingNotes"]["sound"]["text"], failures)
     host.grab(output / "compact-settings-sound.png")
     press_row("soundRemove")
@@ -4050,6 +4083,11 @@ def setup_scenario(host, output, failures):
     wait_for(lambda: "spotifyUpdate:action:Update…" in host.state()["settingKinds"], "Update", timeout=10)
     update = next(r for r in host.state()["settingKinds"] if r.startswith("spotifyUpdate"))
     check(True, "an old Soloist: Spotify's section offers Update… (" + update + ")", failures)
+    # It's on the Spotify tab, which is marked (Apple Music's may be too: the
+    # harness's bridge address doesn't answer, so it has a Fix button).
+    check(host.state()["settingsTab"] == "omarock" and host.state()["settingsTabs"][3] == "Spotify •"
+          and host.state()["settingsTabs"][2] == "SiriusXM" and host.state()["settingsTabs"][4] == "Sound",
+          "the Spotify tab is marked, so Update is seen from the first tab: " + str(host.state()["settingsTabs"]), failures)
     soloist.unlink()
 
     # Fix: omarock-spotify can't be reached.
