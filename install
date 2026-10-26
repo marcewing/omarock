@@ -1052,7 +1052,7 @@ setup_local() {
   step_radio
   save_pending
   printf '\n%sReady%s\n' "$bold" "$reset"
-  explain "Click omarock in the bar (a record until something plays). Press ? there for the keys."
+  explain "Click omarock in the bar (a boombox until something plays). Press ? there for the keys."
   explain "For Spotify, SiriusXM or Apple Music: omarock's settings (press , in the panel) set each one up."
 }
 

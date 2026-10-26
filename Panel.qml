@@ -168,7 +168,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.4"
+  readonly property string version: "0.9.5"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -3514,7 +3514,7 @@ Panel {
     Text {
       id: glyph
       textFormat: Text.PlainText
-      text: ""
+      text: "󰗜"
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.display

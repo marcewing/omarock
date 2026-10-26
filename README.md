@@ -206,7 +206,7 @@ stay until you remove them too.
 
 - **The bar:** the album cover and "Artist — Song" (up to 300 px: the
   `maxLabelWidth` setting). A click opens the panel; a middle click plays or
-  pauses. With nothing queued it shows a record, and a middle click on it
+  pauses. With nothing queued it shows a boombox, and a middle click on it
   plays a song picked at random from your library (so does Play in the panel).
 - **The panel:** now playing, with the cover, a seek bar, transport (shuffle,
   previous, play/pause, next, repeat) and volume, then search and the queue.

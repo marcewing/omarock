@@ -83,7 +83,7 @@ below.
 - `omarchy plugin add https://github.com/marcewing/omarock --enable` (or
   `file://` to a clone).
 - **Check it loaded:** `journalctl --user -b | grep "omarock .* loaded"`. The bar
-  shows a record (nothing queued), or the song playing.
+  shows a boombox (nothing queued), or the song playing.
 - **"Waiting for mpd…"** means the socket: back to step 1.
 
 ## 3. The audio bus (optional: omarock's sound output)
@@ -168,7 +168,7 @@ terminal in the session.
 
 ## When something's wrong
 
-- **The bar shows only a record:** nothing is queued, or mpd isn't reachable
+- **The bar shows only a boombox:** nothing is queued, or mpd isn't reachable
   (doctor, mpd section).
 - **A source's button says its service isn't running:**
   `systemctl --user status omarock-…`, then its log, `journalctl --user -u omarock-…`.

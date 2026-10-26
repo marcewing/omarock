@@ -105,7 +105,7 @@ BarWidget {
         anchors.fill: parent
         visible: !root.showSong
         bar: root.bar
-        text: ""
+        text: "󰗜"
         dimmed: !root.connected
         tooltipText: root.tooltipText
         onPressed: function(mouseButton) { root.press(mouseButton) }
