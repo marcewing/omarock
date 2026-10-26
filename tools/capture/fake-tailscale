@@ -1,0 +1,6 @@
+#!/bin/bash
+# The harness's tailscale: a tailnet with a Mac (where nothing answers) and
+# a Linux machine, for Apple Music's setup window. Only `status --json`.
+[[ $* == "status --json" ]] || exit 1
+echo '{"Peer": {"n1": {"OS": "macOS", "HostName": "Attic Mac", "TailscaleIPs": ["127.0.0.2"]},' \
+  '"n2": {"OS": "linux", "HostName": "laptop", "TailscaleIPs": ["127.0.0.3"]}}}'

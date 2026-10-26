@@ -152,8 +152,8 @@ stream, because restarting the bridge under mpd gives mpd errors until it's back
 ## 3. The Linux side
 
 On your Omarchy machine, **Set up…** under APPLE MUSIC in omarock's settings (or
-`./install apple-music` in your clone there) connects to the bridge. It lists the Macs among
-your Tailscale machines, checks the bridge answers, and asks for the bridge's token.
+`./install apple-music` in your clone there) connects to the bridge. Its window lists the Macs among
+your Tailscale machines, checks the bridge answers, and takes the bridge's token, checked too.
 Paste it (on the Mac, `pbcopy < ~/Library/Application\ Support/omarock-bridge/token`
 puts it on the clipboard without showing it; the Mac's `./install` offers to), or let
 it copy the token with `scp`, which needs the Mac's Remote Login (System Settings →

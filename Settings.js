@@ -26,7 +26,8 @@
 // Panel.qml gives each its default.
 //
 // Spotify, SiriusXM, Apple Music and omarock's sound output are each set up
-// on their own (./install PIECE, which a button runs in a terminal). A
+// on their own: a button opens the piece's setup window (Setup.js), which
+// takes what it needs, then runs ./install PIECE in a terminal. A
 // "source" row is that piece's button until it's set up, then its switch
 // (or, for the sound output, which has no switch, a line saying where it
 // plays). The piece's other rows show only once it's set up: its settings,
@@ -51,7 +52,7 @@ var schema = [
 
   { key: "spotify", type: "source", source: "spotify", name: "Spotify", label: "Spotify", defaultValue: false,
     description: "Played here by Spotify's own player. Off stops it, and keeps your accounts and keys.",
-    setUpDescription: "Needs Spotify Premium, and a free Spotify developer app. Set up opens a terminal that walks you through it." },
+    setUpDescription: "Needs Spotify Premium, and a free Spotify developer app. Set up shows what to do and takes the app's keys, then finishes in a terminal." },
   { key: "spotifyUpdate", type: "action", source: "spotify", name: "Spotify", when: "fix",
     updateDescription: "omarock was updated, and its Spotify service has changes to install. Update does it, in a terminal: Spotify stops for a moment if it's playing." },
   { key: "spotifyClient", type: "account", label: "Your Spotify app's Client ID", source: "spotify",
@@ -67,7 +68,7 @@ var schema = [
 
   { key: "siriusXM", type: "source", source: "sxm", name: "SiriusXM", label: "SiriusXM", defaultValue: false,
     description: "SiriusXM's live channels, played by mpd. Off stops it, and keeps your login.",
-    setUpDescription: "Needs a SiriusXM subscription with streaming. Unofficial: it signs in as SiriusXM's web player does, which SiriusXM's terms forbid. Set up opens a terminal that walks you through it." },
+    setUpDescription: "Needs a SiriusXM subscription with streaming. Unofficial: it signs in as SiriusXM's web player does, which SiriusXM's terms forbid. Set up explains it and takes your login, then finishes in a terminal." },
   { key: "sxmUpdate", type: "action", source: "sxm", name: "SiriusXM", when: "fix",
     updateDescription: "omarock was updated, and its SiriusXM service has changes to install. Update does it, in a terminal: a channel playing stops for a moment." },
   { key: "sxmUser", type: "account", label: "SiriusXM email or username", source: "sxm" },
@@ -78,7 +79,7 @@ var schema = [
 
   { key: "appleMusic", type: "source", source: "apple", name: "Apple Music", label: "Apple Music", defaultValue: false,
     description: "Played on your Mac by omarock's bridge, and heard here. Off keeps the bridge's address and token.",
-    setUpDescription: "Needs a Mac running omarock's bridge: on the Mac, ./install in omarock's clone sets it up (with your Apple Developer membership). Set up then opens a terminal that connects this machine to it." },
+    setUpDescription: "Needs a Mac running omarock's bridge: on the Mac, ./install in omarock's clone sets it up (with your Apple Developer membership). Set up then connects this machine to it." },
   { key: "appleUpdate", type: "action", source: "apple", name: "Apple Music", when: "fix" },
   { key: "bridgeToken", type: "secret", label: "The bridge's token", source: "apple",
     description: "On the Mac: pbcopy < ~/Library/Application\\ Support/omarock-bridge/token, then paste it here. Never shown." },

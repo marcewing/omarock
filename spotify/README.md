@@ -25,9 +25,11 @@ media keys (MPRIS) ──┘          │                                   │
 
 ## Set it up
 
-The easy way: **Set up…** under SPOTIFY in omarock's settings (`,` in the panel),
-or `./install spotify` from your clone. It walks through all of what follows,
-opens the firewall for the pairing and closes it again, and switches Spotify on.
+The easy way: **Set up…** under SPOTIFY in omarock's settings (`,` in the panel).
+Its window links to the dashboard and takes the Client ID and the Soloist key;
+then a terminal does the rest of what follows, opens the firewall for the
+pairing and closes it again, and switches Spotify on. `./install spotify` from
+your clone does it all in the terminal.
 Run it again (the settings' **Fix…** does) to finish a setup that stopped.
 
 By hand, run the tools from your omarock clone: the plugin's folder,

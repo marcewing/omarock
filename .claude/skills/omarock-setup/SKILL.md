@@ -20,7 +20,8 @@ suggest the user run it in one of their own.
 - `./install` in the clone sets up local music and the radio: mpd, then the
   plugin on the bar.
 - Each source then has its own: **Set up…** in omarock's settings (`,` in the
-  panel) runs it in a terminal, or the user runs `./install spotify`,
+  panel) opens its setup window, which takes the keys or login and then runs
+  it in a terminal, or the user runs `./install spotify`,
   `./install siriusxm`, `./install apple-music` or `./install sound` (omarock's
   sound output, the audio bus: optional).
 - Each can be run again any time, to finish or update. `./install --remove

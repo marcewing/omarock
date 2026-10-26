@@ -22,9 +22,10 @@ Soloist ─────┘
 
 ## Set it up
 
-The easy way: **Set up…** under SOUND in omarock's settings, or `./install sound`
-from your clone. It asks which output, then does what follows, and restarts
-Spotify's player (if you have it) to play into the bus. By hand:
+The easy way: **Set up…** under SOUND in omarock's settings: pick the output in
+its window, then a terminal does what follows (asking before it changes
+mpd.conf), and restarts Spotify's player (if you have it) to play into the bus.
+`./install sound` from your clone asks which output itself. By hand:
 
 1. **Pick the output** the bus plays into. Its node name is the second column of:
    ```bash

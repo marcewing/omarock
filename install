@@ -17,6 +17,11 @@
 #                              and one output it never leaves
 #   ./install --remove PIECE   take one of those four off again, with its
 #                              accounts and keys
+#   ./install PIECE --yes NAME --no NAME --output NAME
+#                              questions answered ahead, as omarock's setup
+#                              window does: terms (SiriusXM's risk), flac and
+#                              mpris (Apple Music's patched builds), and
+#                              the output (the sound output's)
 #   ./install --uninstall      take omarock off, a piece at a time, asking first
 #   ./install --help
 #
@@ -131,9 +136,15 @@ answered() {  # PROMPT HOW ANSWER
 # Each prompt has a blank line above it. Gum clears a prompt once it's
 # answered, so the blank line is still the last one on the screen.
 
-# confirm PROMPT [yes|no]: the default is yes.
+# confirm PROMPT [yes|no] [NAME]: the default is yes. NAME answered ahead
+# (--yes NAME, --no NAME) isn't asked.
 confirm() {
   gap
+  if [[ -n ${3:-} && -n ${preset[$3]:-} ]]; then
+    answered "$1" "" "$([[ ${preset[$3]} == yes ]] && echo Yes || echo No), in the setup window"
+    [[ ${preset[$3]} == yes ]]
+    return
+  fi
   if [[ -n $answers ]]; then
     local a
     a=$(answer "$1")
@@ -254,6 +265,9 @@ PY
 }
 # The settings to make once the plugin is on the bar: key -> JSON value.
 declare -A pending=()
+# Questions answered ahead (--yes NAME, --no NAME, --output NAME): name ->
+# yes, no, or the output.
+declare -A preset=()
 
 manifest_version() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$1" 2>/dev/null; }
 newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1) == "$1" ]]; }
@@ -624,9 +638,20 @@ step_bus() {
       args+=("${names[i]}" "${descs[i]}$( ((${seen[${descs[i]}]} > 1)) && echo " (${names[i]})")")
     done
     if ((${#args[@]} == 0)); then bad "PipeWire lists no outputs."; return 1; fi
-    out=$(choose "Which output should omarock play into?" "$default" "${args[@]}") || exit 1
-    [[ -n $out ]] || return 1
-    confirm "omarock will play only into $(output_name "$out"). Go on?" || return 1
+    # Picked in the setup window, where Start setup was the go-ahead.
+    out=${preset[output]:-}
+    if [[ -n $out ]] && ! printf '%s\n' "${names[@]}" | grep -qxF -- "$out"; then
+      bad "The output picked in the setup window isn't there now: $out"
+      out=""
+    fi
+    if [[ -n $out ]]; then
+      gap
+      answered "Which output should omarock play into?" "" "$(output_name "$out"), in the setup window"
+    else
+      out=$(choose "Which output should omarock play into?" "$default" "${args[@]}") || exit 1
+      [[ -n $out ]] || return 1
+      confirm "omarock will play only into $(output_name "$out"). Go on?" || return 1
+    fi
     run "$repo/tools/install-audio" --start --output "$out" || return 1
   fi
 
@@ -826,7 +851,7 @@ step_sxm() {
   step "SiriusXM"
   if [[ ! -f $share/sxm/INSTALLED ]]; then
     explain "Omarock plays SiriusXM using omarock-sxm. It's unofficial! It signs in as SiriusXM's web player does. SiriusXM's terms forbid that, so your account could be limited or closed, and it may stop working whenever SiriusXM changes its player (see: sxm/README.md)."
-    confirm "Set it up anyway?" no || return 1
+    confirm "Set it up anyway?" no terms || return 1
   fi
   if [[ ! -f $share/sxm/INSTALLED ]]; then
     run "$repo/tools/install-sxm" --start || return 1
@@ -955,7 +980,7 @@ step_apple() {
     [[ $(setting appleRejoin true) == true ]] && pending[appleRejoin]=false
   else
     explain "For smooth playback, mpd needs a fix to libFLAC that isn't in Arch's repo yet (patches/README.md). Without it, mpd falls behind the Mac, and omarock catches it up after each change, with a short stutter. This builds the fixed library for mpd only (a few minutes; needs cmake and ninja)."
-    if confirm "Build the patched libFLAC?" no; then
+    if confirm "Build the patched libFLAC?" no flac; then
       run sudo pacman -S --needed --noconfirm base-devel cmake ninja git \
         && run "$repo/tools/build-libflac" \
         && install -d "$units/mpd.service.d" \
@@ -967,7 +992,7 @@ step_apple() {
   fi
   if [[ ! -f $units/mpd-mpris.service.d/omarock-mpris.conf ]]; then
     explain "mpd-mpris also asks mpd for the stream's cover art at every play and pause, which holds mpd for seconds. A patched mpd-mpris doesn't (a minute to build; needs Go)."
-    if confirm "Build the patched mpd-mpris?" no; then
+    if confirm "Build the patched mpd-mpris?" no mpris; then
       run sudo pacman -S --needed --noconfirm go git \
         && run "$repo/tools/build-mpd-mpris" \
         && printf '# omarock: mpd-mpris, patched (patches/README.md)\n[Service]\nExecStart=\nExecStart=%%h/.local/lib/omarock-mpris/mpd-mpris -no-instance\n' >"$units/mpd-mpris.service.d/omarock-mpris.conf" \
@@ -1450,6 +1475,20 @@ uninstall() {
   explain "This clone, $repo: delete it when you're done. On a Mac, the Apple Music bridge comes off with ./install --uninstall in its clone there (bridge/README.md)."
 }
 
+# A piece's questions answered ahead: --yes NAME, --no NAME, --output NAME.
+presets() {
+  while (($#)); do
+    case $1 in
+      --yes | --no) [[ -n ${2:-} ]] || { echo "install: $1 needs a name" >&2; exit 2; }
+        preset[$2]=${1#--} ;;
+      --output) [[ -n ${2:-} ]] || { echo "install: --output needs an output's name" >&2; exit 2; }
+        preset[output]=$2 ;;
+      *) echo "install: what's $1? (try --help)" >&2; exit 2 ;;
+    esac
+    shift 2
+  done
+}
+
 main() {
   preflight "$@"
   case ${1:-} in
@@ -1457,7 +1496,7 @@ main() {
     --remove) remove_piece "${2:-}" ;;
     "") setup_local ;;
     -*) no_piece "$1" ;;
-    *) setup_piece "$1" ;;
+    *) presets "${@:2}"; setup_piece "$1" ;;
   esac
 }
 

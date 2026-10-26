@@ -53,12 +53,16 @@ switch() {  # KEY true|false: the source's switch, as ./install sets it
     remove:siriusxm)
       rm -rf "$share/sxm" "$units/omarock-sxm.service" "$HOME/.fake-systemd/omarock-sxm" "$config/siriusxm.json"
       switch siriusXM false ;;
-    # The fake bridge's address and token, kept aside for a setup to bring back.
+    # The fake bridge's address and token, kept aside for a setup to bring
+    # back, unless the setup window has saved them again.
     remove:apple-music)
       for f in apple.json bridge-token; do [[ -e $config/$f ]] && mv "$config/$f" "$HOME/.removed-$f"; done
       switch appleMusic false ;;
     setup:apple-music)
-      for f in apple.json bridge-token; do [[ -e $HOME/.removed-$f ]] && mv "$HOME/.removed-$f" "$config/$f"; done
+      for f in apple.json bridge-token; do
+        [[ -e $config/$f ]] && rm -f "$HOME/.removed-$f"
+        [[ -e $HOME/.removed-$f ]] && mv "$HOME/.removed-$f" "$config/$f"
+      done
       switch appleMusic true ;;
     setup:sound)
       mkdir -p "$share/audio" && echo harness >"$share/audio/INSTALLED"

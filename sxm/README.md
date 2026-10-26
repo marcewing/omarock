@@ -26,9 +26,10 @@ while mpd plays it. Whether that's acceptable is your call.
 
 ## Set it up
 
-The easy way: **Set up…** under SIRIUSXM in omarock's settings (`,` in the panel),
-or `./install siriusxm` from your clone. It asks for your login, signs in, and
-switches SiriusXM on. By hand:
+The easy way: **Set up…** under SIRIUSXM in omarock's settings (`,` in the panel).
+Its window takes your login; then a terminal installs omarock-sxm, signs in,
+and switches SiriusXM on. `./install siriusxm` from your clone does the same,
+asking for the login itself. By hand:
 
 1. Install the service, from your omarock clone (the plugin's folder,
    `~/.config/omarchy/plugins/mre.omarock`, or a clone of your own):

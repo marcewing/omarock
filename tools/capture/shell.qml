@@ -118,6 +118,30 @@ ShellRoot {
     return rows
   }
 
+  // The setup window's view, while it's open.
+  function setupView() {
+    var w = host.panel.setupWindow
+    return w.visible ? host.findNamed(w.contentItem, "setupView") : null
+  }
+
+  // The setup window as shown: its fields (a secret, whether something's
+  // typed), what's said under each, and what Start setup waits for.
+  function setupState() {
+    var v = host.setupView()
+    if (!v) return { open: false }
+    var values = {}, notes = {}
+    v.fieldList.forEach(function(f) {
+      var x = v.values[f.key]
+      values[f.key] = f.type === "secret" ? (x ? "•" : "") : x
+      notes[f.key] = v.fieldNote(f).text
+    })
+    var w = host.panel.setupWindow
+    return { open: true, piece: v.piece, title: w.title, values: values, notes: notes, blocker: v.blocker,
+      canStart: v.canStart, notice: v.notice, busy: v.busy, otherMac: v.otherMac,
+      macs: v.macs.map(function(m) { return m.name + " " + m.address }), outputs: v.outputs.map(function(o) { return o.name }),
+      resizable: w.minimumSize.width < w.maximumSize.width, footer: host.findNamed(v, "setupFooter").text }
+  }
+
   // The settings view, while it's open.
   function settingsView() {
     var p = popup()
@@ -210,6 +234,7 @@ ShellRoot {
       p.cursorActive = false
       p.searchFocused = false
       p.closeKeysWindow()
+      p.closeSetupWindow()
     }
     function hide(): void { host.panel.close() }
     // Where the keys are: the search box, the picker's box, or the panel's keys.
@@ -285,6 +310,7 @@ ShellRoot {
             && p.keysWindow.minimumSize.height < p.keysWindow.maximumSize.height,
           viewWidth: host.keysWindowView() ? host.keysWindowView().width : 0,
           here: host.keysWindowHere() },
+        setupWindow: host.setupState(),
         browse: p.browseTop ? p.browseTop.kind + ":" + p.browseTop.title : "",
         browseLoading: p.browseLoading, browseInfo: p.browseInfo,
         queueLength: p.queueRows.length, searchFocused: !!p.searchField && p.searchField.activeFocus,
@@ -396,6 +422,40 @@ ShellRoot {
       view.Window.window.width = width
       view.Window.window.height = height
       return "ok"
+    }
+    // The setup window takes the keys, as when it's clicked.
+    function activateSetupWindow(): string {
+      var v = host.setupView()
+      if (!v || !v.Window.window) return "No setup window"
+      v.Window.window.requestActivate()
+      v.forceActiveFocus()
+      return "ok"
+    }
+    // A field of the setup window takes the keys, as when it's clicked (or
+    // a button or tick, by its objectName, as Tab would bring it).
+    function setupFocus(key: string): string {
+      var v = host.setupView()
+      var field = v ? host.findNamed(v, "setupField:" + key) || host.findNamed(v, key) : null
+      if (!field) return "No field " + key
+      v.Window.window.requestActivate()
+      field.forceActiveFocus()
+      return "ok"
+    }
+    // A click on a button or a tick in the setup window, by its objectName;
+    // one that's switched off takes no click.
+    function setupClick(name: string): string {
+      var v = host.setupView()
+      var item = v ? host.findNamed(v, name) : null
+      if (!item) return "No " + name
+      if (!item.enabled) return "off"
+      if (typeof item.toggled === "function") item.toggled()
+      else item.clicked()
+      return "ok"
+    }
+    function grabSetupWindow(path: string): string {
+      var view = host.setupView()
+      if (!view) return "No setup window"
+      return view.grabToImage(function(result) { result.saveToFile(path) }) ? "ok" : "Capture failed"
     }
     function grabKeysWindow(path: string): string {
       var view = host.keysWindowView()

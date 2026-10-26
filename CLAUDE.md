@@ -14,7 +14,8 @@ The quickest route is `./install`, which the user runs in a terminal of their
 own: it asks questions with gum, so it can't run from Claude's shell. It sets up
 local music and the radio. Spotify, SiriusXM, Apple Music and omarock's sound
 output (the audio bus) are each set up on their own: **Set up…** in omarock's
-settings runs `./install spotify` (and so on) in a terminal, and `./install
+settings opens the piece's setup window (Setup.js), which takes its keys or
+login, then runs `./install spotify` (and so on) in a terminal, and `./install
 --remove PIECE` takes one off again. `tools/omarock-sources state` shows what's
 set up, and `tools/omarock-doctor` anything left to do.
 

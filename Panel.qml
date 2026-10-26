@@ -11,6 +11,7 @@ import "Sxm.js" as Sxm
 import "Radio.js" as Radio
 import "Info.js" as Info
 import "Settings.js" as Settings
+import "Setup.js" as Setup
 import "Hints.js" as Hints
 import "TimeMachine.js" as TimeMachine
 import "Keeper.js" as Keeper
@@ -168,7 +169,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.9"
+  readonly property string version: "0.10.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -2556,17 +2557,23 @@ Panel {
   }
 
   // A piece's setup or removal (./install PIECE, ./install --remove PIECE)
-  // in a terminal, as Omarchy runs its own installs. The panel closes, so
-  // the terminal has the keyboard, and follows the run in setup.json
+  // in a terminal, as Omarchy runs its own installs, with the setup window's
+  // choices after the piece (--yes terms, --output NAME). The panel closes,
+  // so the terminal has the keyboard, and follows the run in setup.json
   // (tools/omarock-sources) until it ends.
   readonly property string setupTerminal: "omarchy-launch-floating-terminal-with-presentation"
   property var setupLaunched: null
-  function runSetup(piece, remove) {
+  function shellWord(word) {
+    word = String(word)
+    return /^[A-Za-z0-9_.\/:=@%+,-]+$/.test(word) ? word : "'" + word.replace(/'/g, "'\\''") + "'"
+  }
+  function runSetup(piece, remove, extra) {
     if (root.setupLaunched) {
       root.say("A setup is still running in its terminal")
       return
     }
     var args = remove ? " --remove " + piece : piece !== "local" ? " " + piece : ""
+    args += (extra || []).map(function(w) { return " " + root.shellWord(w) }).join("")
     root.setupLaunched = { piece: piece, action: remove ? "remove" : "setup", at: Date.now() / 1000 }
     Quickshell.execDetached([root.setupTerminal, "'" + root.installPath.replace(/'/g, "'\\''") + "'" + args])
     setupFollow.restart()
@@ -2615,13 +2622,16 @@ Panel {
     accountWriter.running = true
     root.say(key === "musicFolder" ? "Changing the music folder: mpd restarts…" : "Saving…")
   }
-  // The settings screen's buttons: setting a piece up (again: Fix,
-  // Update), removing one, Spotify's sign-in.
-  readonly property var setupActions: ({ localSetUp: "local", spotify: "spotify", siriusXM: "siriusxm", appleMusic: "apple-music",
-    sound: "sound", spotifyUpdate: "spotify", sxmUpdate: "siriusxm", appleUpdate: "apple-music", soundUpdate: "sound" })
+  // The settings screen's buttons: setting a piece up (its window first,
+  // then the terminal), setting it up again (Fix, Update: straight to the
+  // terminal), removing one, Spotify's sign-in.
+  readonly property var setupWindows: ({ spotify: "spotify", siriusXM: "siriusxm", appleMusic: "apple-music", sound: "sound" })
+  readonly property var setupActions: ({ localSetUp: "local", spotifyUpdate: "spotify", sxmUpdate: "siriusxm",
+    appleUpdate: "apple-music", soundUpdate: "sound" })
   readonly property var removeActions: ({ spotifyRemove: "spotify", sxmRemove: "siriusxm", appleRemove: "apple-music",
     soundRemove: "sound" })
   function settingAction(key) {
+    if (root.setupWindows[key]) return root.openSetupWindow(root.setupWindows[key])
     if (root.setupActions[key]) return root.runSetup(root.setupActions[key], false)
     if (root.removeActions[key]) return root.runSetup(root.removeActions[key], true)
     if (key !== "spotifyLogin") return
@@ -4236,6 +4246,160 @@ Panel {
       version: root.version
       here: root.hereKeys
       onCloseRequested: root.closeKeysWindow()
+    }
+  }
+
+  // A piece's setup window (Set up… on its tab of the settings, SetupView,
+  // Setup.js): how the piece works, what it needs and where to get it, and
+  // the fields for it. Start setup saves them (tools/omarock-account, over
+  // stdin) and runs ./install PIECE in a terminal, with the window's choices
+  // after it. The panel closes, so the window has the keys, and stays shut
+  // while you go to the browser for keys. Like the keys window, it maps at
+  // a fixed size, so Hyprland floats it, then can be resized.
+  readonly property alias setupWindow: setupFloat
+  function openSetupWindow(piece) {
+    if (root.setupLaunched) {
+      root.say("A setup is still running in its terminal")
+      return
+    }
+    accountReader.running = true
+    setupView.macs = []
+    setupView.outputs = []
+    setupView.defaultOutput = ""
+    setupView.piece = piece
+    setupView.reset()
+    if (piece === "apple-music") tailnetReader.running = true
+    if (piece === "sound") outputsReader.running = true
+    root.close()
+    if (!setupFloat.visible) {
+      setupFloat.resizable = false
+      setupFloat.visible = true
+    } else if (setupView.Window.window) {
+      setupView.Window.window.requestActivate()
+    }
+  }
+  // Closed or cancelled: what was typed goes, secrets first, and a Start
+  // setup still saving runs nothing.
+  function closeSetupWindow() {
+    setupWriter.queue = []
+    setupWriter.piece = ""
+    setupView.piece = ""
+    setupView.reset()
+    setupFloat.visible = false
+  }
+  // Start setup: each value into its file, one at a time, then the terminal.
+  // A value that can't be saved stops it there, and the window says why.
+  function startSetup(writes, args) {
+    setupWriter.piece = setupView.piece
+    setupWriter.queue = writes
+    setupWriter.args = args
+    root.nextSetupWrite()
+  }
+  function nextSetupWrite() {
+    if (setupWriter.running || setupWriter.piece === "") return
+    if (setupWriter.queue.length === 0) {
+      var piece = setupWriter.piece
+      var args = setupWriter.args
+      setupWriter.args = []
+      root.closeSetupWindow()
+      root.runSetup(piece, false, args)
+      return
+    }
+    var next = setupWriter.queue[0]
+    setupWriter.queue = setupWriter.queue.slice(1)
+    setupWriter.secret = next[1]
+    setupWriter.command = [root.accountTool, next[0]]
+    setupWriter.running = true
+  }
+
+  FloatingWindow {
+    id: setupFloat
+    title: "omarock: " + (Setup.title(setupView.piece) || "set up")
+    visible: false
+    color: Commons.Color.popups.background
+    property size lastSize: Qt.size(Style.space(640), Style.space(780))
+    property bool resizable: false
+    readonly property size openSize: Qt.size(
+      Math.min(lastSize.width, screen ? screen.width - Style.space(80) : lastSize.width),
+      Math.min(lastSize.height, screen ? screen.height - Style.space(80) : lastSize.height))
+    implicitWidth: openSize.width
+    implicitHeight: openSize.height
+    minimumSize: resizable ? Qt.size(Style.space(420), Style.space(360)) : openSize
+    maximumSize: resizable ? Qt.size(16777215, 16777215) : openSize
+    onVisibleChanged: if (!visible) {
+      setupFloat.lastSize = Qt.size(setupFloat.width, setupFloat.height)
+      setupFloat.resizable = false
+    }
+    // Closed by Hyprland (Super+W), as Cancel.
+    onClosed: root.closeSetupWindow()
+
+    Connections {
+      target: setupFloat.visible && !setupFloat.resizable ? setupView.Window.window : null
+      function onFrameSwapped() { setupFloat.resizable = true }
+    }
+
+    SetupView {
+      id: setupView
+      objectName: "setupView"
+      anchors.fill: parent
+      anchors.margins: Style.space(18)
+      foreground: root.foreground
+      fontFamily: root.fontFamily
+      known: root.accounts
+      host: root.clientName
+      onStartRequested: function(writes, args) { root.startSetup(writes, args) }
+      onCloseRequested: root.closeSetupWindow()
+    }
+  }
+
+  // Saves the setup window's values (startSetup), one at a time, each over
+  // stdin, never on a command line.
+  Process {
+    id: setupWriter
+    property string piece: ""
+    property var queue: []
+    property var args: []
+    property string secret: ""
+    stdinEnabled: true
+    stderr: StdioCollector { id: setupWriterErrors; waitForEnd: true }
+    onStarted: {
+      write(secret + "\n")
+      secret = ""
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        setupWriter.queue = []
+        setupView.busy = false
+        setupView.notice = "Couldn't save it: " + (String(setupWriterErrors.text || "").trim().split("\n")[0] || "no reason given")
+        accountReader.running = true
+        return
+      }
+      Qt.callLater(root.nextSetupWrite)
+    }
+  }
+
+  // The tailnet's Macs, for Apple Music's setup window: none without Tailscale.
+  Process {
+    id: tailnetReader
+    command: ["sh", "-c", "command -v tailscale >/dev/null && tailscale status --json 2>/dev/null"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: setupView.macs = Setup.tailnetMacs(text)
+    }
+  }
+
+  // PipeWire's outputs and the default one, for the sound output's setup
+  // window: the default on the first line, then the outputs as JSON.
+  Process {
+    id: outputsReader
+    command: ["sh", "-c", "printf '%s\\n' \"$(pactl get-default-sink 2>/dev/null)\"; pactl -f json list sinks 2>/dev/null"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var at = text.indexOf("\n")
+        setupView.outputs = Setup.outputList(at < 0 ? "" : text.slice(at + 1))
+        setupView.defaultOutput = at < 0 ? "" : text.slice(0, at).trim()
+      }
     }
   }
 

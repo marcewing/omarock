@@ -1,0 +1,11 @@
+#!/bin/bash
+# The harness's pactl: two outputs, the speakers the default, and omarock's
+# own, for the sound output's setup window. Only get-default-sink and
+# `-f json list sinks`.
+case $* in
+  get-default-sink) echo alsa_output.test-speakers ;;
+  "-f json list sinks")
+    echo '[{"name": "alsa_output.test-speakers", "description": "Test Speakers"},' \
+      '{"name": "alsa_output.test-headphones", "description": "Test Headphones"}, {"name": "omarock", "description": "omarock"}]' ;;
+  *) exit 1 ;;
+esac

@@ -41,6 +41,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartClient.qml", "YearPicker.qml",
+                "Setup.js", "SetupView.qml",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -74,11 +75,14 @@ def prepare(work):
     theme.mkdir(parents=True)
     shutil.copy(THEME, theme / "colors.toml")
     # Stand-ins first on the panel's PATH: a systemctl that reaches no real
-    # services, and a terminal that plays a setup out without ./install.
+    # services, a terminal that plays a setup out without ./install, and a
+    # tailnet and PipeWire outputs for the setup windows.
     fakes = work / "bin"
     fakes.mkdir()
     (fakes / "systemctl").symlink_to(TOOLS / "fake-systemctl")
     (fakes / "omarchy-launch-floating-terminal-with-presentation").symlink_to(TOOLS / "fake-terminal")
+    (fakes / "tailscale").symlink_to(TOOLS / "fake-tailscale")
+    (fakes / "pactl").symlink_to(TOOLS / "fake-pactl")
     env = dict(HOME=str(home), PATH=f"{fakes}:/usr/bin:/bin", LANG="C.UTF-8",
                XDG_RUNTIME_DIR=str(runtime), OMARCHY_PATH="/usr/share/omarchy")
     subprocess.run(["omarchy-theme-set-templates"], env=env, check=True, stdout=subprocess.DEVNULL)
@@ -4141,6 +4145,22 @@ def setup_scenario(host, output, failures):
         """The run the panel started has ended, and the panel has read it."""
         wait_for(lambda: host.state()["setupLaunched"] is None, "the run ended", timeout=15)
 
+    def window():
+        return host.state()["setupWindow"]
+
+    def open_window(key, piece):
+        """Set up… on a source: its setup window, and the panel closed."""
+        open_settings()
+        press_row(key)
+        wait_for(lambda: window()["open"] and window()["piece"] == piece, piece + "'s setup window")
+
+    def retype(field, old, new):
+        host.call("setupFocus", field)
+        for _ in old: host.call("press", "Backspace")
+        host.call("typeKeys", new)
+
+    config = home / ".config/omarock"
+
     host.call("settings", "{}")
     open_settings()
     wait_for(lambda: host.state()["sourcesState"], "what's set up, read")
@@ -4162,9 +4182,38 @@ def setup_scenario(host, output, failures):
           "removed: the section is its Set up button again, and Spotify is gone from the panel", failures)
     host.grab(output / "compact-settings-removed.png")
 
-    # Set up: ./install spotify, then the switch (on) and its settings.
-    press_row("spotify")
+    # Set up…: its window first (Marc, 10-26: "a dialog first, which has the
+    # explanation of the service and how it works … links to the various
+    # other bits the user needs to do … places to enter them right there …
+    # a "start setup" button … that would launch the terminal"). The panel
+    # closes, so the window has the keys.
+    removed = launched()
+    open_window("spotify", "spotify")
+    w = window()
+    check(not host.state()["opened"] and w["title"] == "omarock: Set up Spotify" and not w["canStart"]
+          and w["blocker"] == "Needs the app's Client ID" and launched() == removed,
+          "Set up… opens Spotify's setup window, not yet the terminal, and the panel closes: " + w["blocker"], failures)
+    host.call("grabSetupWindow", str(output / "setup-spotify.png"))
+    host.call("setupFocus", "spotifyClient")
+    host.call("typeKeys", "abc123")
+    wait_for(lambda: window()["notes"]["spotifyClient"] == "A Client ID is 32 letters and digits", "the Client ID's check")
+    check(not window()["canStart"] and host.call("setupClick", "setupStart") == "off",
+          "a Client ID that isn't one: the field says so, and Start setup is off", failures)
+    client_id = "0123456789abcdef0123456789abcdef"
+    retype("spotifyClient", "abc123", client_id)
+    host.call("press", "Return")
+    host.call("typeKeys", "soloist-test-key")
+    wait_for(lambda: window()["canStart"], "Start setup, ready")
+    check(window()["values"]["soloistKey"] == "•" and window()["footer"] == "Ready",
+          "Enter goes on to the Soloist key; with both, Start setup is ready", failures)
+    host.call("press", "Return")
     wait_for(lambda: launched().endswith("/install' spotify"), "the setup's terminal")
+    key_file = config / "soloist-key"
+    check(json.loads((config / "spotify.json").read_text())["clientId"] == client_id
+          and key_file.read_text() == "soloist-test-key\n" and key_file.stat().st_mode & 0o777 == 0o600
+          and not window()["open"],
+          "Enter in the last field starts: the Client ID and the Soloist key (mode 600) saved, the window closed, "
+          "./install spotify in a terminal", failures)
     open_settings()
     finished()
     wait_for(lambda: "spotify:boolean" in host.state()["settingKinds"], "its switch")
@@ -4179,22 +4228,63 @@ def setup_scenario(host, output, failures):
     finished()
     wait_for(lambda: "siriusXM:action:Set up…" in host.state()["settingKinds"], "SiriusXM removed")
     result_file.write_text("failed")
-    press_row("siriusXM")
+    open_window("siriusXM", "siriusxm")
+    check(window()["blocker"] == "Needs a tick that you understand the risk" and not window()["canStart"],
+          "SiriusXM's window: its risk has to be ticked first", failures)
+    # The tick by the keys: Tab brings it, Space flips it.
+    host.call("setupFocus", "setupCheck:sxmTerms")
+    host.call("press", "Space")
+    check(window()["values"]["sxmTerms"] is True, "Space flips the tick", failures)
+    host.call("setupFocus", "sxmUser")
+    host.call("typeKeys", "me@example.com")
+    host.call("press", "Return")
+    host.call("typeKeys", "pass word")
+    wait_for(lambda: window()["canStart"], "SiriusXM ready")
+    host.call("grabSetupWindow", str(output / "setup-siriusxm.png"))
+    host.call("setupClick", "setupStart")
+    wait_for(lambda: launched().endswith("/install' siriusxm --yes terms"), "SiriusXM's terminal")
+    login = config / "siriusxm.json"
+    check(json.loads(login.read_text()) == {"username": "me@example.com", "password": "pass word"}
+          and login.stat().st_mode & 0o777 == 0o600,
+          "the login saved (mode 600, the password's space kept), then ./install siriusxm --yes terms: the tick", failures)
     open_settings()
     finished()
     note = host.state()["settingNotes"]["siriusXM"]
     check(note["kind"] == "bad" and "didn't finish" in note["text"] and "siriusXM:action:Set up…" in host.state()["settingKinds"],
           "a setup that fails leaves Set up…, which says it didn't finish: " + note["text"], failures)
     result_file.unlink()
-    press_row("siriusXM")
+    # Again: the login is there already, so only the tick.
+    open_window("siriusXM", "siriusxm")
+    wait_for(lambda: window()["values"]["sxmUser"] == "me@example.com", "the login filled in")
+    check(window()["values"]["sxmPassword"] == "" and window()["blocker"] == "Needs a tick that you understand the risk",
+          "set up again: the window has the login already (the password set, not shown)", failures)
+    host.call("setupClick", "setupCheck:sxmTerms")
+    saved = login.stat().st_mtime_ns
+    host.call("setupClick", "setupStart")
+    wait_for(lambda: terminal_log.read_text().count("siriusxm --yes terms") == 2, "SiriusXM's terminal again")
+    check(login.stat().st_mtime_ns == saved, "nothing retyped, nothing saved again", failures)
     open_settings()
     finished()
     wait_for(lambda: "siriusXM:boolean" in host.state()["settingKinds"], "SiriusXM set up")
     check(host.state()["settingNotes"]["siriusXM"]["kind"] != "bad", "set up again, it carries on", failures)
 
-    # The sound output: a line saying where it plays, then removed again.
-    press_row("sound")
-    wait_for(lambda: launched().endswith("/install' sound"), "the sound output's setup")
+    # The sound output: picked in its window, then a line saying where it
+    # plays, then removed again.
+    open_window("sound", "sound")
+    wait_for(lambda: window()["outputs"], "the outputs")
+    w = window()
+    check(w["outputs"] == ["alsa_output.test-speakers", "alsa_output.test-headphones"]
+          and w["values"]["output"] == "alsa_output.test-speakers" and w["canStart"],
+          "the sound output's window lists the outputs (not omarock's own), the default picked", failures)
+    host.call("setupClick", "setupOutput:alsa_output.test-headphones")
+    check(window()["values"]["output"] == "alsa_output.test-headphones", "a click picks another", failures)
+    host.call("setupFocus", "setupOutput:alsa_output.test-speakers")
+    host.call("press", "Return")
+    check(window()["values"]["output"] == "alsa_output.test-speakers", "so does Enter on one, from the keys", failures)
+    host.call("grabSetupWindow", str(output / "setup-sound.png"))
+    host.call("setupClick", "setupStart")
+    wait_for(lambda: launched().endswith("/install' sound --output alsa_output.test-speakers"), "the sound output's setup")
+    check(True, "Start setup: ./install sound --output (the one picked)", failures)
     open_settings()
     finished()
     wait_for(lambda: "sound:info" in host.state()["settingKinds"], "its line")
@@ -4205,6 +4295,64 @@ def setup_scenario(host, output, failures):
     open_settings()
     finished()
     wait_for(lambda: "sound:action:Set up…" in host.state()["settingKinds"], "sound removed")
+
+    # Apple Music: the Mac from the tailnet, checked live, then its token.
+    apple_json, token_file = config / "apple.json", config / "bridge-token"
+    before = {f: f.read_bytes() if f.exists() else None for f in (apple_json, token_file)}
+    press_row("appleRemove")
+    open_settings()
+    finished()
+    wait_for(lambda: "appleMusic:action:Set up…" in host.state()["settingKinds"], "Apple Music removed")
+    open_window("appleMusic", "apple-music")
+    wait_for(lambda: "Nothing answers at http://127.0.0.2:8710" in window()["notes"]["appleMac"], "the tailnet's Mac checked")
+    w = window()
+    check(w["macs"] == ["Attic Mac 127.0.0.2"] and w["values"]["appleMac"] == "127.0.0.2" and not w["otherMac"] and not w["canStart"]
+          and w["blocker"].startswith("Nothing answers"),
+          "the tailnet's one Mac is picked, and checked: nothing answers there, so Start setup waits", failures)
+    host.call("setupClick", "setupMacOther")
+    host.call("setupFocus", "appleMac")
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    host.call("typeKeys", f"127.0.0.1:{BRIDGE['port']}")
+    wait_for(lambda: window()["notes"]["appleMac"].startswith("The bridge answers"), "the bridge answers")
+    check(window()["canStart"] and window()["otherMac"],
+          "another address: the bridge answers, and with no token the terminal asks for it", failures)
+    host.call("setupFocus", "bridgeToken")
+    host.call("typeKeys", "wrong")
+    wait_for(lambda: window()["notes"]["bridgeToken"] == "The bridge refused this token", "a wrong token")
+    check(not window()["canStart"], "a token the bridge refuses: the field says so, and Start setup waits", failures)
+    retype("bridgeToken", "wrong", "fake-bridge-token")
+    wait_for(lambda: window()["notes"]["bridgeToken"] == "The bridge takes it", "the right token")
+    host.call("setupClick", "setupCheck:flac")
+    host.call("grabSetupWindow", str(output / "setup-apple-music.png"))
+    host.call("setupClick", "setupStart")
+    wait_for(lambda: launched().endswith("/install' apple-music --yes flac --no mpris"), "Apple Music's terminal")
+    check(json.loads(apple_json.read_text()) == {"bridge": url, "stream": url + "/omarock.ogg"}
+          and token_file.read_text() == "fake-bridge-token" and token_file.stat().st_mode & 0o777 == 0o600,
+          "the Mac's address saved with the stream the bridge names, and the token; ./install apple-music --yes flac --no mpris",
+          failures)
+    open_settings()
+    finished()
+    wait_for(lambda: "appleMusic:boolean" in host.state()["settingKinds"], "Apple Music set up")
+    for f, data in before.items():
+        if data is None: f.unlink(missing_ok=True)
+        else: f.write_bytes(data)
+
+    # Cancel, or Esc in a field: the window closes, nothing runs, and what
+    # was picked is forgotten.
+    runs = launched()
+    open_window("sound", "sound")
+    wait_for(lambda: window()["outputs"], "the outputs")
+    host.call("setupClick", "setupOutput:alsa_output.test-headphones")
+    host.call("setupClick", "setupCancel")
+    wait_for(lambda: not window()["open"], "cancelled")
+    open_window("sound", "sound")
+    wait_for(lambda: window()["values"]["output"] == "alsa_output.test-speakers", "the default again")
+    check(launched() == runs, "Cancel closes the window and runs nothing; opened again, it starts afresh", failures)
+    host.call("activateSetupWindow")
+    host.call("press", "Escape")
+    wait_for(lambda: not window()["open"], "Esc")
+    check(launched() == runs, "Esc closes it too", failures)
+    open_settings()
 
     # Update: a Soloist build 85 days old (they stop at 90).
     soloist = home / ".local/lib/omarock-soloist/soloist"

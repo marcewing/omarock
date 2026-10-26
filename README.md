@@ -83,13 +83,17 @@ units. Run it again any time: what's done is skipped.
 
 **Spotify, SiriusXM and Apple Music** come afterwards, one at a time, from
 omarock's settings (press `,` in the panel, or the gear in the expanded view),
-each on its own tab. Each has a **Set up…** button, which opens a terminal that walks you through it,
-as Omarchy's own installs do. Passwords and keys go into hidden prompts, and
-from there into files only you can read. Once it's set up, the source has a
+each on its own tab. Each has a **Set up…** button, which opens a window of its
+own: how the source works, what it needs and where to get it (with links), and
+fields for its keys or login, checked as you type where they can be. **Start
+setup** puts those into files only you can read, then finishes in a terminal,
+as Omarchy's own installs do: the downloads and services, and the steps only
+you can take there (pairing Spotify from your phone, say). Once it's set up, the source has a
 switch (off stops its services and keeps your accounts and keys), its settings,
 and **Remove…**, which takes it off again, accounts and keys included. From a
-terminal it's the same: `./install spotify`, `./install siriusxm`,
-`./install apple-music`, and `./install --remove spotify` and so on.
+terminal it's the same, with every question asked there: `./install spotify`,
+`./install siriusxm`, `./install apple-music`, and `./install --remove spotify`
+and so on.
 
 **Apple Music** also needs the bridge on a Mac: clone omarock there too and run
 `./install` on the Mac first.

@@ -16,6 +16,7 @@
 | `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`, over the panel or in its own window), the info card (`i`), the playlist picker (`A`) |
 | `Hints.js` | Pure helpers: the hint line's keys, fitted to its fixed number of lines |
 | `SettingsView.qml` | The settings (`,` or the gear): Settings.js as a form, each source with its service's state; settings go into settings.json, accounts, keys and the music folder through `tools/omarock-account` |
+| `Setup.js`, `SetupView.qml` | A piece's setup window (Set up…): how it works, what it needs, links, and its fields (checked live against the bridge for Apple Music); Start setup saves them through `tools/omarock-account`, then runs `./install PIECE` in a terminal with the window's choices (`--yes terms`, `--output NAME`) |
 | `Info.js` | Pure helpers: the info card's contents for each source |
 | `AppleClient.qml`, `Apple.js` | A client for the bridge API (bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
 | `SxmClient.qml`, `Sxm.js` | SiriusXM, through omarock-sxm |
@@ -78,7 +79,9 @@ everything else:
 - `fake-systemctl` and `fake-terminal`, first on the panel's PATH: a systemctl
   that only logs and keeps the units "enabled" in the test HOME, and Omarchy's
   terminal launcher, which plays a setup or removal out on the test HOME's
-  files (as `./install` would leave them) without a terminal or `./install`.
+  files (as `./install` would leave them) without a terminal or `./install`;
+  `fake-tailscale` and `fake-pactl` give the setup windows a tailnet's Mac and
+  two outputs.
   The test HOME starts with Spotify and SiriusXM "set up"; `--only setup` sets
   pieces up and removes them through the settings.
 
