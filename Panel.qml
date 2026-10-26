@@ -169,7 +169,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.10.0"
+  readonly property string version: "0.10.2"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -4231,7 +4231,10 @@ Panel {
     // anything sent after it arrives.
     Connections {
       target: keysFloat.visible && !keysFloat.resizable ? keysWindowView.Window.window : null
-      function onFrameSwapped() { keysFloat.resizable = true }
+      function onFrameSwapped() {
+        keysFloat.resizable = true
+        root.floatIfTiled(keysFloat.title)
+      }
     }
 
     KeysHelp {
@@ -4335,7 +4338,10 @@ Panel {
 
     Connections {
       target: setupFloat.visible && !setupFloat.resizable ? setupView.Window.window : null
-      function onFrameSwapped() { setupFloat.resizable = true }
+      function onFrameSwapped() {
+        setupFloat.resizable = true
+        root.floatIfTiled(setupFloat.title)
+      }
     }
 
     SetupView {
@@ -4350,6 +4356,30 @@ Panel {
       onStartRequested: function(writes, args) { root.startSetup(writes, args) }
       onCloseRequested: root.closeSetupWindow()
     }
+  }
+
+  // Hyprland floats a window whose size is fixed as it maps. Should one tile
+  // anyway (the Apple Music setup window did once, on the laptop), a moment
+  // after it opens it's floated and centred, as Omarchy's own scripts do it:
+  // the Lua dispatcher, else the old one.
+  function floatIfTiled(title) {
+    windowFloater.title = title
+    floatCheck.restart()
+  }
+  Timer {
+    id: floatCheck
+    interval: 400
+    onTriggered: if (!windowFloater.running) windowFloater.running = true
+  }
+  Process {
+    id: windowFloater
+    property string title: ""
+    command: ["sh", "-c", 'w=$(hyprctl clients -j 2>/dev/null | jq -r --arg t "$1" '
+      + '\'first(.[] | select(.title == $t and (.floating | not)) | .address) // empty\' 2>/dev/null); [ -n "$w" ] || exit 0; '
+      + 'hyprctl dispatch "hl.dsp.window.float({ action = \\"on\\", window = \\"address:$w\\" })" >/dev/null 2>&1 '
+      + '|| hyprctl dispatch setfloating "address:$w" >/dev/null 2>&1; '
+      + 'hyprctl dispatch "hl.dsp.window.center({ window = \\"address:$w\\" })" >/dev/null 2>&1 '
+      + '|| hyprctl dispatch centerwindow >/dev/null 2>&1; exit 0', "sh", windowFloater.title]
   }
 
   // Saves the setup window's values (startSetup), one at a time, each over

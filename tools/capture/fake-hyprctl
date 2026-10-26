@@ -1,0 +1,11 @@
+#!/bin/bash
+# The harness's hyprctl: never the real compositor. It logs what it's asked
+# to $HOME/hyprctl.log. `clients -j` lists one window, tiled, when
+# $HOME/.fake-hypr-tiled names its title (as Hyprland tiling a window that
+# should float), else none.
+echo "$*" >>"$HOME/hyprctl.log"
+if [[ $* == "clients -j" ]]; then
+  title=$(cat "$HOME/.fake-hypr-tiled" 2>/dev/null)
+  if [[ -n $title ]]; then jq -n --arg t "$title" '[{address: "0xfake", title: $t, floating: false}]'; else echo '[]'; fi
+fi
+exit 0

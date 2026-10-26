@@ -81,7 +81,8 @@ everything else:
   terminal launcher, which plays a setup or removal out on the test HOME's
   files (as `./install` would leave them) without a terminal or `./install`;
   `fake-tailscale` and `fake-pactl` give the setup windows a tailnet's Mac and
-  two outputs.
+  two outputs, and `fake-hyprctl` stands in for the compositor (a window it
+  says is tiled gets floated).
   The test HOME starts with Spotify and SiriusXM "set up"; `--only setup` sets
   pieces up and removes them through the settings.
 

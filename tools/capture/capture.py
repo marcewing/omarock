@@ -83,6 +83,8 @@ def prepare(work):
     (fakes / "omarchy-launch-floating-terminal-with-presentation").symlink_to(TOOLS / "fake-terminal")
     (fakes / "tailscale").symlink_to(TOOLS / "fake-tailscale")
     (fakes / "pactl").symlink_to(TOOLS / "fake-pactl")
+    # Never the real compositor: hyprctl only logs, and lists no windows.
+    (fakes / "hyprctl").symlink_to(TOOLS / "fake-hyprctl")
     env = dict(HOME=str(home), PATH=f"{fakes}:/usr/bin:/bin", LANG="C.UTF-8",
                XDG_RUNTIME_DIR=str(runtime), OMARCHY_PATH="/usr/share/omarchy")
     subprocess.run(["omarchy-theme-set-templates"], env=env, check=True, stdout=subprocess.DEVNULL)
@@ -4269,8 +4271,16 @@ def setup_scenario(host, output, failures):
     check(host.state()["settingNotes"]["siriusXM"]["kind"] != "bad", "set up again, it carries on", failures)
 
     # The sound output: picked in its window, then a line saying where it
-    # plays, then removed again.
+    # plays, then removed again. Hyprland tiles its window this time (as it
+    # did once on the laptop): a moment later it's floated and centred.
+    tiled, hyprctl_log = home / ".fake-hypr-tiled", home / "hyprctl.log"
+    tiled.write_text("omarock: Set up omarock's sound output")
     open_window("sound", "sound")
+    wait_for(lambda: hyprctl_log.exists() and 'hl.dsp.window.center({ window = "address:0xfake" })' in hyprctl_log.read_text(),
+             "the window floated")
+    check('dispatch hl.dsp.window.float({ action = "on", window = "address:0xfake" })' in hyprctl_log.read_text(),
+          "a setup window Hyprland tiled is floated and centred", failures)
+    tiled.unlink()
     wait_for(lambda: window()["outputs"], "the outputs")
     w = window()
     check(w["outputs"] == ["alsa_output.test-speakers", "alsa_output.test-headphones"]
