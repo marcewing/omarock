@@ -87,6 +87,16 @@ ShellRoot {
     return texts
   }
 
+  // The current heading's buttons' tooltips.
+  function levelTips() {
+    var p = popup()
+    var flow = host.findNamed(p ? p.contentItem[0].parent.parent : null, "levelButtons:current")
+    var tips = []
+    for (var i = 0; flow && i < flow.children.length; i++)
+      if (flow.children[i].visible && flow.children[i].tooltipText !== undefined) tips.push(flow.children[i].tooltipText)
+    return tips
+  }
+
   function keysWindowView() {
     var w = host.panel.keysWindow
     return w.visible ? host.findNamed(w.contentItem, "keysWindow") : null
@@ -273,6 +283,7 @@ ShellRoot {
         previewRows: p.previewRows.map(function(r) { return r.kind + ":" + r.title }),
         parentRows: p.browsing ? p.parentLevel().rows.map(function(r) { return r.kind + ":" + r.title }) : [],
         levelButtons: { current: host.levelButtons("current"), parent: host.levelButtons("parent"), preview: host.levelButtons("preview") },
+        levelTips: host.levelTips(),
         // The open level's heading, its second line as drawn.
         headingLine: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "headingLine:current")
           ? host.findNamed(popup().contentItem[0].parent.parent, "headingLine:current").text : "",

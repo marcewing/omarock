@@ -168,7 +168,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.9.3"
+  readonly property string version: "0.9.4"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1076,21 +1076,23 @@ Panel {
   }
 
   // A column's heading buttons: one for each of those rows, then Add to queue
-  // and Add to playlist for the first. Each is { index, mode, icon, label, tip }.
+  // and Add to playlist for the first. Each is { index, mode, icon, label, tip },
+  // the tip ending with the key that does the same with the cursor on them.
   function levelButtons(role) {
     if (role === "") return []
     var level = root.columnLevel(role)
     var rows = level.rows || []
     var count = root.buttonRows(rows)
     var buttons = []
-    // about: what the first stands for, beside them ("12 songs · 48:10").
+    // about: what the first stands for, beside them ("12 songs · 48:10"). A
+    // playlist's heading says it already.
     for (var i = 0; i < count; i++)
-      buttons.push({ index: i, mode: "play", icon: rows[i].lead, label: root.buttonLabel(rows[i]), tip: root.buttonTip(rows[i]),
-        about: rows[i].subtitle || "" })
+      buttons.push({ index: i, mode: "play", icon: rows[i].lead, label: root.buttonLabel(rows[i]),
+        tip: root.buttonTip(rows[i]) + " (Enter)", about: rows[i].kind === "playplaylist" ? "" : rows[i].subtitle || "" })
     if (count > 0 && root.rowQueues(rows[0]))
-      buttons.push({ index: 0, mode: "add", icon: "󰐕", label: "Add to queue", tip: "Add its songs to the end of the queue" })
+      buttons.push({ index: 0, mode: "add", icon: "󰐕", label: "Add to queue", tip: "Add its songs to the end of the queue (a)" })
     if (count > 0 && root.playlistItem(level.entry, rows[0]))
-      buttons.push({ index: 0, mode: "playlist", icon: "󰐒", label: "Add to playlist", tip: "Add its songs to a playlist, or to a new one" })
+      buttons.push({ index: 0, mode: "playlist", icon: "󰐒", label: "Add to playlist", tip: "Add its songs to a playlist, or to a new one (A)" })
     return buttons
   }
 

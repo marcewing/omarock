@@ -380,9 +380,12 @@ function playlistView(playlist, tracks, note) {
       detail: unplayable ? "" : formatTime(song.duration), file: songKey(song), apple: ref(song), position: i,
       artwork: song.artwork, playable: !unplayable, missing: unplayable, item: song })
   })
+  // Unlisted songs: the playlist's own count, if it has one.
+  var count = tracks.length > 0 || !note ? countText(tracks.length, "song")
+    : playlist.trackCount > 0 ? countText(playlist.trackCount, "song") : ""
   return { rows: rows, info: {
     title: nameOf(playlist), artwork: playlist.artwork,
-    subtitle: join(["Playlist", countText(tracks.length, "song"), tracks.length > 0 ? formatTotal(totalSeconds(tracks)) : ""]),
+    subtitle: join(["Playlist", count, tracks.length > 0 ? formatTotal(totalSeconds(tracks)) : ""]),
     detail: playlist.source === "catalog" ? playlist.curator || "" : "",
     notes: playlist.description || "",
     emptyText: "This playlist is empty. Find a song, album or artist and press A to add it." } }

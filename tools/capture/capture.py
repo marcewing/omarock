@@ -447,6 +447,8 @@ def spotify_scenario(host, output, socket_path, failures):
     s = host.state()
     check(s["rows"] == ["playplaylist:Play the playlist", "note:Its songs aren't listed"],
           "a playlist Spotify won't list: Play, and why: " + ", ".join(s["rows"]), failures)
+    check(s["headingLine"] == "Playlist · 3 songs · Apple Music Punk" and s["levelButtons"]["current"][-1] == "Add to playlist",
+          "its heading has Spotify's count, said once: " + s["headingLine"] + " | " + str(s["levelButtons"]["current"]), failures)
     host.call("press", "Up")
     host.call("press", "Return")
     wait_for(lambda: spotify_requests("/v1/play"), "play the playlist")
@@ -614,7 +616,11 @@ def apple_scenario(host, output, socket_path, failures):
           "P lists your Apple Music playlists: " + ", ".join(s["rows"]), failures)
     host.call("press", "Right")
     wait_for(lambda: browsed(host, "playlist:PunkRock"), "PunkRock")
-    check(len(host.state()["rows"]) == 5, "PunkRock: Play, then 4 songs", failures)
+    s = host.state()
+    check(len(s["rows"]) == 5, "PunkRock: Play, then 4 songs", failures)
+    check(s["levelButtons"]["current"] == ["Play", "Add to queue", "Add to playlist"]
+          and s["headingLine"].startswith("Playlist · 4 songs · ") and s["headingLine"].count("songs") == 1,
+          "its heading says how many songs once: " + s["headingLine"] + " | " + str(s["levelButtons"]["current"]), failures)
     host.call("press", "Escape")
     host.call("press", "Escape")
     host.settle(.3)
@@ -2729,8 +2735,12 @@ def playlists_scenario(host, output, socket_path, failures):
                         "track:Schnee"] and s["subtitles"][3] == "Not in the library any more"
           and s["browseInfo"]["subtitle"] == "Playlist · 4 songs · 10 min",
           "the playlist view: " + ", ".join(s["rows"]), failures)
-    check(s["levelButtons"]["current"][:3] == ["Play", "Add to queue", "Add to playlist"],
-          "the playlist's buttons: " + str(s["levelButtons"]["current"]), failures)
+    check(s["levelButtons"]["current"] == ["Play", "Add to queue", "Add to playlist"]
+          and s["headingLine"] == "Playlist · 4 songs · 10 min",
+          "the playlist's buttons, its count said once: " + str(s["levelButtons"]["current"]) + " | " + s["headingLine"], failures)
+    check(s["levelTips"] == ["Replace the queue with the playlist and play it (Enter)", "Add its songs to the end of the queue (a)",
+                             "Add its songs to a playlist, or to a new one (A)"],
+          "each button's tooltip ends with its key: " + str(s["levelTips"]), failures)
     check(s["hint"] == "Enter play from here · a add to queue · A add to playlist · x remove · i info · ← back · ? keys",
           "hint on a playlist song: " + s["hint"], failures)
     host.grab(output / "compact-playlist.png")
