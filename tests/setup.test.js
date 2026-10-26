@@ -7,7 +7,7 @@ test("each piece set up from the settings has a setup window", () => {
   for (const piece of ["spotify", "siriusxm", "apple-music", "sound"]) {
     assert.ok(Setup.pages[piece], piece)
     assert.ok(Setup.title(piece).startsWith("Set up "))
-    assert.ok(Array.isArray(Setup.pages[piece].after))
+    assert.ok(Setup.pages[piece].steps.length > 0)
   }
   assert.equal(Setup.title("sound"), "Set up omarock's sound output")
   // Every piece the settings set up, and nothing else.
@@ -130,10 +130,19 @@ test("the Mac's Remote Login, from ssh in batch mode", () => {
   assert.equal(Setup.bridgeHost("http://my-mac:8710"), "my-mac")
 })
 
-test("Apple Music's window: Tailscale's link with the intro, and no list of what the terminal does", () => {
-  const page = Setup.pages["apple-music"]
-  assert.deepEqual(page.introLinks.map(l => l.label), ["Tailscale"])
-  assert.ok(!page.steps.some(s => (s.links || []).some(l => l.label === "Tailscale")))
-  assert.deepEqual(page.after, [])
-  assert.equal(page.steps[3].title, "Smooth playback (optional, recommended)")
+test("the windows as Marc laid them out: no Tailscale link, no list of what the terminal does", () => {
+  const all = Object.values(Setup.pages)
+  assert.ok(!all.some(p => p.after || p.introLinks))
+  assert.ok(!all.some(p => p.steps.some(s => (s.links || []).some(l => /tailscale/i.test(l.label + l.url)))))
+  const apple = Setup.pages["apple-music"]
+  assert.equal(apple.steps[3].title, "Smooth playback (optional, recommended)")
+  // The recommended fixes start ticked.
+  assert.deepEqual(Setup.args("apple-music", Setup.initial("apple-music", {})), ["--yes", "scp-token", "--yes", "flac", "--yes", "mpris"])
+  // Spotify: where the Client ID comes from, Soloist's own page, and what Start setup does next, as step 3.
+  const spotify = Setup.pages.spotify
+  assert.match(spotify.steps[0].fields[0].lead, /copy the app's Client ID and paste it here/)
+  assert.equal(spotify.steps[1].links[0].url, "https://developer.spotify.com/dashboard/soloist")
+  assert.equal(spotify.steps[2].title, 'After pressing "Start setup"')
+  assert.equal(spotify.steps[2].bullets.length, 4)
+  assert.ok(spotify.steps[2].bullets[1].includes("{host}"))
 })

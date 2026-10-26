@@ -169,7 +169,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.10.3"
+  readonly property string version: "0.10.4"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -3650,6 +3650,9 @@ Panel {
       } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
         root.leaveSearch()
         event.accepted = true
+      } else if (event.text === "/") {
+        // The way into this box; in it, it does nothing (AC/DC is "ac dc").
+        event.accepted = true
       }
     }
   }
@@ -4200,7 +4203,7 @@ Panel {
     root.keysOpen = false
     if (keysFloat.visible) return
     keysFloat.resizable = false
-    keysFloat.visible = true
+    root.showFloating(keysFloat)
   }
   function closeKeysWindow() { keysFloat.visible = false }
 
@@ -4276,7 +4279,7 @@ Panel {
     root.close()
     if (!setupFloat.visible) {
       setupFloat.resizable = false
-      setupFloat.visible = true
+      root.showFloating(setupFloat)
     } else if (setupView.Window.window) {
       setupView.Window.window.requestActivate()
     }
@@ -4284,6 +4287,7 @@ Panel {
   // Closed or cancelled: what was typed goes, secrets first, and a Start
   // setup still saving runs nothing.
   function closeSetupWindow() {
+    root.floatingNext = root.floatingNext.filter(function(w) { return w !== setupFloat })
     setupWriter.queue = []
     setupWriter.piece = ""
     setupView.piece = ""
@@ -4358,10 +4362,30 @@ Panel {
     }
   }
 
-  // Hyprland floats a window whose size is fixed as it maps. Should one tile
-  // anyway (the Apple Music setup window did once, on the laptop), a moment
-  // after it opens it's floated and centred, as Omarchy's own scripts do it:
-  // the Lua dispatcher, else the old one.
+  // omarock's own windows (the setup windows, the keys) float, centred, from
+  // their first frame: a rule of their own, added to the running Hyprland
+  // just before one shows, as Omarchy adds its About window's (a config
+  // reload drops it). Their size is fixed as they map too, which Hyprland
+  // also floats. Should one tile anyway, a moment after it opens it's
+  // floated and centred, as Omarchy's own scripts do it: the Lua
+  // dispatcher, else the old one.
+  readonly property string windowRule: 'if omarock_window_rule then omarock_window_rule:set_enabled(false) end; '
+    + 'omarock_window_rule = hl.window_rule({ match = { class = "^org.quickshell$", title = "^omarock(: Set up .*| keys)$" }, '
+    + 'float = true, center = true })'
+  property var floatingNext: []
+  function showFloating(window) {
+    root.floatingNext = root.floatingNext.concat([window])
+    if (!windowRuler.running) windowRuler.running = true
+  }
+  Process {
+    id: windowRuler
+    command: ["sh", "-c", 'hyprctl eval "$1" >/dev/null 2>&1; exit 0', "sh", root.windowRule]
+    onExited: {
+      var windows = root.floatingNext
+      root.floatingNext = []
+      windows.forEach(function(w) { w.visible = true })
+    }
+  }
   function floatIfTiled(title) {
     windowFloater.title = title
     floatCheck.restart()

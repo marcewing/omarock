@@ -54,7 +54,6 @@ Rectangle {
   property var inputs: ({})
 
   readonly property string blocker: Setup.blocker(root.piece, root.values, root.known, root.live)
-  readonly property bool hasAfter: !!root.page && root.page.after.length > 0
   // ./install's words after the piece, as Start setup would pass them.
   readonly property var startArgs: Setup.args(root.piece, root.values)
   readonly property bool canStart: root.blocker === "" && !root.busy
@@ -344,17 +343,6 @@ Rectangle {
         }
       }
 
-      Flow {
-        width: content.width
-        spacing: Style.space(6)
-        visible: !!root.page && (root.page.introLinks || []).length > 0
-
-        Repeater {
-          model: root.page ? root.page.introLinks || [] : []
-          LinkButton {}
-        }
-      }
-
       Repeater {
         model: root.page ? root.page.steps : []
 
@@ -384,11 +372,43 @@ Rectangle {
               required property string modelData
               width: step.width
               textFormat: Text.PlainText
-              text: modelData
+              text: modelData.replace("{host}", root.host || "this computer")
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
               wrapMode: Text.WordWrap
+            }
+          }
+
+          // What happens, a point at a time.
+          Repeater {
+            model: step.modelData.bullets || []
+
+            Item {
+              required property string modelData
+              width: step.width
+              height: bulletText.implicitHeight
+
+              Text {
+                id: bullet
+                textFormat: Text.PlainText
+                text: "•"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+              Text {
+                id: bulletText
+                anchors.left: bullet.right
+                anchors.right: parent.right
+                anchors.leftMargin: Style.space(8)
+                textFormat: Text.PlainText
+                text: modelData.replace("{host}", root.host || "this computer")
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: Text.WordWrap
+              }
             }
           }
 
@@ -478,6 +498,16 @@ Rectangle {
               width: step.width
               spacing: Style.space(4)
 
+              Text {
+                width: parent.width
+                visible: !!field.f.lead
+                textFormat: Text.PlainText
+                text: field.f.lead || ""
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: Text.WordWrap
+              }
               Text {
                 width: parent.width
                 visible: field.f.type !== "check" && !!field.f.label
@@ -646,58 +676,6 @@ Rectangle {
         }
       }
 
-      Item { width: 1; height: Style.space(4) }
-
-      // What the terminal does next, where the page says.
-      PanelSectionHeader {
-        visible: root.hasAfter
-        width: content.width
-        text: "AFTER START SETUP, IN A TERMINAL"
-        foreground: root.foreground
-        fontFamily: root.fontFamily
-      }
-
-      Repeater {
-        model: root.page ? root.page.after : []
-
-        Item {
-          required property string modelData
-          width: content.width
-          height: afterText.implicitHeight
-
-          Text {
-            id: bullet
-            textFormat: Text.PlainText
-            text: "•"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          Text {
-            id: afterText
-            anchors.left: bullet.right
-            anchors.right: parent.right
-            anchors.leftMargin: Style.space(8)
-            textFormat: Text.PlainText
-            text: modelData.replace("{host}", root.host || "this machine")
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            wrapMode: Text.WordWrap
-          }
-        }
-      }
-
-      Text {
-        visible: root.hasAfter
-        width: content.width
-        textFormat: Text.PlainText
-        text: "You can stop the terminal at any point: Set up carries on where it stopped."
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-      }
     }
   }
 

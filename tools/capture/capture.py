@@ -440,10 +440,13 @@ def spotify_scenario(host, output, socket_path, failures):
     check(command_count(socket_path, "playid") == playids and mpd_state(socket_path)["state"] == "pause",
           "a jump in Spotify leaves mpd alone (no stream to rejoin)", failures)
 
-    # Search: your library, then Spotify's catalog; no genres.
+    # Search: your library, then Spotify's catalog; no genres. / is the way
+    # into the box; in it, it does nothing (Marc, 10-26).
     host.call("press", "/")
     host.call("typeKeys", "husker")
+    host.call("press", "/")
     wait_for(lambda: host.state()["query"] == "husker" and not host.state()["searching"], "Spotify search")
+    check(host.state()["searchFocused"], "/ in the search box types nothing: " + host.state()["query"], failures)
     s = host.state()
     check(s["sections"][:3] == ["YOUR ALBUMS", "SPOTIFY · ARTISTS", "SPOTIFY · ALBUMS"] and "GENRES" not in s["sections"],
           "search: your library, then Spotify: " + ", ".join(x for x in s["sections"] if x), failures)
@@ -4283,6 +4286,9 @@ def setup_scenario(host, output, failures):
     check('dispatch hl.dsp.window.float({ action = "on", window = "address:0xfake" })' in hyprctl_log.read_text(),
           "a setup window Hyprland tiled is floated and centred", failures)
     tiled.unlink()
+    rule = next((l for l in hyprctl_log.read_text().splitlines() if l.startswith("eval ")), "")
+    check("hl.window_rule({ match = { class = \"^org.quickshell$\", title = \"^omarock(: Set up .*| keys)$\" }, float = true, center = true })" in rule,
+          "before a setup window shows, Hyprland is given a rule that floats it, centred", failures)
     wait_for(lambda: window()["outputs"], "the outputs")
     w = window()
     check(w["outputs"] == ["alsa_output.test-speakers", "alsa_output.test-headphones"]
@@ -4337,7 +4343,7 @@ def setup_scenario(host, output, failures):
     last = str(BRIDGE["port"])[-1]
     retype("appleMac", last, last)
     wait_for(lambda: window()["notes"]["bridgeToken"] == "Mac scp enabled", "scp enabled")
-    check(window()["canStart"] and window()["args"] == ["--yes", "scp-token", "--no", "flac", "--no", "mpris"],
+    check(window()["canStart"] and window()["args"] == ["--yes", "scp-token", "--yes", "flac", "--yes", "mpris"],
           "Remote Login on: \"Mac scp enabled\" under the token field, and Start setup would have setup scp it (--yes scp-token)",
           failures)
     host.call("setupFocus", "bridgeToken")
@@ -4346,7 +4352,8 @@ def setup_scenario(host, output, failures):
     check(not window()["canStart"], "a token the bridge refuses: the field says so, and Start setup waits", failures)
     retype("bridgeToken", "wrong", "fake-bridge-token")
     wait_for(lambda: window()["notes"]["bridgeToken"] == "The bridge takes it", "the right token")
-    host.call("setupClick", "setupCheck:flac")
+    # The smooth-playback fixes start ticked (recommended); one unticked.
+    host.call("setupClick", "setupCheck:mpris")
     host.call("grabSetupWindow", str(output / "setup-apple-music.png"))
     host.call("setupClick", "setupStart")
     wait_for(lambda: launched().endswith("/install' apple-music --yes flac --no mpris"), "Apple Music's terminal")

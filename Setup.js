@@ -1,16 +1,21 @@
 // The setup windows (Set up… on a source's tab of the settings): for each
 // piece set up on its own, what it is and how it works, what it needs and
-// where to get it, the fields to fill in there and then, and what the
-// terminal does once Start setup is pressed. The fields' values go into their
-// files first (tools/omarock-account: `account`), so ./install PIECE finds
-// them there and doesn't ask; a few choices go to it as options (`arg`).
-// Pure functions, so node can test them (tests/setup.test.js).
+// where to get it, and the fields to fill in there and then. The fields'
+// values go into their files first (tools/omarock-account: `account`), so
+// ./install PIECE finds them there and doesn't ask; a few choices go to it
+// as options (`arg`). Pure functions, so node can test them
+// (tests/setup.test.js).
 //
-// A field is { key, type, label, description, placeholder, required,
-// needs (what the footer says while it's missing), account, arg }:
+// A step is { title, warning, text, copies (lines to copy), links, fields,
+// bullets }; `{host}` in its text or bullets is this machine's name.
+//
+// A field is { key, type, label, lead (a line above it), description,
+// placeholder, required, needs (what the footer says while it's missing),
+// account, arg }:
 //   "text": a line, filled in with what's set already;
 //   "secret": a key or a password, never shown; empty keeps one that's set;
-//   "check": a tick, which goes to ./install as --yes ARG or --no ARG;
+//   "check": a tick (ticked to start with if `defaultValue` is true), which
+//     goes to ./install as --yes ARG or --no ARG;
 //   "mac": the Mac running the bridge, from the tailnet's Macs or typed,
 //     checked live: it has to answer;
 //   "output": one of PipeWire's outputs, which goes to ./install as
@@ -20,9 +25,6 @@
 // bridge. `scp` (the bridge's token): left blank, setup copies it from the
 // Mac with scp (--yes ARG), so the window checks the Mac's Remote Login
 // first.
-//
-// A page's `introLinks` follow its intro; `after`, what the terminal does
-// after Start setup, may be empty (then the window doesn't say).
 
 var GUIDES = "https://github.com/marcewing/omarock/blob/main/"
 var REDIRECT = "http://127.0.0.1:8730/callback"
@@ -40,18 +42,21 @@ var pages = {
         text: ["In Spotify's developer dashboard, create an app. Give it this redirect URI, and tick Web API:"],
         copies: [REDIRECT],
         links: [{ label: "Spotify's developer dashboard", url: "https://developer.spotify.com/dashboard" }],
-        fields: [{ key: "spotifyClient", type: "text", label: "The app's Client ID", placeholder: "32 letters and digits",
-          required: true, needs: "the app's Client ID", pattern: "^[0-9A-Fa-f]{32}$", wrong: "A Client ID is 32 letters and digits",
-          account: "spotify-client" }] },
+        fields: [{ key: "spotifyClient", type: "text", lead: "From the developer dashboard, copy the app's Client ID and paste it here:",
+          placeholder: "32 letters and digits", required: true, needs: "the app's Client ID", pattern: "^[0-9A-Fa-f]{32}$",
+          wrong: "A Client ID is 32 letters and digits", account: "spotify-client" }] },
       { title: "The Soloist key",
-        text: ["Soloist's API key, from the same dashboard. It's kept in a file only you can read, and never shown."],
+        text: ["Soloist's API key, from its page in the developer dashboard. It's kept in a file only you can read, and never shown."],
+        links: [{ label: "Soloist's API key, in the dashboard", url: "https://developer.spotify.com/dashboard/soloist" }],
         fields: [{ key: "soloistKey", type: "secret", label: "The Soloist key", required: true, needs: "the Soloist key",
-          account: "soloist-key" }] }
-    ],
-    after: [
-      "Downloads Soloist from Spotify, and starts it with omarock-spotify.",
-      "Pairs Soloist with your account, once: open Spotify on your phone or computer, on this network, pick {host} under Connect to a device, and play something. If your firewall is on, the terminal asks to open Soloist's port while you pair (sudo asks for your password), and closes it again.",
-      "Opens Spotify's sign-in in your browser, for search and your library. Then Spotify is on in omarock."
+          account: "soloist-key" }] },
+      { title: "After pressing \"Start setup\"",
+        bullets: [
+          "Soloist will be downloaded from Spotify and started by omarock-spotify.",
+          "Soloist must be paired with your Spotify account. Open Spotify on your phone or computer (on this network), play something and choose {host} under Connect. This only needs to be done once.",
+          "If your firewall is on, you'll be asked to confirm opening Soloist's port while you pair. The port will be closed again after pairing.",
+          "Spotify will be opened in your browser to confirm access."
+        ] }
     ]
   },
 
@@ -76,11 +81,6 @@ var pages = {
           { key: "sxmPassword", type: "secret", label: "SiriusXM password", required: true, needs: "your SiriusXM password",
             account: "sxm-password" }
         ] }
-    ],
-    after: [
-      "Installs omarock-sxm (Python, with aiosxm: a minute or so).",
-      "Signs in to SiriusXM with your login. If SiriusXM turns it down, the terminal says why and asks for it again.",
-      "Then SiriusXM is on in omarock."
     ]
   },
 
@@ -90,7 +90,6 @@ var pages = {
       "Apple Music plays on your Mac, in omarock's bridge, an app you build there. Its sound comes here as a stream that mpd plays, and omarock browses and controls it through the bridge.",
       "Both machines need to reach each other, over Tailscale, say."
     ],
-    introLinks: [{ label: "Tailscale", url: "https://tailscale.com/download" }],
     steps: [
       { title: "The bridge, on your Mac",
         text: ["It's built with your own Apple Developer membership. On the Mac, clone omarock and run ./install there: it builds the bridge, and starts it at login."],
@@ -109,13 +108,12 @@ var pages = {
       { title: "Smooth playback (optional, recommended)",
         text: ["Two fixes for mpd that aren't in Arch's packages yet (patches/README.md). Each is built here, for omarock only, and sudo asks for your password to install the build tools."],
         fields: [
-          { key: "flac", type: "check", label: "A fixed libFLAC (a few minutes; needs cmake and ninja)", arg: "flac",
+          { key: "flac", type: "check", defaultValue: true, label: "A fixed libFLAC (a few minutes; needs cmake and ninja)", arg: "flac",
             description: "Without it, mpd falls behind the Mac, and omarock catches it up after each change, with a short stutter." },
-          { key: "mpris", type: "check", label: "A patched mpd-mpris (a minute; needs Go)", arg: "mpris",
+          { key: "mpris", type: "check", defaultValue: true, label: "A patched mpd-mpris (a minute; needs Go)", arg: "mpris",
             description: "Without it, mpd-mpris (the media keys' go-between) asks mpd for the stream's cover at every play and pause, which holds mpd for seconds." }
         ] }
-    ],
-    after: []
+    ]
   },
 
   sound: {
@@ -128,11 +126,6 @@ var pages = {
       { title: "The output",
         text: ["Pick the one for your speakers or headphones."],
         fields: [{ key: "output", type: "output", required: true, needs: "the output", arg: "output" }] }
-    ],
-    after: [
-      "Installs omarock's output (a PipeWire bus: audio/README.md), playing only into the one you picked.",
-      "Moves mpd onto it: a new audio_output in mpd.conf (a copy of it first), then mpd restarts. The terminal shows the change, and asks first.",
-      "omarock's volume knob is the volume then (mpc volume no longer applies)."
     ]
   }
 }
@@ -161,15 +154,15 @@ function bridgeUrl(address) {
 }
 
 // What the fields start with: what's set already (known: tools/omarock-account
-// show), for a line or the Mac; nothing typed for a secret; no ticks; the
-// default output.
+// show), for a line or the Mac; nothing typed for a secret; a tick as its
+// default; the default output.
 function initial(piece, known, defaultOutput) {
   known = known || {}
   var out = {}
   fields(piece).forEach(function(f) {
     if (f.type === "text") out[f.key] = typeof known[f.key] === "string" ? known[f.key] : ""
     else if (f.type === "secret") out[f.key] = ""
-    else if (f.type === "check") out[f.key] = false
+    else if (f.type === "check") out[f.key] = f.defaultValue === true
     else if (f.type === "mac") out[f.key] = typeof known.appleBridge === "string" ? known.appleBridge : ""
     else if (f.type === "output") out[f.key] = defaultOutput && defaultOutput !== "omarock" ? defaultOutput : ""
   })
