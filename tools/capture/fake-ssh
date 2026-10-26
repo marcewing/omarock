@@ -1,0 +1,12 @@
+#!/bin/bash
+# The harness's ssh: never a real machine. It logs its words to
+# $HOME/ssh.log and answers as $HOME/.fake-ssh says the Mac's Remote Login
+# is: on (the default, with a key that's let in), password (on, no key), or
+# refused (off).
+echo "$*" >>"$HOME/ssh.log"
+host=${*: -2:1}
+case $(cat "$HOME/.fake-ssh" 2>/dev/null || echo on) in
+  refused) echo "ssh: connect to host $host port 22: Connection refused" >&2; exit 255 ;;
+  password) echo "you@$host: Permission denied (publickey,password,keyboard-interactive)." >&2; exit 255 ;;
+  *) exit 0 ;;
+esac

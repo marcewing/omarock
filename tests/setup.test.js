@@ -7,7 +7,7 @@ test("each piece set up from the settings has a setup window", () => {
   for (const piece of ["spotify", "siriusxm", "apple-music", "sound"]) {
     assert.ok(Setup.pages[piece], piece)
     assert.ok(Setup.title(piece).startsWith("Set up "))
-    assert.ok(Setup.pages[piece].after.length > 0)
+    assert.ok(Array.isArray(Setup.pages[piece].after))
   }
   assert.equal(Setup.title("sound"), "Set up omarock's sound output")
   // Every piece the settings set up, and nothing else.
@@ -66,13 +66,19 @@ test("Apple Music: the Mac has to answer; a token typed has to be taken", () => 
   assert.equal(Setup.blocker("apple-music", values, {}, {}), "Checking the bridge…")
   assert.equal(Setup.blocker("apple-music", values, {}, { appleMac: { kind: "bad", text: "Nothing answers" } }), "Nothing answers")
   const answers = { appleMac: { kind: "ok", text: "The bridge answers" } }
-  // No token: the terminal asks for it.
-  assert.equal(Setup.blocker("apple-music", values, {}, answers), "")
+  // No token: setup copies it from the Mac with scp, once its Remote Login answers.
+  assert.equal(Setup.blocker("apple-music", values, {}, answers), "Checking the Mac's Remote Login…")
+  const off = Setup.scpState(255, "ssh: connect to host 100.64.0.10 port 22: Connection refused")
+  assert.equal(Setup.blocker("apple-music", values, {}, Object.assign({ bridgeToken: off }, answers)), off.text)
+  assert.equal(Setup.blocker("apple-music", values, {}, Object.assign({ bridgeToken: Setup.scpState(0, "") }, answers)), "")
+  // A token set already: no need.
+  assert.equal(Setup.blocker("apple-music", values, { bridgeToken: true }, Object.assign({ bridgeToken: off }, answers)), "")
   const typed = Object.assign({}, values, { bridgeToken: "abc" })
   assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "checking" } }, answers)), "Checking the token…")
   assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "bad", text: "Refused" } }, answers)), "Refused")
   assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "ok" } }, answers)), "")
-  assert.deepEqual(Setup.args("apple-music", values), ["--yes", "flac", "--no", "mpris"])
+  assert.deepEqual(Setup.args("apple-music", values), ["--yes", "scp-token", "--yes", "flac", "--no", "mpris"])
+  assert.deepEqual(Setup.args("apple-music", typed), ["--yes", "flac", "--no", "mpris"])
 })
 
 test("a Mac's address is the bridge's URL", () => {
@@ -111,4 +117,23 @@ test("the outputs, as ./install offers them", () => {
     { name: "alsa_output.b", label: "USB Audio (alsa_output.b)" },
     { name: "alsa_output.c", label: "USB Audio (alsa_output.c)" }])
   assert.deepEqual(Setup.outputList(""), [])
+})
+
+test("the Mac's Remote Login, from ssh in batch mode", () => {
+  assert.deepEqual(Setup.scpState(0, ""), { kind: "ok", text: "Mac scp enabled" })
+  assert.equal(Setup.scpState(255, "marc@100.64.0.10: Permission denied (publickey,password,keyboard-interactive).").kind, "ok")
+  assert.match(Setup.scpState(255, "marc@100.64.0.10: Permission denied (publickey,password).").text, /password on the Mac/)
+  assert.match(Setup.scpState(255, "Host key verification failed.").text, /trust the Mac/)
+  assert.match(Setup.scpState(255, "ssh: connect to host 100.64.0.10 port 22: Connection refused").text, /^Remote Login is off/)
+  assert.equal(Setup.scpState(255, "ssh: connect to host 100.64.0.10 port 22: Connection timed out").kind, "bad")
+  assert.equal(Setup.bridgeHost("http://100.64.0.10:8710"), "100.64.0.10")
+  assert.equal(Setup.bridgeHost("http://my-mac:8710"), "my-mac")
+})
+
+test("Apple Music's window: Tailscale's link with the intro, and no list of what the terminal does", () => {
+  const page = Setup.pages["apple-music"]
+  assert.deepEqual(page.introLinks.map(l => l.label), ["Tailscale"])
+  assert.ok(!page.steps.some(s => (s.links || []).some(l => l.label === "Tailscale")))
+  assert.deepEqual(page.after, [])
+  assert.equal(page.steps[3].title, "Smooth playback (optional, recommended)")
 })

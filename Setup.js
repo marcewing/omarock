@@ -17,7 +17,12 @@
 //     --output NAME.
 // `pattern` and `wrong`: what a text has to look like, and what's said when
 // it doesn't. `checked` (a secret): the window checks it live, against the
-// bridge.
+// bridge. `scp` (the bridge's token): left blank, setup copies it from the
+// Mac with scp (--yes ARG), so the window checks the Mac's Remote Login
+// first.
+//
+// A page's `introLinks` follow its intro; `after`, what the terminal does
+// after Start setup, may be empty (then the window doesn't say).
 
 var GUIDES = "https://github.com/marcewing/omarock/blob/main/"
 var REDIRECT = "http://127.0.0.1:8730/callback"
@@ -85,25 +90,23 @@ var pages = {
       "Apple Music plays on your Mac, in omarock's bridge, an app you build there. Its sound comes here as a stream that mpd plays, and omarock browses and controls it through the bridge.",
       "Both machines need to reach each other, over Tailscale, say."
     ],
+    introLinks: [{ label: "Tailscale", url: "https://tailscale.com/download" }],
     steps: [
       { title: "The bridge, on your Mac",
         text: ["It's built with your own Apple Developer membership. On the Mac, clone omarock and run ./install there: it builds the bridge, and starts it at login."],
         copies: ["git clone https://github.com/marcewing/omarock.git && cd omarock && ./install"],
         links: [
           { label: "The bridge's guide", url: GUIDES + "bridge/README.md" },
-          { label: "Apple Developer Program", url: "https://developer.apple.com/programs/" },
-          { label: "Tailscale", url: "https://tailscale.com/download" }
+          { label: "Apple Developer Program", url: "https://developer.apple.com/programs/" }
         ] },
       { title: "Which Mac",
         text: ["The Mac running the bridge: one of the Macs on your tailnet, or its address."],
         fields: [{ key: "appleMac", type: "mac", required: true, needs: "the Mac running the bridge", placeholder: "100.64.0.10 or my-mac",
           account: "apple-bridge" }] },
       { title: "The bridge's token",
-        text: ["The bridge made it on the Mac. Copy it there with this, in Terminal, then paste it here:"],
-        copies: ["pbcopy < ~/Library/Application\\ Support/omarock-bridge/token"],
-        fields: [{ key: "bridgeToken", type: "secret", label: "The bridge's token", checked: true, account: "bridge-token",
-          description: "Or leave it empty: the terminal then offers to copy it from the Mac with scp (with Remote Login on there)." }] },
-      { title: "Smooth playback (optional)",
+        text: ["On the Mac, the token is in ~/Library/Application Support/omarock-bridge/token. Paste it here or leave blank to scp it during setup (Remote Login must be enabled on the Mac)."],
+        fields: [{ key: "bridgeToken", type: "secret", checked: true, scp: true, arg: "scp-token", account: "bridge-token" }] },
+      { title: "Smooth playback (optional, recommended)",
         text: ["Two fixes for mpd that aren't in Arch's packages yet (patches/README.md). Each is built here, for omarock only, and sudo asks for your password to install the build tools."],
         fields: [
           { key: "flac", type: "check", label: "A fixed libFLAC (a few minutes; needs cmake and ninja)", arg: "flac",
@@ -112,11 +115,7 @@ var pages = {
             description: "Without it, mpd-mpris (the media keys' go-between) asks mpd for the stream's cover at every play and pause, which holds mpd for seconds." }
         ] }
     ],
-    after: [
-      "Saves the Mac's address and the bridge's token here.",
-      "Builds the fixes you ticked.",
-      "Then Apple Music is on in omarock."
-    ]
+    after: []
   },
 
   sound: {
@@ -190,7 +189,11 @@ function problem(field, value, known, live) {
   }
   // A password's spaces are its own; a line's aren't.
   var typed = field.type === "secret" ? String(value || "") : String(value || "").trim()
-  if (typed === "") return field.required && !set ? "Needs " + field.needs : ""
+  if (typed === "" && field.required && !set) return "Needs " + field.needs
+  // Left blank to be copied from the Mac: its Remote Login has to answer.
+  if (typed === "" && field.scp && !set)
+    return !live || live.kind === "checking" ? "Checking the Mac's Remote Login…" : live.kind === "bad" ? live.text : ""
+  if (typed === "") return ""
   if (field.pattern && !new RegExp(field.pattern).test(typed)) return field.wrong
   if (field.checked && live) return live.kind === "checking" ? "Checking the token…" : live.kind === "bad" ? live.text : ""
   return ""
@@ -239,8 +242,26 @@ function args(piece, values) {
     if (!f.arg) return
     if (f.type === "check") out.push(values[f.key] === true ? "--yes" : "--no", f.arg)
     else if (f.type === "output" && values[f.key]) out.push("--output", String(values[f.key]))
+    else if (f.scp && String(values[f.key] || "") === "") out.push("--yes", f.arg)
   })
   return out
+}
+
+// The host in a bridge's URL, for ssh: "http://100.64.0.10:8710" is 100.64.0.10.
+function bridgeHost(url) {
+  return String(url || "").replace(/^https?:\/\//, "").replace(/:\d+$/, "")
+}
+
+// What `ssh -o BatchMode=yes HOST true` says of the Mac's Remote Login,
+// for under the token field: whether setup's scp can copy the token from it.
+function scpState(code, stderr) {
+  var e = String(stderr || "")
+  if (code === 0) return { kind: "ok", text: "Mac scp enabled" }
+  if (/Host key verification failed/.test(e)) return { kind: "ok", text: "Mac scp enabled (setup asks once to trust the Mac)" }
+  if (/Permission denied/.test(e)) return { kind: "ok", text: "Mac scp enabled (setup asks for your password on the Mac)" }
+  if (/Connection refused/.test(e))
+    return { kind: "bad", text: "Remote Login is off on the Mac: paste the token, or turn it on there (System Settings, General, Sharing)" }
+  return { kind: "bad", text: "Can't reach the Mac with ssh: paste the token" }
 }
 
 // The Macs on a tailnet, from `tailscale status --json`: [{ address, name }].
@@ -276,5 +297,6 @@ function outputList(text) {
 
 if (typeof module !== "undefined") {
   module.exports = { pages: pages, REDIRECT: REDIRECT, title: title, fields: fields, bridgeUrl: bridgeUrl, initial: initial,
-    problem: problem, blocker: blocker, writes: writes, args: args, tailnetMacs: tailnetMacs, outputList: outputList }
+    problem: problem, blocker: blocker, writes: writes, args: args, bridgeHost: bridgeHost, scpState: scpState,
+    tailnetMacs: tailnetMacs, outputList: outputList }
 }

@@ -20,7 +20,9 @@
 #   ./install PIECE --yes NAME --no NAME --output NAME
 #                              questions answered ahead, as omarock's setup
 #                              window does: terms (SiriusXM's risk), flac and
-#                              mpris (Apple Music's patched builds), and
+#                              mpris (Apple Music's patched builds),
+#                              scp-token (the bridge's token copied from the
+#                              Mac with scp, as ssh's config reaches it), and
 #                              the output (the sound output's)
 #   ./install --uninstall      take omarock off, a piece at a time, asking first
 #   ./install --help
@@ -948,15 +950,26 @@ step_apple() {
     ok "the bridge's token: $tokenfile"
   else
     explain "omarock needs the bridge's token, which the bridge made on the Mac. It goes into $tokenfile."
-    local how token code user host
-    how=$(choose "How do you want to set the token?" paste \
-      paste "I'll paste it (on the Mac: pbcopy < ~/Library/Application\ Support/omarock-bridge/token)" \
-      ssh "Copy it with scp (your Mac's Remote Login must be on)") || exit 1
+    local how token code user host from
+    host=${bridge#http://}
+    host=${host%:*}
+    # Left blank in the setup window, which checked the Mac's Remote Login:
+    # scp, with the user name ssh's config (or yours) gives.
+    if [[ ${preset[scp-token]:-} == yes ]]; then
+      how=ssh from=$host
+      gap
+      answered "How do you want to set the token?" "" "Copy it with scp, in the setup window"
+    else
+      how=$(choose "How do you want to set the token?" paste \
+        paste "I'll paste it (on the Mac: pbcopy < ~/Library/Application\ Support/omarock-bridge/token)" \
+        ssh "Copy it with scp (your Mac's Remote Login must be on)") || exit 1
+    fi
     if [[ $how == ssh ]]; then
-      user=$(ask "Your user name on the Mac:" "$USER") || exit 1
-      host=${bridge#http://}
-      host=${host%:*}
-      (umask 077 && run scp "$user@$host:Library/Application Support/omarock-bridge/token" "$tokenfile.new") || return 1
+      if [[ -z $from ]]; then
+        user=$(ask "Your user name on the Mac:" "$USER") || exit 1
+        from=$user@$host
+      fi
+      (umask 077 && run scp "$from:Library/Application Support/omarock-bridge/token" "$tokenfile.new") || return 1
       tr -d '\n' <"$tokenfile.new" | write_private "$tokenfile"
       rm -f "$tokenfile.new"
     else

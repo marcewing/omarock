@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
@@ -15,7 +16,9 @@ import "Setup.js" as Setup
 // button or flips a tick; Esc closes.
 //
 // The Mac's address and a token typed are checked live against the bridge,
-// so Start setup waits until the bridge answers and takes the token.
+// so Start setup waits until the bridge answers and takes the token. A
+// token left blank is copied from the Mac with scp during setup, so then
+// the Mac's Remote Login is checked (ssh in batch mode: it asks nothing).
 Rectangle {
   id: root
 
@@ -51,10 +54,28 @@ Rectangle {
   property var inputs: ({})
 
   readonly property string blocker: Setup.blocker(root.piece, root.values, root.known, root.live)
+  readonly property bool hasAfter: !!root.page && root.page.after.length > 0
+  // ./install's words after the piece, as Start setup would pass them.
+  readonly property var startArgs: Setup.args(root.piece, root.values)
   readonly property bool canStart: root.blocker === "" && !root.busy
 
   signal startRequested(var writes, var args)
   signal closeRequested()
+
+  // A link: a page on the web, in the browser.
+  component LinkButton: Button {
+    required property var modelData
+    objectName: "setupLink:" + modelData.url
+    text: modelData.label
+    iconText: ""
+    bordered: true
+    focusable: true
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    fontSize: Style.font.caption
+    tooltipText: modelData.url
+    onClicked: Qt.openUrlExternally(modelData.url)
+  }
 
   color: Commons.Color.popups.background
   focus: true
@@ -62,6 +83,7 @@ Rectangle {
 
   // A piece opening: its fields as they start, from the top.
   function reset() {
+    scpProbe.running = false
     root.values = Setup.initial(root.piece, root.known, root.defaultOutput)
     root.touched = {}
     root.live = {}
@@ -142,7 +164,7 @@ Rectangle {
     if (!root.canStart) return
     root.busy = true
     root.notice = "Saving…"
-    root.startRequested(Setup.writes(root.piece, root.values, root.known), Setup.args(root.piece, root.values))
+    root.startRequested(Setup.writes(root.piece, root.values, root.known), root.startArgs)
   }
 
   // What's said under a field: a check's answer, or what's wrong with what
@@ -192,8 +214,13 @@ Rectangle {
       now.appleMac = data && data.authorized === false
         ? { kind: "ok", warn: true, text: "The bridge answers" + version + ", but can't use Apple Music yet: allow it on the Mac, in System Settings, Privacy & Security, Media & Apple Music" }
         : { kind: "ok", text: "The bridge answers" + version }
+      // No token typed: whether setup can scp it from the Mac.
+      if (token === "") now.bridgeToken = { kind: "checking", text: "" }
       root.live = now
-      if (token === "") return
+      if (token === "") {
+        root.probeMac(Setup.bridgeHost(url), seq)
+        return
+      }
       root.get(url + "/v1/status", token, function(code) {
         if (seq !== root.checkSeq) return
         var after = Object.assign({}, root.live)
@@ -204,6 +231,33 @@ Rectangle {
       })
     })
   }
+  // The Mac's Remote Login: ssh in batch mode (no prompts, and nothing
+  // added to known_hosts), through the ssh config, as setup's scp goes.
+  function probeMac(host, seq) {
+    scpProbe.running = false
+    scpProbe.seq = seq
+    scpProbe.command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, "true"]
+    scpProbe.running = true
+    scpDeadline.restart()
+  }
+  Process {
+    id: scpProbe
+    property int seq: 0
+    stderr: StdioCollector { id: scpErrors; waitForEnd: true }
+    onExited: function(exitCode) {
+      scpDeadline.stop()
+      if (scpProbe.seq !== root.checkSeq) return
+      var now = Object.assign({}, root.live)
+      now.bridgeToken = Setup.scpState(exitCode, scpErrors.text)
+      root.live = now
+    }
+  }
+  Timer {
+    id: scpDeadline
+    interval: 12000
+    onTriggered: scpProbe.running = false
+  }
+
   // A GET, given up after 5 s: callback(status, data), status 0 when nothing answered.
   function get(url, token, callback) {
     var xhr = new XMLHttpRequest()
@@ -287,6 +341,17 @@ Rectangle {
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
           wrapMode: Text.WordWrap
+        }
+      }
+
+      Flow {
+        width: content.width
+        spacing: Style.space(6)
+        visible: !!root.page && (root.page.introLinks || []).length > 0
+
+        Repeater {
+          model: root.page ? root.page.introLinks || [] : []
+          LinkButton {}
         }
       }
 
@@ -397,20 +462,7 @@ Rectangle {
 
             Repeater {
               model: step.modelData.links || []
-
-              Button {
-                required property var modelData
-                objectName: "setupLink:" + modelData.url
-                text: modelData.label
-                iconText: ""
-                bordered: true
-                focusable: true
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.caption
-                tooltipText: modelData.url
-                onClicked: Qt.openUrlExternally(modelData.url)
-              }
+              LinkButton {}
             }
           }
 
@@ -596,7 +648,9 @@ Rectangle {
 
       Item { width: 1; height: Style.space(4) }
 
+      // What the terminal does next, where the page says.
       PanelSectionHeader {
+        visible: root.hasAfter
         width: content.width
         text: "AFTER START SETUP, IN A TERMINAL"
         foreground: root.foreground
@@ -635,6 +689,7 @@ Rectangle {
       }
 
       Text {
+        visible: root.hasAfter
         width: content.width
         textFormat: Text.PlainText
         text: "You can stop the terminal at any point: Set up carries on where it stopped."

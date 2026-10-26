@@ -85,6 +85,8 @@ def prepare(work):
     (fakes / "pactl").symlink_to(TOOLS / "fake-pactl")
     # Never the real compositor: hyprctl only logs, and lists no windows.
     (fakes / "hyprctl").symlink_to(TOOLS / "fake-hyprctl")
+    # Never a real machine: ssh only logs, and answers as the test says.
+    (fakes / "ssh").symlink_to(TOOLS / "fake-ssh")
     env = dict(HOME=str(home), PATH=f"{fakes}:/usr/bin:/bin", LANG="C.UTF-8",
                XDG_RUNTIME_DIR=str(runtime), OMARCHY_PATH="/usr/share/omarchy")
     subprocess.run(["omarchy-theme-set-templates"], env=env, check=True, stdout=subprocess.DEVNULL)
@@ -4319,13 +4321,25 @@ def setup_scenario(host, output, failures):
     check(w["macs"] == ["Attic Mac 127.0.0.2"] and w["values"]["appleMac"] == "127.0.0.2" and not w["otherMac"] and not w["canStart"]
           and w["blocker"].startswith("Nothing answers"),
           "the tailnet's one Mac is picked, and checked: nothing answers there, so Start setup waits", failures)
+    ssh_mode, ssh_log = home / ".fake-ssh", home / "ssh.log"
+    ssh_mode.write_text("refused")
     host.call("setupClick", "setupMacOther")
     host.call("setupFocus", "appleMac")
     url = f"http://127.0.0.1:{BRIDGE['port']}"
     host.call("typeKeys", f"127.0.0.1:{BRIDGE['port']}")
     wait_for(lambda: window()["notes"]["appleMac"].startswith("The bridge answers"), "the bridge answers")
-    check(window()["canStart"] and window()["otherMac"],
-          "another address: the bridge answers, and with no token the terminal asks for it", failures)
+    wait_for(lambda: window()["notes"]["bridgeToken"].startswith("Remote Login is off"), "the Mac's Remote Login checked")
+    check(not window()["canStart"] and window()["otherMac"]
+          and "-o BatchMode=yes -o ConnectTimeout=5 127.0.0.1 true" in ssh_log.read_text(),
+          "another address: the bridge answers; the token blank, the Mac's Remote Login is checked (ssh in batch mode): "
+          "off, so Start setup waits: " + window()["notes"]["bridgeToken"], failures)
+    ssh_mode.write_text("on")
+    last = str(BRIDGE["port"])[-1]
+    retype("appleMac", last, last)
+    wait_for(lambda: window()["notes"]["bridgeToken"] == "Mac scp enabled", "scp enabled")
+    check(window()["canStart"] and window()["args"] == ["--yes", "scp-token", "--no", "flac", "--no", "mpris"],
+          "Remote Login on: \"Mac scp enabled\" under the token field, and Start setup would have setup scp it (--yes scp-token)",
+          failures)
     host.call("setupFocus", "bridgeToken")
     host.call("typeKeys", "wrong")
     wait_for(lambda: window()["notes"]["bridgeToken"] == "The bridge refused this token", "a wrong token")
