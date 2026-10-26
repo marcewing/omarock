@@ -24,6 +24,8 @@ test("a place by name: a city, narrowed by its region or country; a region; a co
 test("one word: the time zone's country first, a region before a city", () => {
   assert.equal(Places.countryOfZone(index, "America/New_York"), "US")
   assert.equal(Places.countryOfZone(index, ":Europe/Berlin"), "DE")
+  // An old name, as the laptop's /etc/localtime is (a hard link).
+  assert.equal(Places.countryOfZone(index, "US/Eastern"), "US")
   // Washington the state, as the old "Your US state" meant.
   assert.equal(Places.find(index, "Washington", "US").kind, "region")
   assert.equal(Places.find(index, "Washington, DC", "US").kind, "city")

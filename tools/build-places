@@ -8,8 +8,9 @@ From GeoNames (https://www.geonames.org, CC BY 4.0): every city of 15,000
 people or more (cities15000.txt), the regions they're in (admin1: a state,
 province, Land or canton; admin1CodesASCII.txt), the countries and their
 languages (countryInfo.txt), and which country each time zone is in
-(timeZones.txt). Fetched from download.geonames.org unless DOWNLOADS_DIR has
-them already.
+(timeZones.txt; with tzdata's old names for them too, "US/Eastern" for
+America/New_York, from this machine's tzdata.zi). Fetched from
+download.geonames.org unless DOWNLOADS_DIR has them already.
 
 Radio Browser's stations name their region in their own words ("Bayern" as
 often as GeoNames' "Bavaria", "München" for Munich), so each place gets its
@@ -100,6 +101,12 @@ def main():
     languages = {f[0]: {lang.split("-")[0] for lang in f[15].split(",") if lang} for f in info}
     regions = {f[0]: {"name": f[1], "id": f[3]} for f in geonames(folder, "admin1CodesASCII.txt")}
     zones = {f[1]: f[0] for f in geonames(folder, "timeZones.txt")[1:]}
+    # Old names, which /etc/localtime can be (a hard link, so no way back to the new one).
+    links = Path("/usr/share/zoneinfo/tzdata.zi")
+    for line in links.read_text().splitlines() if links.exists() else []:
+        f = line.split()
+        if len(f) == 3 and f[0] == "L" and f[1] in zones and f[2] not in zones:
+            zones[f[2]] = zones[f[1]]
     cities = [{"name": f[1], "others": [n for n in f[3].split(",") if n], "cc": f[8], "region": f[10],
                "lat": float(f[4]), "lon": float(f[5]), "people": int(f[14] or 0)}
               for f in geonames(folder, "cities15000.txt")]
