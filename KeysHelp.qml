@@ -84,7 +84,7 @@ Rectangle {
       [",", "Settings, on tabs: omarock's own, then Apple Music, SiriusXM, Spotify and the sound output (Tab goes between them)"],
       ["?", "Show or hide these keys"],
       ["w", "With the keys showing: keep them open in a window of their own"],
-      ["Tab", "Next panel on the bar"]
+      ["Tab", "The next panel in this part of the bar, as in Omarchy's own panels (Shift+Tab the one before)"]
     ] }
   ]
 

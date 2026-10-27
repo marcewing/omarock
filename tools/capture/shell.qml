@@ -15,6 +15,8 @@ ShellRoot {
   readonly property string pluginDir: Quickshell.env("OMAROCK_PLUGIN")
   readonly property var widget: widgetLoader.item
   property var panel: null
+  // Tab's asks for the bar's next panel: { widget (asked as omarock's widget), direction }.
+  property var panelSwitches: []
 
   function findPanel(item) {
     var data = item.data
@@ -193,6 +195,10 @@ ShellRoot {
     foregroundAnimationEnabled: false
     _requestPopout: function(owner) { activePopout = owner }
     _releasePopout: function(owner) { if (activePopout === owner) activePopout = null }
+    _switchPanelFrom: function(owner, direction) {
+      host.panelSwitches = host.panelSwitches.concat([{ widget: owner === widgetLoader.item, direction: direction }])
+      return true
+    }
   }
 
   FloatingWindow {
@@ -316,6 +322,7 @@ ShellRoot {
         cursor: p.cursorActive ? p.cursorIndex : -1, notice: p.notice,
         // The now playing card's links as the keys reach them, the one they're on, and its box.
         cardLinks: p.cardLinks, cardFocus: p.cardFocus, cardBoxes: host.cardBoxes(),
+        panelSwitches: host.panelSwitches,
         hint: p.hintParts.map(function(h) { return h.key + " " + h.what }).join(" · "),
         hintLine: host.hintLine(), headerButtons: host.headerButtons(), cardHeight: popup() ? Math.round(popup().contentItem[0].parent.parent.height) : 0,
         keysOpen: p.keysOpen, keysHere: p.hereKeys.map(function(r) { return r[0] + " " + r[1] }),

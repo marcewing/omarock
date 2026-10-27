@@ -1968,6 +1968,25 @@ def card_keys_scenario(host, output, socket_path, failures):
     song = dict(line.split(": ", 1) for line in mpd_query(socket_path, "currentsong") if ": " in line)
     title, album, artist = song.get("Title", ""), song.get("Album", ""), song.get("Artist", "")
     lines = ["artist", "album"] + (["genre"] if song.get("Genre") else [])
+
+    # Tab: the next panel in this part of the bar, Shift+Tab the one before,
+    # as in Omarchy's own panels, asked of the bar as omarock's widget. In
+    # the settings it goes round their tabs instead.
+    before = len(host.state()["panelSwitches"])
+    host.call("press", "Tab")
+    host.call("press", "Shift+Tab")
+    wait_for(lambda: len(host.state()["panelSwitches"]) == before + 2, "Tab asks the bar for the next panel")
+    check(host.state()["panelSwitches"][before:] == [{"widget": True, "direction": 1}, {"widget": True, "direction": -1}],
+          "Tab and Shift+Tab: the bar's next and previous panel, from omarock's widget: "
+          + json.dumps(host.state()["panelSwitches"][before:]), failures)
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"], "the settings open")
+    host.call("press", "Tab")
+    host.settle(.3)
+    check(len(host.state()["panelSwitches"]) == before + 2 and host.state()["settingsTab"] != "omarock",
+          "in the settings Tab goes to their next tab, not another panel: " + host.state()["settingsTab"], failures)
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["settingsOpen"], "the settings close")
     s = host.state()
     check(s["cardLinks"] == [[n] for n in lines] + [["playlist"]], "a local song's links: " + json.dumps(s["cardLinks"]), failures)
     check(s["cardBoxes"] == [], "no box before the keys go there", failures)
@@ -2069,6 +2088,8 @@ def card_keys_scenario(host, output, socket_path, failures):
     host.call("press", "Escape")
     to_source(host, "local")
     BRIDGE["config"].unlink()
+    # The switch's notice, gone before the next scenario reads the hint line.
+    wait_for(lambda: host.state()["notice"] == "", "the notice clears")
 
 
 def library_scenario(host, output, socket_path, failures):

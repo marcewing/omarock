@@ -182,7 +182,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.2"
+  readonly property string version: "0.11.3"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -3693,8 +3693,14 @@ Panel {
       }
       onDeleteRequested: if (root.cursorActive && !root.keysOpen && !root.infoOpen && !root.settingsOpen) root.removeRow(root.cursorIndex)
       onCloseRequested: root.stepBack()
-      // Tab and Shift+Tab: the settings' tabs; nothing elsewhere.
-      onTabRequested: function(direction) { if (root.settingsOpen) settingsView.nextTab(direction) }
+      // Tab and Shift+Tab: the settings' tabs there; elsewhere the next or
+      // previous panel in this part of the bar, as Omarchy's own panels do.
+      // The bar knows omarock by its widget (Ui.Panel's switchPanel passes
+      // the panel, which it doesn't find).
+      onTabRequested: function(direction) {
+        if (root.settingsOpen) settingsView.nextTab(direction)
+        else if (root.bar && typeof root.bar.switchPanelFrom === "function") root.bar.switchPanelFrom(root.barIdentity, direction)
+      }
       onTextKey: function(text) {
         if (root.settingsOpen) {
           if (text === ",") root.closeSettings()
