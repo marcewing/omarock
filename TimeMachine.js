@@ -51,7 +51,7 @@ function only(items, year) {
   return (items || []).filter(function(item) { return inYear(item, year) })
 }
 
-// A search's results (bridge/API.md) with what's after the year left out.
+// A search's results (apple-bridge/API.md) with what's after the year left out.
 function filterResults(results, year) {
   if (!year || !results) return results
   var out = Object.assign({}, results)

@@ -3,7 +3,7 @@ import Quickshell.Io
 import "Apple.js" as Apple
 import "Info.js" as Info
 
-// The Apple Music bridge on the Mac (bridge/API.md), over HTTP on the
+// The Apple Music bridge on the Mac (apple-bridge/API.md), over HTTP on the
 // tailnet. Where the player card and the bar read the player, it has
 // MpdClient's shape: ready, lastError, status, currentSong, elapsed and the
 // transport functions. Volume stays mpd's, and so does the sound: mpd plays

@@ -60,10 +60,10 @@ git clone https://github.com/marcewing/omarock.git
 cd omarock && ./install
 ```
 
-On a Mac, `./install` sets up the bridge (`bridge/install`), one step at a time. It
+On a Mac, `./install` sets up the bridge (`apple-bridge/install`), one step at a time. It
 checks the requirements and offers to install what's missing from Homebrew (`xcodegen`,
 `ffmpeg`, `icecast`, and `gum` for its prompts). It asks for your Team ID and bundle id
-and saves them in `bridge/app/Local.xcconfig`, which git ignores. Then it builds and
+and saves them in `apple-bridge/app/Local.xcconfig`, which git ignores. Then it builds and
 signs the app, installs it to `~/Applications/OmarockBridge.app`, starts it, and goes
 through the Mac's permissions with you. It ends with what your Omarchy machine needs.
 Every command it runs is shown, and it asks before changing anything.
@@ -101,11 +101,11 @@ macOS opens Music's window at login. Closing the window leaves Music running.
 
 ### By hand
 
-`./install` uses `bridge/app/build.sh`, which you can run yourself:
+`./install` uses `apple-bridge/app/build.sh`, which you can run yourself:
 
 ```sh
 brew install xcodegen ffmpeg icecast
-bridge/app/build.sh --run
+apple-bridge/app/build.sh --run
 ```
 
 It checks the requirements, asks once for your Team ID and bundle id, builds, installs
@@ -148,7 +148,7 @@ Everything lives in `~/Library/Application Support/omarock-bridge`, not in the r
 git pull && ./install
 ```
 
-or `git pull && bridge/app/build.sh --run`. Both wait until nothing is listening to the
+or `git pull && apple-bridge/app/build.sh --run`. Both wait until nothing is listening to the
 stream, because restarting the bridge under mpd gives mpd errors until it's back.
 `build.sh --run-now` restarts straight away.
 
@@ -228,7 +228,7 @@ By hand:
 
 ```sh
 tccutil reset All com.example.omarock.bridge   # your bundle id: forgets its permissions
-bridge/app/build.sh --uninstall          # stops it and removes the app
+apple-bridge/app/build.sh --uninstall          # stops it and removes the app
 rm -rf ~/Library/Application\ Support/omarock-bridge
 ```
 

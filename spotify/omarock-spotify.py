@@ -6,7 +6,7 @@ This service drives it over Soloist's local WebSocket API, and uses the Spotify
 Web API (your own developer app: spotify_web.py) for what Soloist can't do:
 search, browsing, the library, playlists, and starting an album or playlist at
 a given song. It answers omarock (and tools/omarock-sp) on 127.0.0.1:8730 with
-the JSON of bridge/API.md, so omarock's Apple Music code serves Spotify too.
+the JSON of apple-bridge/API.md, so omarock's Apple Music code serves Spotify too.
 
 Also:
 - With omarock's sound output (the bus, audio/), Soloist plays into it and
@@ -59,7 +59,7 @@ def log(message):
     print("omarock-spotify: " + message, file=sys.stderr, flush=True)
 
 
-# ---------- Spotify's objects, as bridge/API.md's ----------
+# ---------- Spotify's objects, as apple-bridge/API.md's ----------
 
 def fold(text):
     s = unicodedata.normalize("NFD", str(text or "").lower())
@@ -92,7 +92,7 @@ def names(artists):
 
 
 def clean(obj):
-    """Fields Spotify doesn't give are left out, not null (bridge/API.md)."""
+    """Fields Spotify doesn't give are left out, not null (apple-bridge/API.md)."""
     return {k: v for k, v in obj.items() if v is not None and v != "" and v != []}
 
 

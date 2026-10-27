@@ -1,5 +1,5 @@
 // Apple Music for the panel: rows and views built from the bridge's objects
-// (bridge/API.md), and the bridge's status in the shape the player card and
+// (apple-bridge/API.md), and the bridge's status in the shape the player card and
 // the bar read from mpd. Pure functions, so node can test them
 // (tests/apple.test.js).
 //

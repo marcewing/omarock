@@ -18,7 +18,7 @@
 | `SettingsView.qml` | The settings (`,` or the gear): Settings.js as a form, each source with its service's state; settings go into settings.json, accounts, keys and the music folder through `tools/omarock-account` |
 | `Setup.js`, `SetupView.qml` | A piece's setup window (Set up…): how it works, what it needs, links, and its fields (checked live against the bridge for Apple Music); Start setup saves them through `tools/omarock-account`, then runs `./install PIECE` in a terminal with the window's choices (`--yes terms`, `--output NAME`) |
 | `Info.js` | Pure helpers: the info card's contents for each source |
-| `AppleClient.qml`, `Apple.js` | A client for the bridge API (bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
+| `AppleClient.qml`, `Apple.js` | A client for the bridge API (apple-bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
 | `SxmClient.qml`, `Sxm.js` | SiriusXM, through omarock-sxm |
 | `RadioClient.qml`, `Radio.js` | Radio Browser: search, local stations, favourites (the mpd playlist "Radio"), ICY titles |
 | `ScrollingText.qml` | One line that scrolls when it doesn't fit: the bar's song (a setting) and the now playing card's song, artist and album |
@@ -28,8 +28,8 @@
 | `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard: "omarock's sound output" in the settings |
 | `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit, the Web API client, MPRIS |
 | `sxm/` | omarock-sxm, the SiriusXM relay |
-| `bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
-| `patches/` | libFLAC and mpd-mpris patches that make Apple Music's stream play well (see bridge/README.md) |
+| `apple-bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
+| `patches/` | libFLAC and mpd-mpris patches that make Apple Music's stream play well (see apple-bridge/README.md) |
 | `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-libflac`, `build-mpd-mpris`; `pin-sxm` writes `sxm/requirements.txt`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`), and the test harness (`capture/`) |
 | `tests/` | node tests for the pure helpers |
 
@@ -48,7 +48,7 @@
   (`current` in its status). `Panel.source` is computed once from all of that, and
   every mode follows from it, so the modes never disagree mid-update.
 - **One API, two services.** omarock-spotify speaks the Apple Music bridge's API
-  (bridge/API.md), so AppleClient and Apple.js serve both.
+  (apple-bridge/API.md), so AppleClient and Apple.js serve both.
 - **Opt-in sources.** A source's switch (`spotify`, `appleMusic`, `siriusXM`,
   `radio`) gives it a button and lets omarock talk to its service; switched off,
   omarock doesn't contact it.

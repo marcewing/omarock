@@ -5,7 +5,7 @@ JS at the top level) that is a client for mpd. mpd holds all the state (the
 queue, playlists, playback), so `mpc`, the media keys and omarock always agree.
 The one thing outside it is History, what's been played from every source,
 which `tools/omarock-history` lists. Optional services add more sources: `spotify/` (Spotify through Spotify's
-Soloist player), `sxm/` (SiriusXM), and `bridge/` (Apple Music, through an app
+Soloist player), `sxm/` (SiriusXM), and `apple-bridge/` (Apple Music, through an app
 on a Mac). `audio/` is an optional PipeWire bus that gives omarock one volume
 and pins its sound to one output.
 
@@ -24,7 +24,7 @@ Use the `omarock-setup` skill (`.claude/skills/omarock-setup/`) to help with wha
 the installer didn't finish, or to set up step by step instead. It checks what's
 there, then walks through mpd, the plugin, and each optional source, one at a
 time. Each source has its own guide: `spotify/README.md`, `sxm/README.md`,
-`bridge/README.md`, `audio/README.md`.
+`apple-bridge/README.md`, `audio/README.md`.
 
 Rules while setting up or fixing someone's system:
 - **Never print secrets:** anything in `~/.config/omarock/` that holds a key, a

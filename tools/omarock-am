@@ -1,6 +1,6 @@
 #!/bin/bash
 # omarock-am: Apple Music from the command line, through the omarock bridge on
-# the Mac (bridge/API.md), the way mpc drives mpd. For you and for Claude.
+# the Mac (apple-bridge/API.md), the way mpc drives mpd. For you and for Claude.
 #
 #   omarock-am status                  what's playing, and the queue
 #   omarock-am toggle|pause|resume|next|prev
@@ -40,7 +40,7 @@ TOKEN_FILE=${OMAROCK_BRIDGE_TOKEN:-$HOME/.config/omarock/bridge-token}
 die() { echo "omarock-am: $*" >&2; exit 1; }
 
 call() {  # METHOD PATH [JSON]
-  [[ -n $BRIDGE && -n $STREAM ]] || die "no bridge set up: put \"bridge\" and \"stream\" in $CONFIG (bridge/README.md), or set OMAROCK_BRIDGE and OMAROCK_STREAM"
+  [[ -n $BRIDGE && -n $STREAM ]] || die "no bridge set up: put \"bridge\" and \"stream\" in $CONFIG (apple-bridge/README.md), or set OMAROCK_BRIDGE and OMAROCK_STREAM"
   local token=""
   [[ -r $TOKEN_FILE ]] && token=$(<"$TOKEN_FILE")
   local args=(-sS --max-time 30 -X "$1" -w '\n%{http_code}')

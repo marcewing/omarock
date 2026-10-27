@@ -9,7 +9,7 @@ omarock is a plugin for Omarchy's bar, and a client for mpd. Local music and
 internet radio need only mpd. Spotify, Apple Music and SiriusXM each need a
 service set up, which also switches them on in omarock's settings. The guides
 have the details: `README.md` (install), `audio/README.md`, `spotify/README.md`,
-`sxm/README.md`, `bridge/README.md`. Read the relevant one before a step; this
+`sxm/README.md`, `apple-bridge/README.md`. Read the relevant one before a step; this
 skill is the order to go in, and what to watch out for.
 
 ## The installer first
@@ -138,11 +138,11 @@ Follow `spotify/README.md`. What trips people up:
 ## 6. Apple Music
 
 There are two halves, and the Mac's is the user's to build. Follow
-`bridge/README.md`.
+`apple-bridge/README.md`.
 - **On the Mac:** the user builds and installs the bridge, with their own Apple
   Developer team and MusicKit enabled, and allows Apple Music access when macOS
   asks. `./install` in a clone on the Mac walks them through it (it runs
-  `bridge/install`). Both machines need Tailscale (or another way to reach the Mac).
+  `apple-bridge/install`). Both machines need Tailscale (or another way to reach the Mac).
 - **Here:**
   - `~/.config/omarock/apple.json` names the bridge and the stream.
   - The bridge's token goes in `~/.config/omarock/bridge-token` (mode 600), put

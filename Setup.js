@@ -95,7 +95,7 @@ var pages = {
         text: ["It's built with your own Apple Developer membership. On the Mac, clone omarock and run ./install there: it builds the bridge, and starts it at login."],
         copies: ["git clone https://github.com/marcewing/omarock.git && cd omarock && ./install"],
         links: [
-          { label: "The bridge's guide", url: GUIDES + "bridge/README.md" },
+          { label: "The bridge's guide", url: GUIDES + "apple-bridge/README.md" },
           { label: "Apple Developer Program", url: "https://developer.apple.com/programs/" }
         ] },
       { title: "Which Mac",

@@ -3,7 +3,7 @@ import iTunesLibrary
 import MusicKit
 
 /// GET /v1/info/{source}/{kind}/{id}: everything known about one song or album, for
-/// omarock's info card (bridge/API.md, "Info").
+/// omarock's info card (apple-bridge/API.md, "Info").
 ///
 /// Whether a catalog item is in the library comes from Apple's relate=library and from
 /// the ITLib index (title, artist and length). Apple's relation alone misses songs ripped

@@ -1,7 +1,7 @@
 import Foundation
 import MusicKit
 
-/// Routes bridge/API.md. Runs on the main queue.
+/// Routes apple-bridge/API.md. Runs on the main queue.
 @MainActor
 final class API {
     static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -76,7 +76,7 @@ final class API {
             return respond(.json(200, health()))
         }
         if method == "GET", route.count == 4, route[0] == "artwork" {
-            // Keyed by k in the URL, not the bearer token (see bridge/API.md, Objects).
+            // Keyed by k in the URL, not the bearer token (see apple-bridge/API.md, Objects).
             let source = try source(route[1])
             guard artwork.verify(source: source, kind: route[2], id: route[3], k: request.query["k"]) else {
                 throw APIError(status: 401, message: "Bad artwork key.")

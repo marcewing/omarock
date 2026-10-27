@@ -368,7 +368,7 @@ final class MusicService {
 
     // MARK: Items to songs
 
-    /// Expands items to songs, in order (bridge/API.md, "Items"), with nil where a song
+    /// Expands items to songs, in order (apple-bridge/API.md, "Items"), with nil where a song
     /// can't be played. The nils keep positions as the details list them, so a `start`
     /// counts the same rows omarock shows.
     func expand(_ items: [ItemRef], queue: () -> [Song]) async throws -> [Song?] {

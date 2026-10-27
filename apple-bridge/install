@@ -1,5 +1,5 @@
 #!/bin/zsh
-# bridge/install: set up omarock's Apple Music bridge on this Mac, or check it.
+# apple-bridge/install: set up omarock's Apple Music bridge on this Mac, or check it.
 # It walks through what the bridge needs (Xcode, Homebrew's tools, Tailscale),
 # your App ID with MusicKit, the build, the Mac's permissions, and what your
 # Omarchy machine needs next. Each step checks what's there first, says what it
@@ -13,7 +13,7 @@
 #
 # The bridge's token and Icecast's passwords stay in
 # ~/Library/Application Support/omarock-bridge (mode 600), and are never shown.
-# bridge/app/build.sh does the build; run it by hand to update (bridge/README.md).
+# apple-bridge/app/build.sh does the build; run it by hand to update (apple-bridge/README.md).
 #
 # For tests, OMAROCK_INSTALL_ANSWERS=FILE answers the prompts from FILE, without
 # gum: a line per prompt, `TEXT=ANSWER`, where TEXT is part of the prompt and
@@ -22,7 +22,7 @@
 setopt nounset pipefail
 
 repo=${0:A:h:h}
-here=$repo/bridge/app
+here=$repo/apple-bridge/app
 support=${OMAROCK_BRIDGE_SUPPORT:-$HOME/Library/Application Support/omarock-bridge}
 app=${OMAROCK_BRIDGE_APP:-$HOME/Applications/OmarockBridge.app}
 answers=${OMAROCK_INSTALL_ANSWERS:-}
@@ -140,7 +140,7 @@ wait_until() {
 
 # ---- What's there ----
 
-# A value from bridge/app/Local.xcconfig (your Team ID and bundle id; not in git).
+# A value from apple-bridge/app/Local.xcconfig (your Team ID and bundle id; not in git).
 xc_value() { sed -n "s/^$1 *= *//p" "$here/Local.xcconfig" 2>/dev/null | tail -1; }
 # The installed app's bundle id, version and team.
 installed_id() { /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null; }
@@ -151,7 +151,7 @@ running() { pgrep -qx OmarockBridge; }
 
 # The checkout's commit the installed bridge was built from (build.sh writes
 # it), and whether anything the build uses has changed since.
-build_paths=(bridge/app bridge/tap ':(exclude)bridge/app/build.sh' ':(exclude)*.md')
+build_paths=(apple-bridge/app apple-bridge/tap ':(exclude)apple-bridge/app/build.sh' ':(exclude)*.md')
 installed_commit() { cat "$support/INSTALLED" 2>/dev/null; }
 up_to_date() {
   local c
@@ -213,7 +213,7 @@ preflight() {
     sed -n '2,/^setopt/p' "$0" | sed '$d; s/^# \{0,1\}//'
     exit 0
   fi
-  [[ $(uname) == Darwin ]] || { print "bridge/install sets up the Mac; on Linux, run ./install."; exit 1; }
+  [[ $(uname) == Darwin ]] || { print "apple-bridge/install sets up the Mac; on Linux, run ./install."; exit 1; }
   (( EUID != 0 )) || { print "Run ./install as yourself, not root: it asks for sudo when it needs it."; exit 1; }
   git -C "$repo" rev-parse --verify -q HEAD >/dev/null || {
     print "Run ./install from a git clone of omarock (git clone https://github.com/marcewing/omarock)."; exit 1; }
@@ -331,7 +331,7 @@ step_appid() {
   team=$(xc_value DEVELOPMENT_TEAM)
   bundle=$(xc_value OMAROCK_BUNDLE_ID)
   if [[ -n $team && -n $bundle ]]; then
-    ok "Team $team, bundle id $bundle (bridge/app/Local.xcconfig)"
+    ok "Team $team, bundle id $bundle (apple-bridge/app/Local.xcconfig)"
     return
   fi
 
@@ -363,7 +363,7 @@ step_appid() {
     print -r -- "DEVELOPMENT_TEAM = $team"
     print -r -- "OMAROCK_BUNDLE_ID = $bundle"
   } >"$here/Local.xcconfig.new" && mv "$here/Local.xcconfig.new" "$here/Local.xcconfig"
-  ok "wrote bridge/app/Local.xcconfig (git ignores it; edit it to change these)"
+  ok "wrote apple-bridge/app/Local.xcconfig (git ignores it; edit it to change these)"
   changed=true
 }
 
@@ -555,7 +555,7 @@ uninstall() {
       confirm "Remove it (launchctl bootout)?" && run launchctl bootout "gui/$UID/$label"
     fi
   elif [[ -n $label && $id != "$label" ]]; then
-    bad "${app/#$HOME/~} is $id, not this checkout's $label (bridge/app/Local.xcconfig): leaving it alone"
+    bad "${app/#$HOME/~} is $id, not this checkout's $label (apple-bridge/app/Local.xcconfig): leaving it alone"
     explain "Run ./install --uninstall in the clone it was built from, or set OMAROCK_BUNDLE_ID in Local.xcconfig to $id."
     kept_app=true
   else
@@ -612,7 +612,7 @@ uninstall() {
   local -a stays=(
     "Homebrew's xcodegen, ffmpeg, icecast and gum: brew uninstall them if nothing else uses them."
     "Xcode, and your Apple Development certificate."
-    "This clone, with your Team ID and bundle id in bridge/app/Local.xcconfig, and the build in bridge/app/build: delete the clone to remove them."
+    "This clone, with your Team ID and bundle id in apple-bridge/app/Local.xcconfig, and the build in apple-bridge/app/build: delete the clone to remove them."
     "Your App ID, on developer.apple.com (Certificates, IDs & Profiles, Identifiers): delete it there."
     "The Music app in your Login Items, if setup put it there: take it out in System Settings, General, Login Items & Extensions, unless you want Music opening at login."
     "omarock on your Omarchy machine: run ./install --uninstall there, or switch Apple Music off in its settings."

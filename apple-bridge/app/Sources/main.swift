@@ -1,5 +1,5 @@
-// The omarock bridge: an agent app (no Dock icon) that serves bridge/API.md on the
-// tailnet and streams its own playback to Icecast. See bridge/API.md.
+// The omarock bridge: an agent app (no Dock icon) that serves apple-bridge/API.md on the
+// tailnet and streams its own playback to Icecast. See apple-bridge/API.md.
 
 import AppKit
 

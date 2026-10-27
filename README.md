@@ -53,7 +53,7 @@ has a switch too, on until you turn it off.
 | **Local music** | mpd and your music folder. |
 | **Internet radio** | Nothing more: stations come from [Radio Browser](https://www.radio-browser.info), a free community directory, and mpd plays them. Your favourites are an mpd playlist. |
 | **Spotify** | Spotify Premium, your own (free) Spotify developer app, and the `omarock-spotify` service, which drives Spotify's own player, Soloist ([spotify/](spotify/README.md)). |
-| **Apple Music** | An Apple Music subscription and a Mac running the omarock bridge ([bridge/](bridge/API.md)). The bridge is built with your own Apple Developer membership (for MusicKit), and the Mac must be reachable from your Omarchy machine (omarock uses Tailscale). Advanced. |
+| **Apple Music** | An Apple Music subscription and a Mac running the omarock bridge ([apple-bridge/](apple-bridge/API.md)). The bridge is built with your own Apple Developer membership (for MusicKit), and the Mac must be reachable from your Omarchy machine (omarock uses Tailscale). Advanced. |
 | **SiriusXM** | A SiriusXM subscription that includes streaming, and the `omarock-sxm` service ([sxm/](sxm/README.md)). It's unofficial: it signs in as SiriusXM's web player does, which their terms may not allow. |
 
 ## Requirements
@@ -197,7 +197,7 @@ Each has a Set up… button in omarock's settings (above), and a guide for doing
 by hand:
 
 - **Spotify:** [spotify/README.md](spotify/README.md)
-- **Apple Music:** [bridge/README.md](bridge/README.md)
+- **Apple Music:** [apple-bridge/README.md](apple-bridge/README.md)
 - **SiriusXM:** [sxm/README.md](sxm/README.md)
 - **omarock's sound output** (one volume, and one pinned output, for
   everything): [audio/README.md](audio/README.md)
@@ -411,7 +411,7 @@ change saves at once.
 | `radio` | on | Internet radio |
 | `radioArea` | none | Your area, for the radio's local stations: a city, or a state, region or country (`radioState`, the US state it replaced, still counts while it's empty) |
 | `spotify` | off | Spotify ([spotify/README.md](spotify/README.md)) |
-| `appleMusic` | off | Apple Music ([bridge/README.md](bridge/README.md)) |
+| `appleMusic` | off | Apple Music ([apple-bridge/README.md](apple-bridge/README.md)) |
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |
 | `lookup` | Apple Music | Where a click on the radio's song looks it up, and where Time Machine's Top 100 plays from local music or a station: `Apple Music` or `Spotify` (the other one if that one is off) |
 | `history` | on | Keep History (`H`): what you've played here, from every source |

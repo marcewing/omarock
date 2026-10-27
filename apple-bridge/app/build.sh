@@ -1,12 +1,12 @@
 #!/bin/zsh
 # Builds the omarock bridge from this checkout, signed with your Apple Development
 # identity (a stable signature keeps its audio capture and Apple Music permissions across
-# rebuilds), and installs it. See bridge/README.md.
-#   bridge/app/build.sh              # check, build, set up; the first run asks for your Team ID
-#   bridge/app/build.sh --run        # ... then install to ~/Applications and (re)start it,
+# rebuilds), and installs it. See apple-bridge/README.md.
+#   apple-bridge/app/build.sh              # check, build, set up; the first run asks for your Team ID
+#   apple-bridge/app/build.sh --run        # ... then install to ~/Applications and (re)start it,
 #                                    # once nobody is listening (a restart under mpd gives it 404s)
-#   bridge/app/build.sh --run-now    # the same, without waiting for listeners to leave
-#   bridge/app/build.sh --uninstall  # stop it and remove the app (keeps your settings)
+#   apple-bridge/app/build.sh --run-now    # the same, without waiting for listeners to leave
+#   apple-bridge/app/build.sh --uninstall  # stop it and remove the app (keeps your settings)
 # OMAROCK_TEAM_ID and OMAROCK_BUNDLE_ID answer the first run's questions without asking.
 set -euo pipefail
 cd ${0:A:h}
@@ -90,7 +90,7 @@ if [[ ! -f Local.xcconfig ]]; then
   fi
   [[ $team =~ '^[A-Z0-9]{10}$' ]] || { print "That isn't a Team ID (10 letters and digits)."; exit 1; }
   if [[ -z $bundle && -t 0 ]]; then
-    print "The bundle id of your App ID with MusicKit (see bridge/README.md)."
+    print "The bundle id of your App ID with MusicKit (see apple-bridge/README.md)."
     read -r "bundle?Bundle id [org.omarock.bridge]: " || true
   fi
   bundle=${bundle:-org.omarock.bridge}
@@ -152,7 +152,7 @@ else
   print "Built $built (install it with --run)."
 fi
 
-# bridge/install shows the next steps itself.
+# apple-bridge/install shows the next steps itself.
 [[ -n ${OMAROCK_FROM_INSTALL:-} ]] && exit 0
 
 cat <<EOF

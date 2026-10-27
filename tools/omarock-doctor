@@ -142,8 +142,8 @@ if [[ $(setting appleMusic false) == true ]] || [[ -e $HOME/.config/omarock/appl
   if [[ -z $bridge && -f $HOME/.config/omarock/apple.json ]]; then
     bridge=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("bridge",""))' "$HOME/.config/omarock/apple.json" 2>/dev/null)
   fi
-  [[ -n $bridge ]] && ok "the bridge: $bridge" || bad "no bridge address: ~/.config/omarock/apple.json (bridge/README.md)"
-  private_file "$(setting appleTokenFile "$HOME/.config/omarock/bridge-token")" "the bridge's token" "bridge/README.md, the Linux side"
+  [[ -n $bridge ]] && ok "the bridge: $bridge" || bad "no bridge address: ~/.config/omarock/apple.json (apple-bridge/README.md)"
+  private_file "$(setting appleTokenFile "$HOME/.config/omarock/bridge-token")" "the bridge's token" "apple-bridge/README.md, the Linux side"
   if [[ -n $bridge ]]; then
     h=$(health "$bridge")
     if [[ -n $h ]]; then

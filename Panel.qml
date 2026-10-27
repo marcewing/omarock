@@ -42,7 +42,7 @@ Panel {
   readonly property bool closeOnLeave: root.setting("closeOnLeave", true) === true
   property bool pointerArmed: false
 
-  // Apple Music (bridge/API.md): the bridge on the Mac, and the stream mpd
+  // Apple Music (apple-bridge/API.md): the bridge on the Mac, and the stream mpd
   // plays from it. Apple Music mode is mpd playing that stream, so the mode
   // lives in mpd too, and mpc shows it. The addresses come from the widget's
   // settings, else ~/.config/omarock/apple.json ({ "bridge", "stream" }),
@@ -775,7 +775,7 @@ Panel {
 
   function switchToApple() {
     if (!root.appleConfigured) {
-      root.say("Apple Music isn't set up (bridge/README.md)")
+      root.say("Apple Music isn't set up (apple-bridge/README.md)")
       return
     }
     root.say("Connecting to Apple Music…")

@@ -22,7 +22,7 @@ enum Source: String {
     }
 }
 
-/// Turns MusicKit items into the contract's objects (bridge/API.md, "Objects"). Fields
+/// Turns MusicKit items into the contract's objects (apple-bridge/API.md, "Objects"). Fields
 /// Apple doesn't give are left out, never null.
 enum Normalize {
     /// Set at startup: the bridge's own artwork URLs, for artwork without an https template.

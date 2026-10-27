@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""A fake omarock bridge (bridge/API.md), for testing the panel's Apple Music
+"""A fake omarock bridge (apple-bridge/API.md), for testing the panel's Apple Music
 mode away from the Mac.
 
 Serves a small made-up catalog and library over HTTP on 127.0.0.1, with the
