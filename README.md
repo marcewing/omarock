@@ -76,7 +76,8 @@ cd omarock
 ./install
 ```
 
-It sets up mpd (asking where your music is), then puts omarock on the bar. It
+It sets up mpd (asking where your music is), then puts omarock on the bar, with
+a key that opens it from anywhere: Super+Ctrl+M (if nothing else has it). It
 checks first what's already there, shows each command before running it, and
 asks before changing anything: packages (with sudo), your mpd config, systemd
 units. Run it again any time: what's done is skipped.
@@ -175,6 +176,13 @@ omarchy plugin add https://github.com/marcewing/omarock --enable
 `--enable` puts it on the left of the bar (`omarchy plugin enable mre.omarock
 --section center`, or `right`, for elsewhere). Click it, and press `?` for the keys.
 
+A key to open it is a line in `~/.config/hypr/bindings.lua` (Omarchy's shell
+opens the omarock on the screen you're using):
+
+```lua
+o.bind("SUPER + CTRL + M", "omarock", "omarchy-shell shell toggle mre.omarock")
+```
+
 ### 3. More sources (optional)
 
 Each has a Set up… button in omarock's settings (above), and a guide for doing it
@@ -200,7 +208,7 @@ so on) does the same.
 
 **Remove…** in the settings, or `./install --remove spotify` (`siriusxm`,
 `apple-music`, `sound`), takes one source off, with its accounts and keys.
-`./install --uninstall` takes all of omarock off: the plugin, each service, the
+`./install --uninstall` takes all of omarock off: its key, the plugin, each service, the
 patches and the sound output (mpd gets its old output back). Each shows what it
 removes and asks first, and leaves mpd, your music and playlists alone.
 `omarchy plugin remove mre.omarock` alone removes only the plugin; the services
@@ -210,8 +218,8 @@ stay until you remove them too.
 
 - **The bar:** the album cover and "Artist — Song" (up to 300 px: the
   `maxLabelWidth` setting; longer, it ends in …, or scrolls with
-  `scrollBarSong` on). A click opens the panel; a middle click plays or
-  pauses. With nothing queued it shows a boombox, and a middle click on it
+  `scrollBarSong` on). A click opens the panel (so does Super+Ctrl+M, once
+  `./install` has set it up); a middle click plays or pauses. With nothing queued it shows a boombox, and a middle click on it
   plays a song picked at random from your library (so does Play in the panel).
 - **The panel:** now playing, with the cover (a song, artist or album too
   long for its line scrolls), a seek bar, transport (shuffle, previous,

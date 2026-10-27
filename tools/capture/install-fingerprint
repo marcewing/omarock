@@ -1,6 +1,6 @@
 #!/bin/bash
 # install-fingerprint: what ./install could have changed on this machine, as
-# hashes and names (never contents): mpd.conf, the user units and drop-ins,
+# hashes and names (never contents): mpd.conf, Hyprland's key bindings, the user units and drop-ins,
 # omarock's config files, the bus, the installed services, omarock's bar
 # settings, ufw's rules and the plugin's commit. Run it before and after a
 # run, in a test VM, and diff: a second run of ./install should change nothing,
@@ -14,6 +14,9 @@ cd ~ || exit 1
   # Soloist's sign-in and cache change as it runs: names only, top level.
   find .local/share/omarock-soloist .cache/omarock-soloist -maxdepth 1 2>/dev/null | sort
   ls .config/mpd
+  # omarock's key, and the copies of the bindings from before it.
+  sha256sum .config/hypr/bindings.lua
+  ls .config/hypr
   python3 -I -c '
 import json
 d = json.load(open(".config/omarchy/shell.json"))

@@ -1,6 +1,7 @@
 #!/bin/bash
 # install: set omarock up. On its own it sets up local music and the radio:
-# mpd (which plays the music), the bar plugin, and the radio's local stations.
+# mpd (which plays the music), the bar plugin and a key to open it
+# (Super+Ctrl+M), and the radio's local stations.
 # Spotify, SiriusXM and Apple Music each have a setup of their own, which
 # omarock's settings run in a terminal (their Set up buttons), or you can run
 # here. Each step checks what's there first, says what it will change, and asks
@@ -366,7 +367,7 @@ welcome() {
   local v
   v=$(manifest_version "$repo/manifest.json")
   printf '\n%somarock %s%s: a music player for the Omarchy bar\n\n' "$bold" "$v" "$reset"
-  explain "This sets up your own music and the radio: mpd (which plays the music), then omarock on the bar. It shows each command before running it, and asks before it changes anything. Run it again whenever you like: what's done is checked and skipped."
+  explain "This sets up your own music and the radio: mpd (which plays the music), then omarock on the bar, with a key to open it. It shows each command before running it, and asks before it changes anything. Run it again whenever you like: what's done is checked and skipped."
   explain "Spotify, SiriusXM and Apple Music come afterwards, each from omarock's settings, if you want them."
 }
 declare -A done_=()
@@ -586,6 +587,74 @@ step_plugin() {
     ok "omarock $here is on the bar"
   else
     note "the bar hasn't said it loaded omarock yet: journalctl --user -b | grep omarock"
+  fi
+}
+
+# A key that opens omarock: a line in Hyprland's key bindings, between two
+# comments that ./install --uninstall finds again. Omarchy's shell opens the
+# omarock on the screen in use (one per bar).
+bindings=$HOME/.config/hypr/bindings.lua
+key_begin="-- omarock: Super+Ctrl+M opens and closes its panel (./install --uninstall takes this out)"
+key_line="o.bind(\"SUPER + CTRL + M\", \"omarock\", \"omarchy-shell shell toggle $plugin_id\")"
+key_end="-- omarock: end"
+key_set() { grep -qxF -- "$key_end" "$bindings" 2>/dev/null; }
+key_live() {
+  hyprctl binds -j 2>/dev/null | jq -e 'any(.[]; .modmask == 68 and (.key | ascii_downcase) == "m" and .description == "omarock")' >/dev/null
+}
+# What Super+Ctrl+M does now, if anything: Hyprland's description of it
+# (Super is 64, Ctrl 4), else the line that binds it.
+key_taken() {
+  if hyprctl version >/dev/null 2>&1; then
+    hyprctl binds -j 2>/dev/null | jq -r 'first(.[] | select(.modmask == 68 and (.key | ascii_downcase) == "m")
+      | if .description != "" then .description else "\(.dispatcher) \(.arg)" end) // empty'
+  else
+    grep -iE '"SUPER *\+ *CTRL *\+ *M"' "$bindings" 2>/dev/null | head -1
+  fi
+}
+key_out() {  # omarock's lines out of the bindings, with the blank line above them
+  python3 -I - "$bindings" "$key_begin" "$key_end" <<'PY'
+import sys
+path, begin, end = sys.argv[1:]
+lines = open(path).read().split("\n")
+if begin in lines and end in lines:
+    a, b = lines.index(begin), lines.index(end)
+    if a > 0 and lines[a - 1] == "":
+        a -= 1
+    del lines[a:b + 1]
+    open(path, "w").write("\n".join(lines))
+PY
+}
+
+step_key() {
+  step "A key for omarock"
+  local taken errors shown=${bindings/#"$HOME"/\~}
+  if key_set; then ok "Super+Ctrl+M opens omarock"; return; fi
+  if [[ ! -f $bindings ]]; then
+    note "there's no $shown (Omarchy's key bindings) here, so omarock has no key: click it on the bar"
+    return
+  fi
+  if grep -qF "$plugin_id" "$bindings"; then ok "a key in $shown opens omarock already"; return; fi
+  taken=$(key_taken)
+  if [[ -n $taken ]]; then
+    note "Super+Ctrl+M is taken ($taken), so omarock has no key"
+    explain "To give it another, add a line like this to $shown:"
+    block "${key_line/SUPER + CTRL + M/SUPER + CTRL + …}"
+    return
+  fi
+  explain "Super+Ctrl+M can open and close omarock from anywhere, so it never needs the mouse. It's a line in $shown, Hyprland's key bindings, which ./install --uninstall takes out again."
+  confirm "Open omarock with Super+Ctrl+M?" || return 0
+  errors=$(hyprctl configerrors 2>/dev/null | tr -d '[:space:]')
+  backup "$bindings"
+  [[ -s $bindings && $(tail -c 1 "$bindings") != "" ]] && printf '\n' >>"$bindings"
+  printf '\n%s\n%s\n%s\n' "$key_begin" "$key_line" "$key_end" >>"$bindings"
+  # Hyprland reads its config again when a file of it changes.
+  if wait_until "Waiting for Hyprland…" 10 key_live; then
+    ok "Super+Ctrl+M opens omarock"
+  elif [[ $(hyprctl configerrors 2>/dev/null | tr -d '[:space:]') != "$errors" ]]; then
+    bad "Hyprland found an error in its config once the key was added, so it came out again: hyprctl configerrors"
+    key_out
+  else
+    note "added to $shown; Hyprland hasn't picked it up yet (hyprctl reload does)"
   fi
 }
 
@@ -1088,10 +1157,11 @@ setup_local() {
   welcome
   step_mpd
   step_plugin
+  step_key
   step_radio
   save_pending
   printf '\n%sReady%s\n' "$bold" "$reset"
-  explain "Click omarock in the bar (a boombox until something plays). Press ? there for the keys."
+  explain "Click omarock in the bar (a boombox until something plays)$(key_set && echo ", or press Super+Ctrl+M"). Press ? there for the keys."
   explain "For Spotify, SiriusXM or Apple Music: omarock's settings (press , in the panel) set each one up."
 }
 
@@ -1159,6 +1229,17 @@ mpd_back() {  # after a restart: mpd answers again
   local i
   for ((i = 0; i < 40; i++)); do mpc status >/dev/null 2>&1 && break; sleep 0.5; done
   if mpc status >/dev/null 2>&1; then ok "mpd runs"; else bad "mpd doesn't answer: journalctl --user -u mpd"; fi
+}
+
+un_key() {
+  key_set || return 0
+  step "omarock's key"
+  explain "Super+Ctrl+M opens omarock, from these lines in ${bindings/#"$HOME"/\~}:"
+  block "$key_begin" "$key_line" "$key_end"
+  confirm "Take them out?" || return 0
+  backup "$bindings"
+  key_out
+  if key_set; then bad "they're still there"; else ok "Super+Ctrl+M is free again"; fi
 }
 
 un_plugin() {
@@ -1466,12 +1547,13 @@ un_config() {
 uninstall() {
   again="./install --uninstall"
   printf '\n%sTaking omarock off this machine%s\n\n' "$bold" "$reset"
-  explain "This goes through what omarock set up, in reverse: the bar plugin, the services, the patches, its sound output, then its changes to mpd and its own files. It shows what each step removes, and asks first. mpd stays, with your music, its database and playlists."
+  explain "This goes through what omarock set up, in reverse: its key, the bar plugin, the services, the patches, its sound output, then its changes to mpd and its own files. It shows what each step removes, and asks first. mpd stays, with your music, its database and playlists."
   # mpc reaches mpd where omarock did, while that's still there.
   mpd_socket=$(setting socket "")
   [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
   [[ -S $mpd_socket ]] && export MPD_HOST=$mpd_socket
   local before=$step_no backups
+  un_key
   un_plugin
   un_spotify
   un_sxm
@@ -1485,6 +1567,8 @@ uninstall() {
   explain "mpd, mpc and mpd-mpris, with mpd's config, database and playlists. omarock's radio favourites are the mpd playlist \"Radio\"."
   mapfile -t backups < <(compgen -G "$(mpd_conf).before-omarock-*")
   if ((${#backups[@]})); then explain "Copies of mpd.conf from before each change:"; listing "${backups[@]}"; fi
+  mapfile -t backups < <(compgen -G "$bindings.before-omarock-*")
+  if ((${#backups[@]})); then explain "Copies of Hyprland's key bindings from before each change:"; listing "${backups[@]}"; fi
   explain "This clone, $repo: delete it when you're done. On a Mac, the Apple Music bridge comes off with ./install --uninstall in its clone there (bridge/README.md)."
 }
 

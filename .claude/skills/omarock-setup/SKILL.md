@@ -18,7 +18,8 @@ The installer is interactive, checking first and asking before each change. It
 needs a real terminal (gum prompts), so it can't run from Claude's shell:
 suggest the user run it in one of their own.
 - `./install` in the clone sets up local music and the radio: mpd, then the
-  plugin on the bar.
+  plugin on the bar, and offers Super+Ctrl+M to open it (a marked line in
+  `~/.config/hypr/bindings.lua`, if the key is free).
 - Each source then has its own: **Set up…** in omarock's settings (`,` in the
   panel) opens its setup window, which takes the keys or login and then runs
   it in a terminal, or the user runs `./install spotify`,
@@ -86,6 +87,11 @@ below.
 - **Check it loaded:** `journalctl --user -b | grep "omarock .* loaded"`. The bar
   shows a boombox (nothing queued), or the song playing.
 - **"Waiting for mpd…"** means the socket: back to step 1.
+- **A key to open it** (ask first: it's Hyprland config): check the key is free
+  (`omarchy menu keybindings --print`), then add `o.bind("SUPER + CTRL + M",
+  "omarock", "omarchy-shell shell toggle mre.omarock")` to
+  `~/.config/hypr/bindings.lua`, backed up first. Hyprland reloads it on save;
+  `hyprctl configerrors` should stay empty.
 
 ## 3. The audio bus (optional: omarock's sound output)
 
