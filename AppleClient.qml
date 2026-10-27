@@ -249,6 +249,9 @@ Item {
   // The long poll: the bridge answers at once when its status moved past
   // ours, else after up to 25 s.
   function poll() {
+    // Called later (Qt.callLater) by a reply that landed mid-reload: the
+    // client may be half torn down by then ("Property 'get' … is not a function").
+    if (!root || typeof root.get !== "function") return
     var sequence = ++root.pollSequence
     var since = root.bridgeStatus.seq
     root.get("/v1/status" + (since !== undefined ? "?since=" + since : ""), function(data, error) {
