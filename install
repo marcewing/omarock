@@ -907,7 +907,7 @@ step_spotify() {
   if sp_paired; then
     ok "Soloist is signed in to your account"
   else
-    explain "Now you must pair Soloist with your account, once. Open Spotify on your phone or computer, on this network, then open Connect to a device, pick $(hostname), and play something."
+    explain "Now you must pair Soloist with your account."
     if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
       local port nets=()
       port=$(ss -ltnpH 2>/dev/null | awk '/"soloist"/ && $4 !~ /^127\./ {n = split($4, a, ":"); print a[n]; exit}')
@@ -917,7 +917,7 @@ step_spotify() {
       elif ((${#nets[@]} == 0)); then
         note "this machine isn't on a network (no default route), so there's nothing to pair over"
       else
-        explain "Your firewall (ufw) hides Soloist from the network. This opens its port ($port/tcp) and mDNS (5353/udp) to your local network only (${nets[*]}) while you pair. They close again afterwards, or in 11 minutes at the latest, even if this window is closed."
+        explain "Your firewall (ufw) hides Soloist from the network, so we will need to open it temporarily for the pairing. This opens its port ($port/tcp) and mDNS (5353/udp) to your local network only (${nets[*]}) while you pair. The ports will close again afterwards, or in 11 minutes at the latest, even if this window is closed."
       fi
       if [[ -n $port ]] && ((${#nets[@]})) && confirm "Open them for the pairing (sudo ufw)?"; then
         local net spec rule script=""
@@ -938,6 +938,7 @@ step_spotify() {
         fi
       fi
     fi
+    explain $'Now, open Spotify on your phone or computer, on this network,\n'"then open Connect to a device, pick $(hostname), and play something."
     if wait_until "Waiting for the pairing… (Ctrl-C to do it later)" 600 sp_paired; then
       ok "Soloist is signed in to your account"
     else
