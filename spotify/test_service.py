@@ -14,6 +14,7 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("omarock_spotify", HERE / "omarock-spotify.py")
 service = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(service)
+REAL_CALL = service.spotify_web.call  # the tests below swap in their own
 failures = []
 
 
@@ -94,6 +95,7 @@ def main():
     sign_out()
     queue_jump()
     web_pages()
+    dropped()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
 
@@ -377,6 +379,75 @@ def web_pages():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def dropped():
+    """Marc, 10-27: opening an album said "omarock-spotify failed: Remote end
+    closed connection without response". Spotify had closed the connection
+    without answering; the same album opened at once afterwards."""
+    import http.client
+    import http.server
+    import json
+    import tempfile
+    web = service.spotify_web
+    web.call = REAL_CALL
+    folder = Path(tempfile.mkdtemp())
+    web.TOKENS = folder / "spotify-token.json"
+    web.TOKENS.write_text(json.dumps({"access_token": "a", "refresh_token": "r", "expires_at": time.time() + 3600}))
+    seen, drops = [], [0]
+
+    class Api(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+
+        def answer(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            seen.append(self.command)
+            if drops[0]:
+                drops[0] -= 1
+                return  # the connection closes without a word
+            body = b'{"name": "Sixteen Stone"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        do_GET = do_POST = answer
+    api = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Api)
+    threading.Thread(target=api.serve_forever, daemon=True).start()
+    real_api, web.API = web.API, f"http://127.0.0.1:{api.server_address[1]}"
+    ours = service.ThreadingHTTPServer(("127.0.0.1", 0), service.Handler)
+    threading.Thread(target=ours.serve_forever, daemon=True).start()
+
+    def fails(method):
+        try:
+            web.call(method, "/albums/x")
+            return ""
+        except web.ApiError as e:
+            return str(e)
+    try:
+        drops[0] = 1
+        got = web.call("GET", "/albums/x")
+        check("dropped once: a GET is tried again", got == (200, {"name": "Sixteen Stone"}) and seen == ["GET", "GET"],
+              f"{got} {seen}")
+        seen.clear(); drops[0] = 2
+        error = fails("GET")
+        check("dropped twice: a GET says so", "closed the connection" in error and seen == ["GET", "GET"],
+              f"{error!r} {seen}")
+        seen.clear(); drops[0] = 1
+        error = fails("POST")
+        check("dropped: a POST isn't tried again", "closed the connection" in error and seen == ["POST"],
+              f"{error!r} {seen}")
+        seen.clear(); drops[0] = 2
+        conn = http.client.HTTPConnection("127.0.0.1", ours.server_address[1], timeout=5)
+        conn.request("GET", "/v1/albums/catalog/x", headers={"X-Omarock": "1"})
+        reply = conn.getresponse()
+        text = reply.read().decode()
+        check("dropped: the panel gets a 502 that says to try again",
+              reply.status == 502 and "try again" in json.loads(text)["error"], f"{reply.status} {text}")
+    finally:
+        web.API = real_api
+        for server in (api, ours):
+            server.shutdown()
+            server.server_close()
 
 if __name__ == "__main__":
     main()

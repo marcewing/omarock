@@ -23,6 +23,7 @@ Spotify ends a sign-in 6 months after it was given; then log in again.
 import base64
 import hashlib
 import html
+import http.client
 import http.server
 import json
 import os
@@ -85,6 +86,23 @@ def token_request(fields):
         if e.code in (400, 401):
             raise NotSignedIn(f"Spotify refused the sign-in ({e.code}): {text}")
         raise ApiError(f"Spotify's token service said {e.code}: {text}")
+    except (OSError, http.client.HTTPException) as e:
+        # Not tried again: a renewal Spotify carried out may have replaced
+        # the refresh token sent.
+        raise unanswered(e)[1] from e
+
+
+def unanswered(e):
+    """(worth another try, the ApiError) for a request Spotify didn't answer.
+
+    Spotify's servers now and then close a connection without answering
+    (RemoteDisconnected), or don't answer in time."""
+    cause = e.reason if isinstance(e, urllib.error.URLError) else e
+    if isinstance(cause, TimeoutError):
+        return False, ApiError("Spotify didn't answer in time; try again")
+    if isinstance(cause, (ConnectionError, http.client.HTTPException)):
+        return True, ApiError("Spotify closed the connection without answering; try again")
+    return False, ApiError(f"Couldn't reach Spotify ({cause}); try again")
 
 
 def stored(data, previous=None):
@@ -187,21 +205,29 @@ def sign_out():
 
 
 def call(method, path, body=None):
-    """(status, JSON or text) for one Web API request; raises NotSignedIn."""
+    """(status, JSON or text) for one Web API request; raises NotSignedIn, or
+    ApiError when Spotify doesn't answer (a GET dropped unanswered is tried
+    once more first: it changes nothing)."""
     url = path if path.startswith("http") else API + path
     data = json.dumps(body).encode() if body is not None else (b"" if method in ("PUT", "POST") else None)
     request = urllib.request.Request(url, data=data, method=method,
                                      headers={"Authorization": "Bearer " + access_token(), "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=20) as reply:
-            text = reply.read().decode()
-            return reply.status, json.loads(text) if text.strip() else None
-    except urllib.error.HTTPError as e:
-        text = e.read().decode(errors="replace")
+    for attempt in (1, 2):
         try:
-            return e.code, json.loads(text)
-        except ValueError:
-            return e.code, text
+            with urllib.request.urlopen(request, timeout=20) as reply:
+                text = reply.read().decode()
+                return reply.status, json.loads(text) if text.strip() else None
+        except urllib.error.HTTPError as e:
+            text = e.read().decode(errors="replace")
+            try:
+                return e.code, json.loads(text)
+            except ValueError:
+                return e.code, text
+        except (OSError, http.client.HTTPException) as e:
+            again, error = unanswered(e)
+            if not (again and method == "GET" and attempt == 1):
+                raise error from e
+            time.sleep(0.3)
 
 
 def main():

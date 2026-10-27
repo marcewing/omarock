@@ -45,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 # omarock's sound output (audio/, ./install sound): Soloist plays into it
@@ -792,7 +792,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(400, {"error": str(e)})
         except RuntimeError as e:
             return self.reply(409, {"error": str(e)})
-        except ApiError as e:
+        except (ApiError, spotify_web.ApiError) as e:
             return self.reply(502, {"error": str(e)})
         except Exception as e:  # noqa: BLE001
             log(f"{method} {url.path}: {e!r}")
