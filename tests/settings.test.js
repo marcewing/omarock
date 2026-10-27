@@ -23,7 +23,7 @@ test("Spotify's sign-in row: Sign in, and once signed in, Sign out", () => {
 test("the file-only settings aren't on the screen, and still apply from the file", () => {
   const all = { local: { setUp: true }, spotify: { setUp: true }, sxm: { setUp: true }, apple: { setUp: true }, sound: { setUp: true } }
   const fileOnly = ["socket", "spotifyService", "sxmService", "radioBrowser", "appleTokenFile", "appleBridge", "appleStream", "appleRejoin",
-    "chartSource", "timeMachineYear"]
+    "chartSource", "timeMachineYear", "historyAfter"]
   assert.ok(!keys(Settings.shown(all)).some(k => fileOnly.includes(k)))
   assert.ok(!Settings.groups.some(g => g.title === "ADVANCED"))
   assert.equal(Settings.value({ socket: "/run/mpd/socket" }, {}, "socket", ""), "/run/mpd/socket")
@@ -54,6 +54,16 @@ test("Time Machine is off until switched on, in a group of its own; the year is 
   assert.ok(!("timeMachineYear" in Settings.defaults))
   assert.equal(Settings.value({ timeMachineYear: 1996 }, {}, "timeMachineYear", 0), 1996)
   assert.match(row(Settings.shown({}), "lookup").description, /Top 100/)
+})
+
+test("History is on, for 7 days, both settings; and a button clears it", () => {
+  assert.equal(Settings.defaults.history, true)
+  assert.equal(Settings.defaults.historyDays, 7)
+  assert.deepEqual(Settings.groups.find(g => g.title === "HISTORY").keys, ["history", "historyDays", "historyClear"])
+  const days = row(Settings.shown({}), "historyDays")
+  assert.equal(days.type, "integer")
+  assert.ok(days.min === 1 && days.max === 90)
+  assert.equal(row(Settings.shown({}), "historyClear").type, "action")
 })
 
 const keys = rows => rows.map(r => r.key)
@@ -107,7 +117,7 @@ test("the settings' tabs: omarock's own groups first, then a tab for each piece 
   assert.deepEqual(Settings.tabs, ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"])
   assert.ok(Settings.groups.every(g => Settings.tabs.includes(g.tab)))
   assert.deepEqual(Settings.groups.filter(g => g.tab === "omarock").map(g => g.title),
-    ["YOUR MUSIC AND THE RADIO", "TIME MACHINE", "THE PANEL AND THE BAR"])
+    ["YOUR MUSIC AND THE RADIO", "HISTORY", "TIME MACHINE", "THE PANEL AND THE BAR"])
   // A source's own tab names it: its group has no heading.
   for (const [tab, first] of [["Apple Music", "appleMusic"], ["SiriusXM", "siriusXM"], ["Spotify", "spotify"], ["Sound", "sound"]]) {
     const groups = Settings.groups.filter(g => g.tab === tab)

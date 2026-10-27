@@ -1595,6 +1595,15 @@ un_config() {
   fi
 }
 
+# History (H): what's been played here, the last few days.
+un_history() {
+  local file=$share/history.jsonl
+  [[ -f $file ]] || return 0
+  step "omarock's history"
+  explain "${file/#"$HOME"/\~} lists what you've played here lately (History, in the panel)."
+  confirm "Delete it?" && run rm -f "$file" && ok "deleted"
+}
+
 # What omarock keeps only to be quicker: the Top 100 charts and the radio's
 # local stations, fetched again whenever they're wanted.
 un_cache() {
@@ -1622,6 +1631,7 @@ uninstall() {
   un_bus
   un_mpd
   un_config
+  un_history
   un_cache
   [[ -d $share ]] && rmdir "$share" 2>/dev/null
   # How the last setup went, for the settings, which are gone now.

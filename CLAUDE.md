@@ -3,7 +3,8 @@
 omarock is a music player for the Omarchy bar: a Quickshell plugin (the QML and
 JS at the top level) that is a client for mpd. mpd holds all the state (the
 queue, playlists, playback), so `mpc`, the media keys and omarock always agree.
-Optional services add more sources: `spotify/` (Spotify through Spotify's
+The one thing outside it is History, what's been played from every source,
+which `tools/omarock-history` lists. Optional services add more sources: `spotify/` (Spotify through Spotify's
 Soloist player), `sxm/` (SiriusXM), and `bridge/` (Apple Music, through an app
 on a Mac). `audio/` is an optional PipeWire bus that gives omarock one volume
 and pins its sound to one output.

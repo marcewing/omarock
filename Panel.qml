@@ -15,6 +15,7 @@ import "Setup.js" as Setup
 import "Hints.js" as Hints
 import "TimeMachine.js" as TimeMachine
 import "Keeper.js" as Keeper
+import "History.js" as History
 
 // omarock's popup. Laid out like crmne.hyprmoncfg: a compact panel with an
 // Expand button, and an expanded panel in the same popup with the sources,
@@ -131,6 +132,12 @@ Panel {
   readonly property int listYear: root.lookupLive ? 0 : root.timeYear
   // Where Top 100 plays: the service playing, else the lookup's.
   readonly property string chartService: root.bridgeMode ? root.bridge.serviceKey : root.lookupTarget
+  // History (H): what's been played here, from every source, for the last
+  // historyDays (History.js). historyAfter, in the file only, is a test's:
+  // a play counts after that many seconds.
+  readonly property bool historyEnabled: root.setting("history", true) === true
+  readonly property int historyDays: Math.max(1, Math.min(90, parseInt(root.setting("historyDays", 7), 10) || 7))
+  readonly property int historyAfter: parseInt(root.setting("historyAfter", 0), 10) || 0
   property bool yearPickerOpen: false
   // What's listed belongs to the year it was listed for.
   onTimeYearChanged: root.clearSearch()
@@ -147,6 +154,12 @@ Panel {
     root.pickerItem = null
     root.clearSearch()
     root.recheckQueue()
+    // A song of yours from History, once local music is back.
+    if (root.source === "local" && root.historyPending !== "") {
+      var file = root.historyPending
+      root.historyPending = ""
+      Qt.callLater(function() { client.queueFiles([file], "play") })
+    }
   }
   // The channel to come back to when switching to SiriusXM.
   property string lastChannel: ""
@@ -169,7 +182,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.10.7"
+  readonly property string version: "0.11.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -484,6 +497,7 @@ Panel {
     if (kind === "playtop") return hint("Enter", "play them all", "Play the chart's songs, from the top", true)
     if (kind === "shuffletop") return hint("Enter", "shuffle them", "Play the chart's songs in an order of their own", true)
     if (kind === "chartmiss") return null
+    if (kind === "historylookup") return hint("Enter", "look it up", "Find it in Apple Music or Spotify (a station's song)", true)
     if (kind === "shuffleall") return hint("Enter", "shuffle all", "Shuffle all the songs", true)
     if (kind === "savequeue") return hint("Enter", "save the queue", "Save the queue as a playlist", true)
     return kind !== "note" && kind !== "" ? hint("Enter", "play", "Play it", true) : null
@@ -522,12 +536,12 @@ Panel {
           row.favorite ? "Take it out of your favourites" : "Add it to your favourites"), info, steps]
         : [hint("Space", "play/stop", "Play or stop", true),
           hint("/", root.sxmMode ? "find a channel" : "find a station", root.sxmMode ? "Search the channels" : "Search for a station"), steps]
-      return parts.concat(root.cursorActive && row ? [] : time, source, [keys])
+      return parts.concat(root.cursorActive && row ? [] : time, source, [hint("H", "history", "What you've played here")], [keys])
     }
     if (!root.searchMode && !root.browsing) {
       if (!root.cursorActive || !row)
         return [hint("Space", "play/pause", "Play or pause", true), hint("/", "search", "Search"),
-          hint("P", "playlists", "Your playlists")].concat(time, source, [keys])
+          hint("P", "playlists", "Your playlists")].concat(time, source, [hint("H", "history", "What you've played here"), keys])
       parts = [hint("Enter", "play", "Play from this song", true), hint("A", "add to playlist", "Add the song to a playlist")]
       if (!root.bridgeMode || root.bridge.canRemove) parts.push(hint("x", "remove", "Take the song out of the queue"))
       parts.push(info)
@@ -1060,6 +1074,7 @@ Panel {
   // Esc or Backspace goes back to where it was opened from.
   function opens(kind) {
     return kind === "artist" || kind === "album" || kind === "genre" || kind === "compilations" || kind === "playlist"
+      || kind === "historylist"
   }
 
   // Rows that play and add to the queue (▶, +, a). A genre's compilations
@@ -1077,7 +1092,8 @@ Panel {
   // Shuffle all songs, Save the queue as a playlist): its heading shows them
   // as buttons, and the list leaves them out. The cursor still goes up onto
   // them from the first song, so Enter, a and A act on the whole of it there.
-  readonly property var buttonKinds: ["playalbum", "playplaylist", "playall", "shuffleall", "playtop", "shuffletop", "savequeue"]
+  readonly property var buttonKinds: ["playalbum", "playplaylist", "playall", "shuffleall", "playtop", "shuffletop", "savequeue",
+    "historylist"]
 
   function buttonRows(rows) {
     var count = 0
@@ -1098,7 +1114,8 @@ Panel {
     // playlist's heading says it already.
     for (var i = 0; i < count; i++)
       buttons.push({ index: i, mode: "play", icon: rows[i].lead, label: root.buttonLabel(rows[i]),
-        tip: root.buttonTip(rows[i]) + " (Enter)", about: rows[i].kind === "playplaylist" ? "" : rows[i].subtitle || "" })
+        tip: root.buttonTip(rows[i]) + " (Enter)",
+        about: rows[i].kind === "playplaylist" || rows[i].kind === "historylist" ? "" : rows[i].subtitle || "" })
     if (count > 0 && root.rowQueues(rows[0]))
       buttons.push({ index: 0, mode: "add", icon: "󰐕", label: "Add to queue", tip: "Add its songs to the end of the queue (a)" })
     if (count > 0 && root.playlistItem(level.entry, rows[0]))
@@ -1108,6 +1125,7 @@ Panel {
 
   function buttonLabel(row) {
     if (row.kind === "savequeue") return "Save the queue as a playlist"
+    if (row.kind === "historylist") return "History"
     if (row.kind === "shuffleall" || row.kind === "shuffletop") return "Shuffle"
     if (row.kind === "playall") return row.title
     return "Play"
@@ -1115,6 +1133,7 @@ Panel {
 
   function buttonTip(row) {
     if (row.kind === "savequeue") return "Save the songs in the queue as a playlist"
+    if (row.kind === "historylist") return "What you've played here lately, from every source (also H)"
     var what = row.kind === "playalbum" ? "the album" : row.kind === "playplaylist" ? "the playlist"
       : row.kind === "shuffleall" ? "the genre's songs, shuffled,"
       : row.kind === "playtop" ? "the chart's songs" : row.kind === "shuffletop" ? "the chart's songs, shuffled,"
@@ -1123,6 +1142,9 @@ Panel {
   }
 
   function makeEntry(row, index) {
+    if (row.kind === "historylist")
+      return { kind: "history", title: "History", artist: "", album: "", genre: "", playlist: "", from: index,
+        rows: [], info: ({}), files: [], loaded: false }
     if (row.apple) {
       return { kind: row.kind, apple: row.apple, title: row.name || row.title, artist: "", album: "", genre: "",
         playlist: "", from: index, rows: [], info: ({}), files: [], loaded: false }
@@ -1394,6 +1416,141 @@ Panel {
     })
   }
 
+  // ---------- History (H): what's been played here (History.js) ----------
+
+  // What's playing, as History.entryFor takes it.
+  function historyNow() {
+    if (root.bridgeMode) {
+      var item = root.bridge.bridgeStatus.song
+      if (!item) return null
+      return { title: item.title, artist: item.artist, album: item.album, duration: item.duration,
+        ref: { kind: "song", id: item.id, source: item.source || "catalog" } }
+    }
+    var song = root.player.currentSong || ({})
+    if (root.sxmMode)
+      return { title: song.title, artist: song.artist, station: sxm.channel ? sxm.channel.name : root.songAlbum,
+        isAd: !!(sxm.now && sxm.now.isAd) }
+    if (root.radioMode) return { title: song.title, artist: song.artist, station: song.album }
+    return { title: root.songTitle, artist: root.songArtist, album: root.songAlbum, file: song.file,
+      duration: parseFloat(song.duration || song.time || 0) }
+  }
+
+  // The song playing, and how long it's been heard here: once that's long
+  // enough (History.counts), it's added. Only one panel adds (Keeper.js).
+  property var historyHeard: ({ key: "", seconds: 0, added: false })
+  function tickHistory(seconds) {
+    if (!Keeper.claim(root.keeperId, "history")) return
+    var entry = History.entryFor(root.source, root.historyNow())
+    var key = History.keyOf(entry)
+    var heard = root.historyHeard
+    if (key !== heard.key) heard = root.historyHeard = { key: key, seconds: 0, added: false }
+    if (!entry || heard.added) return
+    heard.seconds += seconds
+    if (!History.counts(heard.seconds, entry.duration || 0, root.live, root.historyAfter)) return
+    heard.added = true
+    entry.at = Date.now()
+    history.add(entry)
+  }
+
+  // H, or History at the top of Playlists: opened from the queue, as
+  // Playlists is, on any source.
+  function openHistory() {
+    if (root.browseRoot === "queue" && root.browseStack.length === 1 && root.browseTop.kind === "history") return
+    root.clearSearch()
+    root.leaveSearch()
+    root.browseRoot = "queue"
+    var entry = root.makeEntry({ kind: "historylist" }, -1)
+    root.browseStack = [entry]
+    root.loadBrowse(entry)
+  }
+
+  function loadHistory(entry, done) {
+    history.read(function(entries) {
+      root.showHistory(entry, entries)
+      done()
+    })
+  }
+
+  function showHistory(entry, entries) {
+    entry.rows = History.rows(entries, Date.now(), function(at) {
+      return new Date(at).toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
+    })
+    entry.info = History.info(entries, root.historyDays, root.historyEnabled)
+    entry.files = []
+    entry.loaded = true
+  }
+
+  // A play added, or the list cleared: History, if it's open, shows it.
+  function historyChanged() {
+    var entry = root.browseTop
+    if (!entry || entry.kind !== "history" || !entry.loaded) return
+    root.showHistory(entry, history.entries)
+    root.browseRows = entry.rows
+    root.browseInfo = entry.info
+  }
+
+  // History's own button at the top of Playlists, after Save the queue
+  // (a button row: Panel.buttonKinds).
+  function withHistoryRow(rows) {
+    var at = 0
+    while (at < rows.length && root.buttonKinds.indexOf(rows[at].kind) >= 0) at++
+    var row = { kind: "historylist", lead: "󰋚", title: "History", noQueue: true,
+      subtitle: root.historyEnabled ? "What you've played here in the last " + (root.historyDays === 1 ? "day" : root.historyDays + " days")
+        : "Off: switch it on in the settings (,)" }
+    return rows.slice(0, at).concat([row], rows.slice(at))
+  }
+
+  // A song from History plays where it was heard, when that's still there:
+  // a song of yours from mpd, an Apple Music or Spotify song by its id (that
+  // service then becomes the source, as Top 100's does). A station's song
+  // can't be heard again from the station, so it's looked up in Apple Music
+  // or Spotify, as the card's links do; so is a song from a service that's
+  // off or can't be reached.
+  property string historyPending: ""
+  function activateHistory(row, mode) {
+    var e = row.history
+    if (!e) return
+    if (mode === "open") mode = "play"
+    if (e.source === "local") {
+      if (mode === "add") {
+        client.queueFiles([e.file], "add")
+        root.say("Added " + e.title + " to the queue" + (root.source !== "local" ? " of your music" : ""))
+        return
+      }
+      if (root.source === "local") {
+        client.queueFiles([e.file], "play")
+        root.clearSearch()
+        root.leaveSearch()
+      } else {
+        // Once the switch has happened (it puts back what local music was
+        // playing): onSourceChanged.
+        root.historyPending = e.file
+        historyPendingDrop.restart()
+        root.setSource("local")
+      }
+      root.say("Playing " + e.title)
+      return
+    }
+    var target = e.source === "apple" && root.appleEnabled ? apple : e.source === "spotify" && root.spotifyEnabled ? spotify : null
+    if (target && e.ref && target.ready) {
+      var service = e.source
+      target.playItems([e.ref], mode === "add" ? "add" : "play", 0, function(data, error) {
+        if (error !== "") root.say(error)
+        else if (mode === "add") root.say("Added " + e.title + " to " + target.service + "'s queue")
+        else {
+          root.setSource(service)
+          root.say("Playing " + e.title + " on " + target.service)
+        }
+      })
+      return
+    }
+    if (mode === "add") {
+      root.say(e.title + " was on " + (e.station || History.NAMES[e.source]) + ": Enter looks it up")
+      return
+    }
+    root.lookUpSong(e.title, e.artist, "song")
+  }
+
   // The playing song's album, artist or genre, as a level to open, or null:
   // Apple Music's and Spotify's songs name their album and artist by id, and
   // a genre opens Apple's charts when it's one of its top genres; local songs
@@ -1438,13 +1595,18 @@ Panel {
       root.say("The station isn't saying what song this is")
       return
     }
+    root.lookUpSong(song.title, song.artist, kind)
+  }
+
+  // A song (or its artist) looked up there: a station's, or one from History.
+  function lookUpSong(title, artist, kind) {
     var service = root.lookupTarget
     if (service === "") {
       root.say("Switch on Apple Music or Spotify to look up the station's songs")
       return
     }
     var target = service === "apple" ? apple : spotify
-    var text = kind === "artist" ? song.artist : song.title + " " + song.artist
+    var text = kind === "artist" ? artist : title + " " + artist
     function go() {
       root.clearSearch()
       root.lookupService = service
@@ -1453,7 +1615,7 @@ Panel {
       root.leaveSearch()
       if (root.searchField) root.searchField.text = text
       root.setQuery(text)
-      root.say(target.service + ": " + (kind === "artist" ? song.artist : song.title) + ". Enter plays it there; Esc comes back")
+      root.say(target.service + ": " + (kind === "artist" ? artist : title) + ". Enter plays it there; Esc comes back")
     }
     if (target.ready) go()
     else target.checkHealth(function(ok, error) {
@@ -1818,7 +1980,7 @@ Panel {
     return { title: entry.title, coverFile: "",
       subtitle: entry.kind === "artist" ? "Artist" : entry.kind === "genre" ? "Genre"
         : entry.kind === "playlist" ? "Playlist" : entry.kind === "playlists" ? ""
-        : entry.kind === "top100" ? "Billboard's year-end chart" : "Album" }
+        : entry.kind === "top100" ? "Billboard's year-end chart" : entry.kind === "history" ? "What you've played here" : "Album" }
   }
 
   // The preview column (expanded panel, before anything is opened): what the
@@ -1885,7 +2047,11 @@ Panel {
     // playlist, an artist or a genre only those from its year or before.
     var year = root.listYear
     if (ref.kind === "playlists") {
-      bridge.refreshPlaylists(shown(function(data) { return Apple.playlistsView(data, bridge.status.queueLength, bridge.service) }))
+      bridge.refreshPlaylists(shown(function(data) {
+        var view = Apple.playlistsView(data, bridge.status.queueLength, bridge.service)
+        view.rows = root.withHistoryRow(view.rows)
+        return view
+      }))
     } else if (ref.kind === "album") {
       bridge.album(ref.source, ref.id, shown(function(data) {
         var after = !TimeMachine.inYear(data.album, year)
@@ -1974,6 +2140,10 @@ Panel {
       root.loadTop100(entry, done)
       return
     }
+    if (entry.kind === "history") {
+      root.loadHistory(entry, done)
+      return
+    }
     function show(rows, info, files) {
       entry.rows = rows
       entry.info = info
@@ -1991,7 +2161,7 @@ Panel {
     if (entry.kind === "playlists") {
       client.playlistSummaries(function(playlists) {
         if (!playlists) { failed(); return }
-        show(root.playlistsRows(playlists), { title: entry.title, coverFile: "",
+        show(root.withHistoryRow(root.playlistsRows(playlists)), { title: entry.title, coverFile: "",
           subtitle: playlists.length === 0 ? "None yet" : root.countText(playlists.length, "playlist") }, [])
       })
     } else if (entry.kind === "playlist") {
@@ -2322,6 +2492,14 @@ Panel {
       root.activateTop100(entry, row, index, mode)
       return
     }
+    if (row.kind === "historylist") {
+      if (mode !== "add") root.openRow(index)
+      return
+    }
+    if (entry && entry.kind === "history") {
+      root.activateHistory(row, mode)
+      return
+    }
     if (row.apple || (entry && entry.apple)) {
       root.activateApple(entry, row, index, mode)
       return
@@ -2636,6 +2814,10 @@ Panel {
     if (root.setupWindows[key]) return root.openSetupWindow(root.setupWindows[key])
     if (root.setupActions[key]) return root.runSetup(root.setupActions[key], false)
     if (root.removeActions[key]) return root.runSetup(root.removeActions[key], true)
+    if (key === "historyClear") {
+      root.confirmTarget = { clearHistory: true }
+      return
+    }
     if (key !== "spotifyLogin") return
     if (root.settingStates.spotify.signedIn) {
       root.confirmTarget = { signOut: true }
@@ -2706,9 +2888,15 @@ Panel {
     var folder = root.confirmTarget ? root.confirmTarget.folder || "" : ""
     var name = root.confirmTarget ? root.confirmTarget.playlist || "" : ""
     var signOut = !!root.confirmTarget && root.confirmTarget.signOut === true
+    var clearHistory = !!root.confirmTarget && root.confirmTarget.clearHistory === true
     root.cancelConfirm()
     if (folder !== "") {
       root.saveAccount("musicFolder", folder)
+      return
+    }
+    if (clearHistory) {
+      history.clear(function() { root.say("History cleared") })
+      root.historyHeard = { key: "", seconds: 0, added: false }
       return
     }
     if (signOut) {
@@ -2737,6 +2925,11 @@ Panel {
   function playlistItem(entry, row) {
     if (!row || row.missing) return null
     var kind = row.kind
+    // History: a song of yours, into one of your playlists (while the picker
+    // has mpd's, on local music or a station).
+    if (entry && entry.kind === "history")
+      return kind === "history" && row.history.source === "local" && !root.browseBridgeMode
+        ? { result: { kind: "song", file: row.file }, title: row.title } : null
     // Top 100: a song, or the chart's songs found (as a playlist of the service's).
     if (entry && entry.kind === "top100") {
       if (kind === "playtop") return (entry.songItems || []).length > 0 ? { result: { items: entry.songItems }, title: entry.title } : null
@@ -2867,7 +3060,7 @@ Panel {
   function infoRequest(entry, row) {
     if (!row) return null
     var kind = row.kind
-    var song = kind === "song" || kind === "track" || kind === "queue"
+    var song = kind === "song" || kind === "track" || kind === "queue" || (kind === "history" && row.history.source === "local")
     if (kind === "station") return { type: "station", uuid: row.stationUuid }
     if (kind === "channel") return { type: "channel", id: row.channelId }
     if (row.item && (song || kind === "album")) return { type: "apple", item: row.item }
@@ -2982,6 +3175,7 @@ Panel {
     else if (t === ",") root.openSettings()
     else if (t === "i") root.showInfo()
     else if (t === "P") root.openPlaylists()
+    else if (t === "H") root.openHistory()
     else if (t === "t" && root.timeMachineEnabled) root.openYearPicker()
     else if (t === "T" && root.timeMachineEnabled) root.openTop100()
     else if (t === "o") root.openPlaying("album")
@@ -3252,6 +3446,28 @@ Panel {
     onChanged: root.top100Changed()
   }
 
+  // History's file, and once a second while something plays, whether the
+  // song playing has now been heard long enough to count (History.counts).
+  HistoryClient {
+    id: history
+    path: Quickshell.env("HOME") + "/.local/share/omarock/history.jsonl"
+    days: root.historyDays
+    onChanged: root.historyChanged()
+  }
+  Timer {
+    id: historyTick
+    interval: 1000
+    repeat: true
+    running: root.historyEnabled && root.playing && root.hasSong
+    onTriggered: root.tickHistory(1)
+  }
+  // A song of yours from History waits for local music this long.
+  Timer {
+    id: historyPendingDrop
+    interval: 10000
+    onTriggered: root.historyPending = ""
+  }
+
   Timer {
     id: searchDelay
     interval: 180
@@ -3484,13 +3700,16 @@ Panel {
           : root.confirmTarget && root.confirmTarget.signOut
           ? "Sign omarock out of Spotify? Search and your library stop working here until you sign in again. "
             + "Spotify's player stays paired to your account."
+          : root.confirmTarget && root.confirmTarget.clearHistory
+          ? "Clear the history? Everything played so far is forgotten. Your music and playlists stay as they are."
           : root.confirmTarget
           ? "Delete the playlist “" + root.confirmTarget.playlist + "”? "
             + (root.confirmTarget.songs > 0 ? "Its " + root.countText(root.confirmTarget.songs, "song") + " stay in the library."
               : "It's empty.")
           : ""
         confirmText: root.confirmTarget && root.confirmTarget.folder ? "Change it"
-          : root.confirmTarget && root.confirmTarget.signOut ? "Sign out" : "Delete"
+          : root.confirmTarget && root.confirmTarget.signOut ? "Sign out"
+          : root.confirmTarget && root.confirmTarget.clearHistory ? "Clear" : "Delete"
         background: Commons.Color.popups.background
         foreground: root.foreground
         fontFamily: root.fontFamily

@@ -59,9 +59,13 @@ Rectangle {
       ["o  O  g", "Open the album, artist or genre of the song playing (or click them, or the cover, above). On SiriusXM or the radio, o and O look the song or artist up in Apple Music or Spotify"]
     ] },
     { title: "PLAYLISTS", keys: [
-      ["P", "Your playlists; saving the queue as one is at the top"],
+      ["P", "Your playlists; saving the queue as one, and History, are at the top"],
       ["A", "Add the song, album, artist or genre to a playlist, or start a new one"],
       ["x", "In a playlist, remove the song; on a playlist, delete it (asks first)"]
+    ] },
+    { title: "HISTORY", keys: [
+      ["H", "What you've played here lately, by day, from every source (also a button at the top of Playlists)"],
+      ["Enter", "In History: play the song again where it was heard; a station's song is looked up in Apple Music or Spotify"]
     ] },
     { title: "TIME MACHINE", keys: [
       ["t", "Enter a year: only music from then or before shows, and the queue's later songs come out (once Time Machine is switched on in the settings)"],

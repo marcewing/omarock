@@ -1,0 +1,40 @@
+#!/bin/bash
+# omarock-history: what's been played here, as omarock's History (H) lists
+# it, for Claude and the terminal: ~/.local/share/omarock/history.jsonl, a
+# line of JSON a play (History.js), kept for the historyDays setting.
+#
+#   omarock-history              the plays kept (historyDays, as the panel shows
+#                                them), newest first: when, where, the song
+#   omarock-history --days N     the last N days instead
+#   omarock-history --json       the entries themselves, oldest first
+#   omarock-history clear        forget them all
+set -euo pipefail
+file=$HOME/.local/share/omarock/history.jsonl
+days="" json=false
+while (($#)); do
+  case $1 in
+    --days) [[ ${2:-} =~ ^[0-9]+$ ]] || { echo "omarock-history: --days needs a number" >&2; exit 2; }
+      days=$2; shift ;;
+    --json) json=true ;;
+    clear) rm -f "$file"; echo "cleared"; exit 0 ;;
+    *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  esac
+  shift
+done
+[[ -s $file ]] || { $json && echo "[]" || echo "nothing played yet"; exit 0; }
+[[ -n $days ]] || days=$(jq -r '(.historyDays // 7) | floor' "$HOME/.config/omarock/settings.json" 2>/dev/null || echo 7)
+[[ $days =~ ^[0-9]+$ ]] || days=7
+since=$(( ($(date +%s) - days * 86400) * 1000 ))
+# Lines that aren't JSON are skipped, as omarock skips them.
+entries=$(jq -c -R --argjson since "$since" 'fromjson? | select(type == "object" and (.at // 0) >= $since)' "$file" | jq -s 'sort_by(.at)')
+if $json; then
+  jq . <<<"$entries"
+else
+  jq -r '
+    {local: "Your music", apple: "Apple Music", spotify: "Spotify", sxm: "SiriusXM", radio: "Radio"} as $names
+    | reverse[]
+    | [(.at / 1000 | strflocaltime("%a %d %b %H:%M")), ($names[.source] // .source),
+       .title + (if (.artist // "") != "" then " — " + .artist else "" end)
+         + (if .station then " (" + .station + ")" elif (.album // "") != "" then " (" + .album + ")" else "" end)]
+    | join("  ")' <<<"$entries"
+fi

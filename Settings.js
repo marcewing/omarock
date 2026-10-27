@@ -20,7 +20,8 @@
 // Machine's button picked (0 or none: off); `radioState`, the US state
 // "Your area" replaced (still read while radioArea is empty); `timeZone`,
 // the time zone that says which country an area is likelier in (else the
-// machine's: the harness sets it); and the addresses the test
+// machine's: the harness sets it); `historyAfter`, a test's: a play counts
+// for History after that many seconds; and the addresses the test
 // harness points at its fakes, `spotifyService`, `sxmService`, `radioBrowser`,
 // `chartSource` (Wikipedia, for Time Machine's charts) and `appleTokenFile`.
 // Panel.qml gives each its default.
@@ -46,6 +47,13 @@ var schema = [
   { key: "lookup", type: "enum", label: "Look up songs in", options: ["Apple Music", "Spotify"],
     defaultValue: "Apple Music",
     description: "Click a song or artist playing on SiriusXM or the radio to find it there, while the station plays on. Time Machine's Top 100 plays there too, away from Apple Music and Spotify. The other one if this one is off." },
+
+  { key: "history", type: "boolean", label: "Keep a history of what you play", defaultValue: true,
+    description: "H lists what you've played here, from every source, by day: a song once you've heard half of it or 4 minutes, a station's after 30 s. It stays on this machine (~/.local/share/omarock/history.jsonl)." },
+  { key: "historyDays", type: "integer", label: "Days of history to keep", min: 1, max: 90, step: 1, defaultValue: 7,
+    description: "Older plays come out of it." },
+  { key: "historyClear", type: "action", label: "Clear the history", button: "Clear…",
+    description: "Forget everything played so far (asks first)." },
 
   { key: "timeMachine", type: "boolean", label: "Time Machine", defaultValue: false,
     description: "A Time Machine button at the top of the panel: enter a year, and only music from then or before shows, with that year's Top 100 from Billboard (as Wikipedia lists it). Songs from after it come out of the queue." },
@@ -110,6 +118,7 @@ var tabs = ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
 
 var groups = [
   { tab: "omarock", title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioArea", "lookup"] },
+  { tab: "omarock", title: "HISTORY", keys: ["history", "historyDays", "historyClear"] },
   { tab: "omarock", title: "TIME MACHINE", keys: ["timeMachine"] },
   { tab: "omarock", title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "scrollBarSong"] },
   { tab: "Apple Music", title: "", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },

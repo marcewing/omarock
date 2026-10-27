@@ -35,6 +35,8 @@ media keys and any other mpd client always agree with it.
   size, and, on a streaming service, whether it's in your library.
 - **Time Machine:** enter a year, and only music from then or before shows and
   plays, with that year's Billboard Top 100 to play on Apple Music or Spotify.
+- **History (`H`):** what you've played this past week, from every source, the
+  radio's songs included; Enter plays one again.
 - **Keys that do what you'd guess,** and the full list is a `?` away.
 - **One volume for every source** (with omarock's optional audio bus).
 
@@ -297,8 +299,19 @@ stay until you remove them too.
 - **Playlists** are mpd's stored playlists, so `mpc` and other clients see them
   too. `A` adds the song, album, artist or genre under the cursor to one: pick a
   playlist, or type a new name. `P` lists them, with **Save the queue as a
-  playlist** at the top. A playlist opens like an album; `x` removes a song, and
+  playlist** and **History** at the top. A playlist opens like an album; `x` removes a song, and
   `x` on a playlist deletes it, after asking.
+- **History** (`H`, or its button at the top of Playlists): what you've played
+  here, from every source, newest first, by day, each with where it played
+  (the source, and the station or album) and when. A song counts once you've
+  heard half of it or 4 minutes, a station's song after 30 seconds (when the
+  station says what's playing; its own name and its ads don't count). Enter
+  plays it again where it was heard: a song of yours from mpd, an Apple Music
+  or Spotify song on that service. A station's song can't be heard again from
+  the station, so Enter looks it up in Apple Music or Spotify instead (`lookup`).
+  It's kept on this machine only, in `~/.local/share/omarock/history.jsonl`,
+  for 7 days (`historyDays`); the settings switch it off (`history`) or clear
+  it. `tools/omarock-history` lists it in a terminal.
 - **Info (`i`):** everything omarock knows about the song, album, station or
   channel under the cursor (or what's playing). At the top: the service and, for
   Spotify and Apple Music, whether it's in your library. For a local song: its
@@ -397,6 +410,8 @@ change saves at once.
 | `appleMusic` | off | Apple Music ([bridge/README.md](bridge/README.md)) |
 | `siriusXM` | off | SiriusXM ([sxm/README.md](sxm/README.md)) |
 | `lookup` | Apple Music | Where a click on the radio's song looks it up, and where Time Machine's Top 100 plays from local music or a station: `Apple Music` or `Spotify` (the other one if that one is off) |
+| `history` | on | Keep History (`H`): what you've played here, from every source |
+| `historyDays` | 7 | How many days History keeps (1 to 90) |
 | `timeMachine` | off | Time Machine's button at the top, and its Top 100 |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |
 | `maxLabelWidth` | 300 | How wide the song gets on the bar, in pixels |

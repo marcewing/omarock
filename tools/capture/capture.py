@@ -41,7 +41,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartClient.qml", "YearPicker.qml",
-                "Setup.js", "SetupView.qml",
+                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -283,6 +283,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     list_tuning_scenario(host, failures)
     hover_scroll_scenario(host, failures)
     search_covers_scenario(host, failures)
+    history_scenario(host, output, socket_path, failures)
     scrolling_scenario(host, output, socket_path, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
@@ -474,7 +475,7 @@ def spotify_scenario(host, output, socket_path, failures):
     # P: Spotify playlists.
     host.call("press", "P")
     wait_for(lambda: browsed(host, "playlists:Spotify playlists"), "Spotify playlists")
-    check(host.state()["rows"][1:] == ["playlist:PunkRock", "playlist:Road Songs"], "P lists your Spotify playlists", failures)
+    check(host.state()["rows"][2:] == ["playlist:PunkRock", "playlist:Road Songs"], "P lists your Spotify playlists", failures)
     host.call("press", "Escape")
 
     # i: what's playing, from Spotify, and whether it's in the library.
@@ -626,7 +627,7 @@ def apple_scenario(host, output, socket_path, failures):
     host.call("press", "P")
     wait_for(lambda: browsed(host, "playlists:Apple Music playlists"), "Apple playlists")
     s = host.state()
-    check(s["rows"] == ["savequeue:Save the queue as a playlist", "playlist:PunkRock", "playlist:Road Songs"],
+    check(s["rows"] == ["savequeue:Save the queue as a playlist", "historylist:History", "playlist:PunkRock", "playlist:Road Songs"],
           "P lists your Apple Music playlists: " + ", ".join(s["rows"]), failures)
     host.call("press", "Right")
     wait_for(lambda: browsed(host, "playlist:PunkRock"), "PunkRock")
@@ -2822,11 +2823,11 @@ def playlists_scenario(host, output, socket_path, failures):
     host.call("press", "P")
     wait_for(lambda: browsed(host, "playlists:Playlists"), "Playlists view")
     s = host.state()
-    check(s["rows"] == ["savequeue:Save the queue as a playlist", "playlist:Late Night"] and s["cursor"] == 1
-          and s["subtitles"][1] == "4 songs · 10 min" and s["browseRoot"] == "queue",
-          "P opens Playlists: " + ", ".join(s["rows"]) + " | " + s["subtitles"][1], failures)
-    check(s["levelButtons"]["current"][0] == "Save the queue as a playlist",
-          "Save the queue is a button: " + str(s["levelButtons"]["current"]), failures)
+    check(s["rows"] == ["savequeue:Save the queue as a playlist", "historylist:History", "playlist:Late Night"] and s["cursor"] == 2
+          and s["subtitles"][2] == "4 songs · 10 min" and s["browseRoot"] == "queue",
+          "P opens Playlists: " + ", ".join(s["rows"]) + " | " + s["subtitles"][2], failures)
+    check(s["levelButtons"]["current"][:2] == ["Save the queue as a playlist", "History"],
+          "Save the queue and History are buttons: " + str(s["levelButtons"]["current"]), failures)
     host.grab(output / "compact-playlists.png")
 
     # → opens it: Play the playlist, then its songs; one has left the library.
@@ -2933,7 +2934,7 @@ def playlists_scenario(host, output, socket_path, failures):
     host.call("press", "P")
     wait_for(lambda: browsed(host, "playlists:Playlists"), "Playlists view")
     s = host.state()
-    check(s["query"] == "" and s["rows"][1:] == ["playlist:Late Night", "playlist:Road Trip"],
+    check(s["query"] == "" and s["rows"][2:] == ["playlist:Late Night", "playlist:Road Trip"],
           "P from search goes to Playlists, by name", failures)
     host.call("press", "Down")
     host.call("press", "Right")
@@ -2966,15 +2967,18 @@ def playlists_scenario(host, output, socket_path, failures):
     host.call("press", "x")
     wait_for(lambda: host.state()["confirmOpen"], "delete dialog")
     host.call("press", "Return")
-    wait_for(lambda: host.state()["rows"] == ["savequeue:Save the queue as a playlist", "playlist:Late Night"], "deleted")
+    wait_for(lambda: host.state()["rows"] == ["savequeue:Save the queue as a playlist", "historylist:History", "playlist:Late Night"], "deleted")
     s = host.state()
     check(stored(socket_path, "Road Trip") == [] and s["notice"] == "Deleted the playlist Road Trip",
           "x, Enter deletes it: " + s["notice"], failures)
 
-    # Save the queue: its button (↑ onto it, Enter), then a name.
+    # Save the queue: its button (↑ onto History's, ↑ onto it, Enter), then a name.
+    host.call("press", "Up")
+    check(host.state()["levelButtons"]["current"][:2] == ["Save the queue as a playlist", "[History]"],
+          "↑ goes onto History first: " + str(host.state()["levelButtons"]["current"]), failures)
     host.call("press", "Up")
     check(host.state()["levelButtons"]["current"][0] == "[Save the queue as a playlist]",
-          "↑ goes onto Save the queue: " + str(host.state()["levelButtons"]["current"]), failures)
+          "↑ again, onto Save the queue: " + str(host.state()["levelButtons"]["current"]), failures)
     host.call("press", "Return")
     wait_for(lambda: host.state()["pickerOpen"], "picker")
     check(host.state()["pickerTitle"] == "The queue", "Save the queue opens the picker", failures)
@@ -3012,7 +3016,7 @@ def playlists_scenario(host, output, socket_path, failures):
     wait_for(lambda: browsed(host, "playlist:Late Night"), "playlist in columns")
     host.settle(.5)
     s = host.state()
-    check(s["parentRows"] == ["savequeue:Save the queue as a playlist", "playlist:Late Night", "playlist:Saved Queue"],
+    check(s["parentRows"] == ["savequeue:Save the queue as a playlist", "historylist:History", "playlist:Late Night", "playlist:Saved Queue"],
           "→: Playlists on the left, the playlist on the right", failures)
     host.grab(output / "expanded-playlist.png")
     host.call("press", "A")
@@ -3024,7 +3028,7 @@ def playlists_scenario(host, output, socket_path, failures):
     s = host.state()
     check(not s["pickerOpen"] and s["browse"] == "playlist:Late Night", "Esc closes the picker, nothing else", failures)
     # × on a playlist in the left column asks about that playlist.
-    host.call("columnRemove", "parent", 2)
+    host.call("columnRemove", "parent", 3)
     wait_for(lambda: host.state()["confirmOpen"], "delete dialog")
     host.call("press", "Return")
     wait_for(lambda: "Saved Queue" not in host.state()["playlists"], "deleted from the left column")
@@ -3455,6 +3459,131 @@ def search_covers_scenario(host, failures):
     album_at = host.state()["rows"].index("album:Basement Tapes")
     wait_for(lambda: host.state()["rowCovers"][album_at], "the album's cover in search", timeout=8)
     check(True, "an album found by search shows its cover", failures)
+    host.call("close")
+
+
+def history_scenario(host, output, socket_path, failures):
+    """Marc, 10-27: a History "of everything the user played", from every
+    source, with the source shown, on by default and kept 7 days (both
+    settings). A play counts at half the song or 4 minutes, a station's song
+    after 30 s; historyAfter makes that 1 s here. H opens it, as does its row
+    at the top of Playlists; Enter plays a song again where it was heard, and
+    looks a station's song up in Apple Music or Spotify."""
+    home = BRIDGE["config"].parents[2]
+    file = home / ".local/share/omarock/history.jsonl"
+    file.unlink(missing_ok=True)
+
+    def entries():
+        return [json.loads(line) for line in file.read_text().splitlines() if line.strip()] if file.exists() else []
+
+    def file_of(title):
+        return next(line[6:] for line in mpd_query(socket_path, f'find "(title == \\"{title}\\")"') if line.startswith("file: "))
+
+    def play_local(title):
+        added = next(line[4:] for line in mpd_query(socket_path, f'addid "{file_of(title)}"') if line.startswith("Id: "))
+        mpd_client(socket_path, "playid " + added)
+        wait_for(lambda: host.state()["nowPlaying"].startswith(title), title + " playing")
+
+    def open_history():
+        host.call("key", "H")
+        wait_for(lambda: host.state()["browse"] == "history:History" and not host.state()["browseLoading"], "History open")
+        return host.state()
+
+    host.call("settings", json.dumps({"historyAfter": 1}))
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    to_source(host, "local")
+    play_local("Glasswork")
+    wait_for(lambda: any(e["title"] == "Glasswork" for e in entries()), "Glasswork in the history", timeout=8)
+    e = next(e for e in entries() if e["title"] == "Glasswork")
+    check(e["source"] == "local" and e["file"] == file_of("Glasswork") and e["artist"] and e["album"] and e["at"] > 0,
+          "a song of yours, once heard: its file, artist and album: " + json.dumps(e), failures)
+
+    to_source(host, "radio")
+    mpd_client(socket_path, 'fake_stream_title "The Rolling Stones - Gimme Shelter"')
+    wait_for(lambda: host.state()["nowPlaying"].startswith("Gimme Shelter"), "the station's song")
+    wait_for(lambda: any(e["title"] == "Gimme Shelter" for e in entries()), "the station's song in the history", timeout=8)
+    e = next(e for e in entries() if e["title"] == "Gimme Shelter")
+    station = e["station"]
+    check(e["source"] == "radio" and e["artist"] == "The Rolling Stones" and station not in ("", "Radio"),
+          "a station's song, with the station: " + json.dumps(e), failures)
+    mpd_client(socket_path, 'fake_stream_title "' + station + '"')
+    host.settle(2.5)
+    check(not any(e["title"] == station for e in entries()), "the station saying its own name isn't a song", failures)
+
+    # One from Spotify, two days ago (as if played then): a song its catalog has.
+    found = urllib.request.Request(BRIDGE["spotify"] + "/v1/search?q=Sunspots&scope=catalog", headers={"X-Omarock": "1"})
+    with urllib.request.urlopen(found, timeout=5) as reply:
+        song = json.loads(reply.read())["catalog"]["songs"][0]
+    spotify_entry = {"at": int(time.time() * 1000) - 2 * 86400 * 1000, "source": "spotify", "title": song["title"],
+                     "artist": song["artist"], "album": song["album"], "ref": {"kind": "song", "id": song["id"], "source": "catalog"}}
+    with file.open("a") as f:
+        f.write(json.dumps(spotify_entry) + "\n")
+
+    s = open_history()
+    check(s["rows"] == ["historylookup:Gimme Shelter", "history:Glasswork", "history:" + song["title"]]
+          and s["sections"][0] == "TODAY" and s["sections"][1] == "" and s["sections"][2] not in ("", "TODAY")
+          and s["subtitles"][0] == "The Rolling Stones · " + station + " · Radio" and s["subtitles"][2].endswith("· Spotify"),
+          "H: newest first, by day, with where each was heard: " + " | ".join(f"{a} [{b}] {c}" for a, b, c in
+                                                                         zip(s["rows"], s["sections"], s["subtitles"])), failures)
+    check(s["browseInfo"]["subtitle"] == "3 songs · the last 7 days", "its heading: " + s["browseInfo"]["subtitle"], failures)
+    check("Enter look it up" in s["hint"] if s["cursor"] == 0 else True, "a station's song: Enter looks it up", failures)
+    host.grab(output / "compact-history.png")
+
+    # Enter on your song, while the radio plays: local music again, and it plays.
+    host.call("activate", 1, "open")
+    wait_for(lambda: host.state()["source"] == "local" and host.state()["nowPlaying"].startswith("Glasswork"),
+             "Glasswork playing again, on local music")
+    check(True, "a song of yours plays again from mpd, on local music", failures)
+
+    # Spotify's song plays there, by its id; the station's is looked up.
+    before = len(spotify_requests("/v1/play"))
+    open_history()
+    host.call("activate", 2, "open")
+    wait_for(lambda: len(spotify_requests("/v1/play")) > before, "Spotify asked to play it")
+    body = spotify_requests("/v1/play")[-1][2] or {}
+    check(song["id"] in json.dumps(body), "a Spotify song plays on Spotify by its id: " + json.dumps(body), failures)
+    wait_for(lambda: host.state()["source"] == "spotify", "Spotify the source")
+    open_history()
+    host.call("activate", 0, "open")
+    wait_for(lambda: host.state()["query"] == "Gimme Shelter The Rolling Stones", "the station's song looked up")
+    check(host.state()["lookup"] in ("apple", "spotify"), "a station's song is looked up in Apple Music or Spotify: "
+          + host.state()["lookup"], failures)
+    host.call("back")
+    to_source(host, "local")
+
+    # History at the top of Playlists, after its buttons.
+    host.call("key", "P")
+    wait_for(lambda: host.state()["browse"].startswith("playlists:") and not host.state()["browseLoading"], "Playlists")
+    rows = host.state()["rows"]
+    check("historylist:History" in rows and all(r.startswith("savequeue:") for r in rows[:rows.index("historylist:History")])
+          and "History" in host.state()["levelButtons"]["current"],
+          "Playlists has a History button, after Save the queue: " + str(host.state()["levelButtons"]["current"]), failures)
+    host.call("activate", rows.index("historylist:History"), "open")
+    wait_for(lambda: host.state()["browse"] == "history:History", "its row opens History")
+    host.call("close")
+
+    # Off: nothing more is kept.
+    host.call("settings", json.dumps({"historyAfter": 1, "history": False}))
+    count = len(entries())
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    play_local("Fernweh")
+    host.settle(2.5)
+    check(len(entries()) == count, "switched off, nothing more is kept", failures)
+
+    # Clear the history (the settings' button, after asking).
+    host.call("settings", json.dumps({"historyAfter": 1}))
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "settings open")
+    settings_cursor_to(host, "historyClear")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["confirmOpen"], "asked before clearing")
+    host.call("press", "Return")
+    wait_for(lambda: not file.exists(), "the file gone")
+    check(host.state()["notice"] == "History cleared", "Clear the history empties it: " + host.state()["notice"], failures)
+    host.call("press", "Escape")
+    host.call("settings", "{}")
     host.call("close")
 
 
@@ -3916,8 +4045,9 @@ def settings_scenario(host, output, failures):
     # timemachine, panel and bar".
     check([t.removesuffix(" •") for t in s["settingsTabs"]] == ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
           and s["settingsTab"] == "omarock"
-          and s["settingsRows"] == ["musicFolder", "radio", "radioArea", "lookup", "timeMachine", "closeOnLeave", "maxLabelWidth", "scrollBarSong"],
-          ", opens the settings on the omarock tab: your music and the radio, Time Machine, the panel and the bar: "
+          and s["settingsRows"] == ["musicFolder", "radio", "radioArea", "lookup", "history", "historyDays", "historyClear",
+                                    "timeMachine", "closeOnLeave", "maxLabelWidth", "scrollBarSong"],
+          ", opens the settings on the omarock tab: your music and the radio, History, Time Machine, the panel and the bar: "
           + str(s["settingsTabs"]) + " | " + ", ".join(s["settingsRows"]), failures)
     check(all(k in s["settingsAllRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
                                                   "spotifyLogin", "bridgeToken", "spotifyRemove", "sxmRemove", "appleRemove")),
@@ -4620,7 +4750,7 @@ def scratch_scenario(host, output, socket_path, failures):
     host.call("press", "P")
     wait_for(lambda: browsed(host, "playlists:Playlists"), "Playlists view")
     s = host.state()
-    check(s["rows"] == ["savequeue:Save the queue as a playlist", "note:No playlists yet"],
+    check(s["rows"] == ["savequeue:Save the queue as a playlist", "historylist:History", "note:No playlists yet"],
           "no playlists yet: " + ", ".join(s["rows"]), failures)
     host.grab(output / "scratch-no-playlists.png")
     host.call("press", "Escape")
@@ -4981,6 +5111,7 @@ def main():
                             elif name == "scrolling": scrolling_scenario(host, output, socket_path, failures)
                             elif name == "hover-scroll": hover_scroll_scenario(host, failures)
                             elif name == "search-covers": search_covers_scenario(host, failures)
+                            elif name == "history": history_scenario(host, output, socket_path, failures)
                             elif name == "time-machine": time_machine_scenario(host, output, socket_path, failures)
                             elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)
                             elif name == "bus-volume": bus_volume_scenario(host, socket_path, failures)
