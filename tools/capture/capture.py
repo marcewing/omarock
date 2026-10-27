@@ -269,6 +269,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     leave_scenario(host, failures)
     apple_scenario(host, output, socket_path, failures)
     now_playing_scenario(host, output, socket_path, failures)
+    card_keys_scenario(host, output, socket_path, failures)
     lookup_scenario(host, output, socket_path, failures)
     spotify_scenario(host, output, socket_path, failures)
     spotify_volume_scenario(host, socket_path, failures)
@@ -1935,6 +1936,141 @@ def now_playing_scenario(host, output, socket_path, failures):
     BRIDGE["config"].unlink()
 
 
+def card_keys_scenario(host, output, socket_path, failures):
+    """Marc, 10-27, for "fully keyboard driven": the arrows reach the now
+    playing card's links. ↑ from the top of the list goes up into the card,
+    ↑↓ between its lines and ←→ along the last, Enter does what a click
+    does, ↓ from the last line or Esc goes back to the list. A with no
+    cursor adds the song playing to a playlist."""
+    def reopen_panel():
+        host.call("close")
+        host.settle(.3)
+        host.call("open")
+        wait_for(lambda: host.state()["opened"], "open")
+        host.settle(.5)
+
+    def to_top():
+        host.call("press", "Down")
+        for _ in range(len(host.state()["rows"]) + 1):
+            if host.state()["cursor"] == 0: return
+            host.call("press", "Up")
+
+    def focus(want, label):
+        s = host.state()
+        check(s["cardFocus"] == want and s["cardBoxes"] == [want] and s["cursor"] == -1,
+              label + ": " + json.dumps([s["cardFocus"], s["cardBoxes"], s["cursor"]]), failures)
+
+    reopen_panel()
+    if not mpd_query(socket_path, "currentsong"):
+        mpd_client(socket_path, "play")
+        wait_for(lambda: host.state()["nowPlaying"] != "", "a local song")
+        host.settle(.5)
+    song = dict(line.split(": ", 1) for line in mpd_query(socket_path, "currentsong") if ": " in line)
+    title, album, artist = song.get("Title", ""), song.get("Album", ""), song.get("Artist", "")
+    lines = ["artist", "album"] + (["genre"] if song.get("Genre") else [])
+    s = host.state()
+    check(s["cardLinks"] == [[n] for n in lines] + [["playlist"]], "a local song's links: " + json.dumps(s["cardLinks"]), failures)
+    check(s["cardBoxes"] == [], "no box before the keys go there", failures)
+
+    to_top()
+    s = host.state()
+    check(s["cursor"] == 0 and "↑ now playing" in s["hint"], "at the top of the queue the hints say ↑ goes up: " + s["hint"], failures)
+    host.call("press", "Up")
+    focus("playlist", "↑ from the top of the queue: Add to playlist, boxed, and no cursor in the list")
+    check(host.state()["hint"].startswith("Enter add to playlist · ↑↓ move · Esc to the list"),
+          "the hints say what Enter does there: " + host.state()["hint"], failures)
+    host.grab(output / "card-keys.png")
+    for name in reversed(lines):
+        host.call("press", "Up")
+        focus(name, "↑ goes up to the " + name)
+    host.call("press", "Up")
+    focus("artist", "↑ on the top link stays there")
+    host.call("press", "Right")
+    host.settle(.3)
+    check(host.state()["browse"] == "" and host.state()["cardFocus"] == "artist", "→ on a line of one link does nothing", failures)
+    host.call("press", "Down")
+    focus("album", "↓ goes down to the album")
+    host.grab(output / "card-keys-album.png")
+    host.call("press", "Return")
+    wait_for(lambda: browsed(host, "album:" + album), "Enter on the album opens it")
+    s = host.state()
+    check(s["cardFocus"] == "" and s["cardBoxes"] == [] and s["browseRoot"] == "queue"
+          and s["cursor"] >= 0 and s["rows"][s["cursor"]] == "track:" + title,
+          "Enter on the album opens it on the song playing, with the keys in it: " + json.dumps([s["cardFocus"], s["cursor"]]), failures)
+    host.call("press", "Left")
+    wait_for(lambda: host.state()["browse"] == "", "← back to the queue")
+
+    to_top()
+    host.call("press", "Up")
+    host.call("press", "Down")
+    s = host.state()
+    check(s["cardFocus"] == "" and s["cursor"] == 0, "↓ from the last line goes back to the list where it was", failures)
+    host.call("press", "Up")
+    host.call("press", "Up")
+    host.call("press", "Escape")
+    s = host.state()
+    check(s["opened"] and s["cardFocus"] == "" and s["cursor"] == 0, "Esc goes back to the list, the panel open", failures)
+    host.call("press", "Up")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["pickerOpen"], "Enter on Add to playlist opens the picker")
+    check(host.state()["pickerTitle"] == title, "the picker is for the song playing: " + host.state()["pickerTitle"], failures)
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["pickerOpen"], "the picker closes")
+    check(host.state()["cardFocus"] == "playlist", "the keys are still on Add to playlist", failures)
+
+    reopen_panel()
+    host.call("press", "A")
+    wait_for(lambda: host.state()["pickerOpen"], "A with no cursor opens the picker")
+    check(host.state()["pickerTitle"] == title, "A with no cursor: the song playing", failures)
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["pickerOpen"], "the picker closes")
+
+    host.call("expand", "true")
+    host.settle(1)
+    to_top()
+    host.call("press", "Up")
+    focus("playlist", "the expanded panel: ↑ from the top goes to the card too")
+    for _ in lines: host.call("press", "Up")
+    focus("artist", "up to the artist")
+    host.grab(output / "card-keys-expanded.png")
+    host.call("press", "Return")
+    wait_for(lambda: browsed(host, "artist:" + artist), "Enter on the expanded panel's artist opens it")
+    host.call("press", "Left")
+    wait_for(lambda: host.state()["browse"] == "", "← back to the queue")
+    host.call("expand", "false")
+    host.settle(.5)
+
+    # Apple Music: Add to library beside Add to playlist, ← → between them.
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    to_source(host, "apple")
+    wait_for(lambda: host.state()["appleReady"] and host.state()["nowPlaying"] != "", "Apple Music playing")
+    host.settle(.5)
+    s = host.state()
+    check(s["cardLinks"][-1:] == [["library", "playlist"]], "Apple Music's last line: Add to library, Add to playlist: "
+          + json.dumps(s["cardLinks"]), failures)
+    to_top()
+    host.call("press", "Up")
+    focus("library", "↑ from the top: Add to library, the first on the last line")
+    check(host.state()["hint"].startswith("Enter add to library · ↑↓←→ move"), "its hints: " + host.state()["hint"], failures)
+    host.call("press", "Right")
+    focus("playlist", "→ to Add to playlist")
+    host.call("press", "Right")
+    focus("playlist", "→ at the end stays")
+    host.call("press", "Left")
+    focus("library", "← back to Add to library")
+    host.call("press", "Right")
+    host.call("press", "Up")
+    above = s["cardLinks"][-2][0]
+    focus(above, "↑ from Add to playlist to the line above (" + above + ")")
+    host.call("press", "Down")
+    focus("library", "↓ again lands on the line's first")
+    host.call("press", "Escape")
+    to_source(host, "local")
+    BRIDGE["config"].unlink()
+
+
 def library_scenario(host, output, socket_path, failures):
     """The now playing card's Add to library and Add to playlist, L on a row,
     and the info card's link. Local music: Add to playlist only. Apple Music
@@ -2334,7 +2470,10 @@ def hints_scenario(host, output, failures):
               mode + ": typing, the box's own keys: " + s["hint"], failures)
         cursor_to(host, "artist:Glass Harbor", failures)
         steady(mode + ": search results", lines, height, card)
-        check(host.state()["hint"].endswith("Esc clear · ? keys"), mode + ": the list's keys again: " + host.state()["hint"], failures)
+        # At the top of the list, ↑ goes up to the song playing.
+        s = host.state()
+        want = "Esc clear · ↑ now playing · ? keys" if s["cursor"] == 0 else "Esc clear · ? keys"
+        check(s["hint"].endswith(want), mode + ": the list's keys again: " + s["hint"], failures)
         cursor_to(host, "artist:Glass Harbor", failures)
         host.call("press", "Right")
         wait_for(lambda: host.state()["browse"] == "artist:Glass Harbor" and not host.state()["browseLoading"], "the artist")
@@ -5095,6 +5234,7 @@ def main():
                             elif name == "radio-area": radio_area_scenario(host, output, failures)
                             elif name == "info": info_scenario(host, output, socket_path, failures)
                             elif name == "now-playing": now_playing_scenario(host, output, socket_path, failures)
+                            elif name == "card-keys": card_keys_scenario(host, output, socket_path, failures)
                             elif name == "lookup": lookup_scenario(host, output, socket_path, failures)
                             elif name == "library": library_scenario(host, output, socket_path, failures)
                             elif name == "keep-state": keep_state_scenario(host, output, failures)

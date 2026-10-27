@@ -23,44 +23,50 @@ Item {
 
   implicitWidth: cut.implicitWidth
   implicitHeight: cut.implicitHeight
-  clip: true
 
-  // Still: the text, cut short.
-  Text {
-    id: cut
-    anchors.verticalCenter: parent.verticalCenter
-    width: root.width
-    visible: !root.scrolling
-    textFormat: Text.PlainText
-    text: root.text
-    color: root.color
-    elide: Text.ElideRight
-  }
-
-  // Scrolling: the whole text, then a copy after a gap. Separate from the
-  // still one, which keeps its width and elide (changing them on a shown
-  // Text left its old, cut-short picture on screen).
+  // The clip is inside, so what's put in it (a box behind, say) can reach
+  // past the text.
   Item {
-    id: strip
-    height: parent.height
-    visible: root.scrolling
+    anchors.fill: parent
+    clip: true
 
+    // Still: the text, cut short.
     Text {
-      id: whole
+      id: cut
       anchors.verticalCenter: parent.verticalCenter
+      width: root.width
+      visible: !root.scrolling
       textFormat: Text.PlainText
       text: root.text
       color: root.color
-      font: cut.font
+      elide: Text.ElideRight
     }
 
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      x: whole.implicitWidth + root.gap
-      textFormat: Text.PlainText
-      text: root.text
-      color: root.color
-      font: cut.font
+    // Scrolling: the whole text, then a copy after a gap. Separate from the
+    // still one, which keeps its width and elide (changing them on a shown
+    // Text left its old, cut-short picture on screen).
+    Item {
+      id: strip
+      height: parent.height
+      visible: root.scrolling
+
+      Text {
+        id: whole
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: root.text
+        color: root.color
+        font: cut.font
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        x: whole.implicitWidth + root.gap
+        textFormat: Text.PlainText
+        text: root.text
+        color: root.color
+        font: cut.font
+      }
     }
   }
 

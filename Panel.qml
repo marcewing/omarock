@@ -182,7 +182,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.0"
+  readonly property string version: "0.11.1"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -506,6 +506,23 @@ Panel {
   // The keys that do something here (Hints.js): the line under the list
   // shows what fits, the most useful first, and the keys page all of them.
   readonly property var hintParts: {
+    var hint = Hints.hint
+    if (root.cardFocus !== "") {
+      var enter = root.cardHint()
+      var line = (root.cardPosition() || { row: -1 }).row
+      return (enter ? [enter] : []).concat([
+        hint((root.cardLinks[line] || []).length > 1 ? "↑↓←→" : "↑↓", "move", "Between the song's links; ↓ from the last goes back to the list"),
+        hint("Esc", "to the list", "Back to the list", true),
+        hint("i", "info", "Everything known about the song playing"), hint("?", "keys", "", true)])
+    }
+    var parts = root.listHintParts()
+    // At the top of the list, ↑ goes up to the song playing.
+    if (!root.typing && root.cursorActive && root.cursorIndex === 0 && root.cardLinks.length > 0)
+      parts.splice(Math.max(0, parts.length - 1), 0, hint("↑", "now playing", "Up to the song playing: its artist, album and the rest"))
+    return parts
+  }
+
+  function listHintParts() {
     var row = root.enterRow
     var kind = row ? row.kind : ""
     var hint = Hints.hint
@@ -1698,6 +1715,108 @@ Panel {
   readonly property string playingLibraryHover: root.playingLibrary === "yes" && root.bridge.canUnsave ? "󰅖 Remove from library" : ""
   readonly property bool canAddPlayingToPlaylist: !root.live && root.player.ready && !!root.player.currentSong.file
 
+  // The now playing card's links: the album, the artist and the genre open
+  // (o, O, g), a live station's song and artist are looked up, then Add to
+  // library and Add to playlist.
+  readonly property bool cardTitleLink: root.liveSong && root.lookupTarget !== ""
+  readonly property bool cardArtistLink: root.live ? root.cardTitleLink : root.playingEntry("artist") !== null
+  readonly property bool cardAlbumLink: root.playingEntry("album") !== null
+  readonly property bool cardGenreLink: root.playingEntry("genre") !== null
+  // The same, as the keys reach them: ↑ from the top of the list goes up
+  // into the card, ↑↓ go between its lines and ←→ along the last, Enter
+  // acts, and ↓ from the last line or Esc goes back to the list. Rows top
+  // to bottom; the Add links share the last.
+  readonly property var cardLinks: {
+    var rows = [["title", root.cardTitleLink], ["artist", root.cardArtistLink], ["album", root.cardAlbumLink],
+      ["genre", root.cardGenreLink]].filter(function(r) { return r[1] }).map(function(r) { return [r[0]] })
+    var add = []
+    if (root.playingLibraryText !== "") add.push("library")
+    if (root.canAddPlayingToPlaylist) add.push("playlist")
+    return add.length > 0 ? rows.concat([add]) : rows
+  }
+  // The link with the keys ("" while they're in the list), and the list's
+  // cursor to go back to (-1: it wasn't showing).
+  property string cardFocus: ""
+  property int cardReturn: -1
+  // A link gone with the song: the nearest the list, or back to it.
+  onCardLinksChanged: if (root.cardFocus !== "" && !root.cardPosition()) {
+    var last = root.cardLinks[root.cardLinks.length - 1]
+    if (last) root.cardFocus = last[0]
+    else root.leaveCard(false)
+  }
+  onCursorActiveChanged: if (root.cursorActive) root.cardFocus = ""
+  onTypingChanged: if (root.typing) root.cardFocus = ""
+
+  function cardPosition() {
+    for (var r = 0; r < root.cardLinks.length; r++) {
+      var c = root.cardLinks[r].indexOf(root.cardFocus)
+      if (c >= 0) return { row: r, column: c }
+    }
+    return null
+  }
+
+  // ↑ from the top of the list: the card's last line.
+  function enterCard() {
+    var links = root.cardLinks
+    if (links.length === 0) return false
+    root.cardReturn = root.cursorActive ? root.cursorIndex : -1
+    root.cardFocus = links[links.length - 1][0]
+    root.cursorActive = false
+    return true
+  }
+
+  // Back to the list, where the cursor was. into (↓): the cursor shows
+  // even if it wasn't.
+  function leaveCard(into) {
+    root.cardFocus = ""
+    if (root.cardReturn >= 0 && root.rows.length > 0) {
+      root.cursorIndex = Math.min(root.cardReturn, root.rows.length - 1)
+      root.cursorActive = true
+    } else if (into) root.moveCursor(1)
+  }
+
+  function moveInCard(dx, dy) {
+    var at = root.cardPosition()
+    if (!at) { root.leaveCard(false); return }
+    var links = root.cardLinks
+    if (dy !== 0) {
+      var r = at.row + dy
+      if (r >= links.length) root.leaveCard(true)
+      else if (r >= 0) root.cardFocus = links[r][Math.min(at.column, links[r].length - 1)]
+      return
+    }
+    var line = links[at.row]
+    if (at.column + dx >= 0 && at.column + dx < line.length) root.cardFocus = line[at.column + dx]
+  }
+
+  // Enter on a link: what a click does. What opens has the keys.
+  function activateCard() {
+    var link = root.cardFocus
+    if (link === "library") root.libraryPlaying()
+    else if (link === "playlist") root.addPlayingToPlaylist()
+    else {
+      root.cardFocus = ""
+      if (link === "title") root.lookUp("song")
+      else root.openPlaying(link)
+    }
+  }
+
+  // What Enter does on the link with the keys, for the hints.
+  function cardHint() {
+    var hint = Hints.hint
+    var link = root.cardFocus
+    var service = root.sourceNames[root.lookupTarget] || ""
+    if (link === "title") return hint("Enter", "look it up", "Find the song in " + service + " (or o)", true)
+    if (link === "artist") return root.live ? hint("Enter", "look it up", "Find the artist in " + service + " (or O)", true)
+      : hint("Enter", "open the artist", "Open the artist playing (or O)", true)
+    if (link === "album") return hint("Enter", "open the album", "Open the album playing (or o)", true)
+    if (link === "genre") return hint("Enter", "open the genre", "Open the genre of the song playing (or g)", true)
+    if (link === "library") return root.playingLibrary !== "yes" ? hint("Enter", "add to library", "Add the song to your library (or L)", true)
+      : root.bridge.canUnsave ? hint("Enter", "remove from library", "Take the song out of your library (or L)", true) : null
+    if (link === "playlist") return hint("Enter", "add to playlist", "Add the song to a playlist (or A)", true)
+    return null
+  }
+
   // L, or the card's Add to library: add the item to target's library, or
   // take it out again where the service can (Spotify). state is what
   // inLibrary says; after runs once it's done. A library item that isn't in
@@ -2839,8 +2958,9 @@ Panel {
     Qt.callLater(function() { root.confirmTarget = { folder: path } })
   }
 
-  // Esc: close the key list, else back out of an artist or album, else clear
-  // the search, else close the panel.
+  // Esc: close the key list, else leave the now playing card for the list,
+  // else back out of an artist or album, else clear the search, else close
+  // the panel.
   function stepBack() {
     if (root.yearPickerOpen) root.closeYearPicker()
     else if (root.pickerOpen) root.closePicker()
@@ -2848,6 +2968,7 @@ Panel {
     else if (root.settingsOpen) root.closeSettings()
     else if (root.infoOpen) root.closeInfo()
     else if (root.keysOpen) root.keysOpen = false
+    else if (root.cardFocus !== "") root.leaveCard(false)
     else if (root.browsing) root.goBack()
     else if (root.searchMode) root.clearSearch()
     else root.close()
@@ -3191,6 +3312,7 @@ Panel {
       var picked = root.cursorRow()
       if (picked && (picked.kind === "channel" || picked.kind === "station")) root.toggleFavorite(picked)
       else if (root.cursorActive) root.addToPlaylistIn(root.browseTop, root.rows, root.cursorIndex)
+      else if (root.canAddPlayingToPlaylist) root.addPlayingToPlaylist()
     } else if (t === "\u007f" && root.cursorActive) root.removeRow(root.cursorIndex)
     else if (t === "\b") root.goBack()
   }
@@ -3550,6 +3672,9 @@ Panel {
           return
         }
         if (root.keysOpen) return
+        if (root.cardFocus !== "") { root.moveInCard(dx, dy); return }
+        // ↑ from the top of the list: up into the now playing card.
+        if (dy < 0 && (root.rows.length === 0 || (root.cursorActive && root.cursorIndex === 0)) && root.enterCard()) return
         if (dy !== 0) root.moveCursor(dy)
         else if (dx > 0) root.openCursorRow()
         else root.goBack()
@@ -3561,6 +3686,7 @@ Panel {
         if (root.settingsOpen) { settingsView.activate(); return }
         if (root.infoOpen) { root.closeInfo(); return }
         if (root.keysOpen) { root.keysOpen = false; return }
+        if (enter && root.cardFocus !== "") { root.activateCard(); return }
         if (enter && root.cursorActive) root.activateRow(root.cursorIndex, "open")
         else if (enter && root.searchMode && !root.browsing) root.activateRow(0, "open")
         else root.playPause()
@@ -4749,12 +4875,13 @@ Panel {
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
         live: root.live
         active: root.opened
-        canOpenAlbum: root.playingEntry("album") !== null
-        canOpenArtist: root.live ? root.liveSong && root.lookupTarget !== "" : root.playingEntry("artist") !== null
-        canOpenTitle: root.liveSong && root.lookupTarget !== ""
+        canOpenAlbum: root.cardAlbumLink
+        canOpenArtist: root.cardArtistLink
+        canOpenTitle: root.cardTitleLink
+        canOpenGenre: root.cardGenreLink
+        focusedLink: root.cardFocus
         foreground: root.foreground
         fontFamily: root.fontFamily
-        canOpenGenre: root.playingEntry("genre") !== null
         onOpenAlbum: root.openPlaying("album")
         onOpenArtist: root.openPlaying("artist")
         onOpenTitle: root.lookUp("song")
@@ -4897,12 +5024,13 @@ Panel {
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
         live: root.live
         active: root.opened
-        canOpenAlbum: root.playingEntry("album") !== null
-        canOpenArtist: root.live ? root.liveSong && root.lookupTarget !== "" : root.playingEntry("artist") !== null
-        canOpenTitle: root.liveSong && root.lookupTarget !== ""
+        canOpenAlbum: root.cardAlbumLink
+        canOpenArtist: root.cardArtistLink
+        canOpenTitle: root.cardTitleLink
+        canOpenGenre: root.cardGenreLink
+        focusedLink: root.cardFocus
         foreground: root.foreground
         fontFamily: root.fontFamily
-        canOpenGenre: root.playingEntry("genre") !== null
         onOpenAlbum: root.openPlaying("album")
         onOpenArtist: root.openPlaying("artist")
         onOpenTitle: root.lookUp("song")

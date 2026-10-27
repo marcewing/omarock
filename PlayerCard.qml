@@ -39,6 +39,9 @@ Item {
   property string libraryHoverText: ""
   property bool libraryActive: true
   property bool canAddToPlaylist: false
+  // The link the keys are on ("title", "artist", "album", "genre", "library"
+  // or "playlist"; "" while they're in the list), boxed like a list's cursor.
+  property string focusedLink: ""
 
   signal openArtist()
   signal openAlbum()
@@ -89,6 +92,8 @@ Item {
       font.bold: true
       font.underline: root.canOpenTitle && titleLink.containsMouse
 
+      FocusBox { link: "title" }
+
       MouseArea {
         id: titleLink
         anchors.fill: parent
@@ -111,6 +116,8 @@ Item {
       font.pixelSize: Style.font.body
       font.underline: root.canOpenArtist && artistLink.containsMouse
 
+      FocusBox { link: "artist" }
+
       MouseArea {
         id: artistLink
         anchors.fill: parent
@@ -131,6 +138,8 @@ Item {
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.underline: root.canOpenAlbum && albumLink.containsMouse
+
+      FocusBox { link: "album" }
 
       MouseArea {
         id: albumLink
@@ -153,6 +162,8 @@ Item {
       font.pixelSize: Style.font.caption
       font.underline: root.canOpenGenre && genreLink.containsMouse
       elide: Text.ElideRight
+
+      FocusBox { link: "genre" }
 
       MouseArea {
         id: genreLink
@@ -181,6 +192,7 @@ Item {
 
       ActionLink {
         objectName: "playingLibrary"
+        name: "library"
         visible: root.libraryText !== ""
         label: root.libraryText
         hoverLabel: root.libraryHoverText
@@ -190,6 +202,7 @@ Item {
 
       ActionLink {
         objectName: "playingAddToPlaylist"
+        name: "playlist"
         visible: root.canAddToPlaylist
         label: "󰐕 Add to playlist"
         onClicked: root.addToPlaylist()
@@ -203,6 +216,8 @@ Item {
     property string label: ""
     property string hoverLabel: ""
     property bool active: true
+    // Its name, for focusedLink.
+    property alias name: box.link
     signal clicked()
 
     textFormat: Text.PlainText
@@ -212,6 +227,8 @@ Item {
     font.pixelSize: Style.font.caption
     font.underline: link.active && linkMouse.containsMouse
 
+    FocusBox { id: box }
+
     MouseArea {
       id: linkMouse
       anchors.fill: parent
@@ -220,6 +237,21 @@ Item {
       cursorShape: Qt.PointingHandCursor
       onClicked: link.clicked()
     }
+  }
+
+  // Behind a link while the keys are on it.
+  component FocusBox: CursorSurface {
+    property string link: ""
+    objectName: "focusBox:" + link
+    anchors.fill: parent
+    anchors.leftMargin: -Style.space(6)
+    anchors.rightMargin: -Style.space(6)
+    anchors.topMargin: -Style.space(2)
+    anchors.bottomMargin: -Style.space(2)
+    z: -1
+    visible: hasCursor
+    hasCursor: link !== "" && root.focusedLink === link
+    foreground: root.foreground
   }
 
   // The cover opens the album too.

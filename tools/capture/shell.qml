@@ -74,6 +74,15 @@ ShellRoot {
   // A column heading's buttons (current, parent or preview) as drawn, by
   // their text, the cursor's in brackets ("[Play]"), then what Play stands
   // for where it shows ("(4 songs · 10 min)").
+  // The now playing card's links whose keys' box shows (PlayerCard's FocusBox).
+  function cardBoxes() {
+    var p = popup()
+    var card = p ? p.contentItem[0].parent.parent : null
+    return ["title", "artist", "album", "genre", "library", "playlist"].filter(function(name) {
+      return !!host.findNamed(card, "focusBox:" + name)
+    })
+  }
+
   function levelButtons(role) {
     var p = popup()
     var card = p ? p.contentItem[0].parent.parent : null
@@ -232,6 +241,7 @@ ShellRoot {
       p.settingsOpen = false
       p.yearPickerOpen = false
       p.cursorActive = false
+      p.cardFocus = ""
       p.searchFocused = false
       p.closeKeysWindow()
       p.closeSetupWindow()
@@ -304,6 +314,8 @@ ShellRoot {
         rowCovers: p.rows.map(function(r) { return p.rowCoverUrl(r) !== "" }),
         sections: p.rows.map(function(r) { return r.section || "" }),
         cursor: p.cursorActive ? p.cursorIndex : -1, notice: p.notice,
+        // The now playing card's links as the keys reach them, the one they're on, and its box.
+        cardLinks: p.cardLinks, cardFocus: p.cardFocus, cardBoxes: host.cardBoxes(),
         hint: p.hintParts.map(function(h) { return h.key + " " + h.what }).join(" · "),
         hintLine: host.hintLine(), headerButtons: host.headerButtons(), cardHeight: popup() ? Math.round(popup().contentItem[0].parent.parent.height) : 0,
         keysOpen: p.keysOpen, keysHere: p.hereKeys.map(function(r) { return r[0] + " " + r[1] }),

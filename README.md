@@ -259,6 +259,10 @@ stay until you remove them too.
   Apple Music and Spotify **Add to library** saves it to your library (`L`
   too). On Spotify, a second click takes it out again; Apple Music's API can
   only add, so taking it out is for the Music app.
+  The keys reach all of these too: ↑ from the top of the list goes up to the
+  song playing, ↑ ↓ (and ← → between the two Add links) move, Enter does what a
+  click would, and ↓ from the last line or Esc goes back to the list. `A` with
+  no cursor in the list adds the song playing to a playlist.
 - **Your library (`L`):** on Apple Music or Spotify, `L` adds the song, album
   or (Apple Music) playlist under the cursor to your library, or, with no
   cursor, the song playing. In the info card it adds what the card shows. A
