@@ -13,6 +13,9 @@ media keys (MPRIS) ──┘          │                                   │
                                 └─► Spotify's Web API               └─► your speakers (or the omarock bus)
 ```
 
+omarock-spotify listens on 127.0.0.1 only, and answers only omarock's own
+requests: they carry an `X-Omarock: 1` header, which a web page can't send.
+
 ## What you need
 
 - **Spotify Premium.**
@@ -108,7 +111,12 @@ By hand, run the tools from your omarock clone: the plugin's folder,
 - `~/.config/omarock/soloist-key` and `~/.config/omarock/spotify-token.json` hold
   your key and your sign-in. Keep them private (mode 600), and don't paste them
   anywhere. If one leaks, make a new key in the dashboard, or sign in again.
+- Soloist takes its key only on its command line (`--api-key`), so while it runs,
+  another user on this machine can read it with `ps`. On a machine of your own
+  that's no one; on a shared one, bear it in mind.
 - omarock-spotify and Soloist's control API listen on 127.0.0.1 only.
+  omarock-spotify answers only omarock's own requests (`X-Omarock: 1`), so a web
+  page you visit can't drive it.
 - Soloist's Connect discovery listens on every interface (mDNS, and a random TCP
   port), as any Spotify speaker does. Soloist has no setting to turn it off.
 

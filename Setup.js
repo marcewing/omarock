@@ -107,11 +107,11 @@ var pages = {
           "Paste it here or leave blank to scp it during setup (Remote Login must be enabled on the Mac)."],
         fields: [{ key: "bridgeToken", type: "secret", checked: true, scp: true, arg: "scp-token", account: "bridge-token" }] },
       { title: "Smooth playback (optional, recommended)",
-        text: ["Two fixes for mpd that aren't in Arch's packages yet (patches/README.md). Each is built here, for omarock only, and sudo asks for your password to install the build tools."],
+        text: ["Two fixes for mpd that aren't in Arch's packages yet (patches/README.md). Each is built here, for omarock only, from a pinned release, and sudo asks for your password to install the packages it builds with (those you don't have yet; they stay afterwards)."],
         fields: [
-          { key: "flac", type: "check", defaultValue: true, label: "A fixed libFLAC (a few minutes; needs cmake and ninja)", arg: "flac",
+          { key: "flac", type: "check", defaultValue: true, label: "A fixed libFLAC (a few minutes; installs base-devel, cmake, ninja and git)", arg: "flac",
             description: "Without it, mpd falls behind the Mac, and omarock catches it up after each change, with a short stutter." },
-          { key: "mpris", type: "check", defaultValue: true, label: "A patched mpd-mpris (a minute; needs Go)", arg: "mpris",
+          { key: "mpris", type: "check", defaultValue: true, label: "A patched mpd-mpris (a minute; installs go and git)", arg: "mpris",
             description: "Without it, mpd-mpris (the media keys' go-between) asks mpd for the stream's cover at every play and pause, which holds mpd for seconds." }
         ] }
     ]

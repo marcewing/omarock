@@ -93,6 +93,7 @@ def main():
     renewal()
     sign_out()
     queue_jump()
+    web_pages()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
 
@@ -346,6 +347,36 @@ def queue_jump():
         check("the song playing: back to its start", plays == [] and s.ws.sent == ["seek"], f"{plays} {s.ws.sent}")
     finally:
         service.web_play = real_play
+
+
+def web_pages():
+    """A web page can't drive the service: the real handler, on a spare port."""
+    import http.client
+    server = service.ThreadingHTTPServer(("127.0.0.1", 0), service.Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def ask(method, path, headers=None, body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(method, path, body=body, headers=headers or {})
+        reply = conn.getresponse()
+        return reply.status, reply.read().decode()
+
+    omarock = {"X-Omarock": "1"}
+    try:
+        check("omarock's request gets past the check", ask("GET", "/v1/nosuch", omarock)[0] == 404)
+        check("a request without X-Omarock is refused", ask("GET", "/v1/nosuch")[0] == 403)
+        check("another name for this address is refused (DNS rebinding)",
+              ask("GET", "/v1/nosuch", dict(omarock, Host=f"rebind.example:{port}"))[0] == 403)
+        check("a body that isn't JSON is refused (a form's text/plain)",
+              ask("POST", "/v1/logout", dict(omarock, **{"Content-Type": "text/plain"}), '{"a": 1}')[0] == 403)
+        service.WEB.pending_login = None
+        code, page = ask("GET", "/callback?error=%3Cscript%3Ealert(1)%3C/script%3E")
+        check("the sign-in page shows an error as text, not as HTML",
+              code == 400 and "<script>" not in page and "&lt;script&gt;" in page, page)
+    finally:
+        server.shutdown()
+        server.server_close()
 
 if __name__ == "__main__":
     main()

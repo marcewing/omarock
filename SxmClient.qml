@@ -60,6 +60,8 @@ Item {
       }
     }
     xhr.open(method, root.baseUrl + path)
+    // What tells omarock-sxm the request is omarock's, not a web page's.
+    xhr.setRequestHeader("X-Omarock", "1")
     if (body !== undefined && body !== null) {
       xhr.setRequestHeader("Content-Type", "application/json")
       xhr.send(JSON.stringify(body))

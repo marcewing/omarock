@@ -614,6 +614,7 @@ uninstall() {
     "Xcode, and your Apple Development certificate."
     "This clone, with your Team ID and bundle id in bridge/app/Local.xcconfig, and the build in bridge/app/build: delete the clone to remove them."
     "Your App ID, on developer.apple.com (Certificates, IDs & Profiles, Identifiers): delete it there."
+    "The Music app in your Login Items, if setup put it there: take it out in System Settings, General, Login Items & Extensions, unless you want Music opening at login."
     "omarock on your Omarchy machine: run ./install --uninstall there, or switch Apple Music off in its settings."
   )
   [[ -d $support ]] && ! $kept_app && stays+=("${support/#$HOME/~}: delete it to remove the token and passwords.")

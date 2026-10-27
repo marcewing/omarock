@@ -99,7 +99,8 @@ else:
     lines.insert(0, line)
 open(path + ".new", "w").write("".join(lines))
 EOF
-    mv "$conf.new" "$conf" && systemctl --user restart mpd || exit 1
+    # With mpd.conf's own mode: it can hold mpd's passwords.
+    chmod --reference="$conf" "$conf.new" && mv "$conf.new" "$conf" && systemctl --user restart mpd || exit 1
     # mpd reads the new folder once it answers again.
     socket=${XDG_RUNTIME_DIR:-/run/user/$UID}/mpd/socket
     for _ in $(seq 40); do MPD_HOST=$socket mpc status >/dev/null 2>&1 && break; sleep 0.5; done

@@ -131,7 +131,7 @@ Follow `spotify/README.md`. What trips people up:
   accept that.
 - **Install:** `tools/install-sxm --start`. Then the user puts their login in
   `~/.config/omarock/siriusxm.json`, then `systemctl --user restart omarock-sxm`.
-- **Check:** `curl -s 127.0.0.1:8720/v1/health` shows `account` and `loggedIn`
+- **Check:** `curl -s -H 'X-Omarock: 1' 127.0.0.1:8720/v1/health` shows `account` and `loggedIn`
   true. A "revoked" entitlement means the subscription lacks streaming.
 - **Then the switch:** `siriusXM` on.
 

@@ -385,7 +385,7 @@ def spotify_requests(path_prefix=""):
 def spotify_post(path, body=None):
     """As another client (omarock-sp, or a phone through Spotify Connect)."""
     request = urllib.request.Request(BRIDGE["spotify"] + path, data=json.dumps(body or {}).encode(),
-                                     headers={"Content-Type": "application/json"}, method="POST")
+                                     headers={"Content-Type": "application/json", "X-Omarock": "1"}, method="POST")
     with urllib.request.urlopen(request, timeout=5) as reply:
         return json.loads(reply.read())
 
@@ -3319,7 +3319,8 @@ def elsewhere_scenario(host, socket_path, failures):
     back. The local sources aren't touched."""
     def fake_elsewhere(base, name):
         request = urllib.request.Request(base + "/v1/fake/elsewhere", data=json.dumps({"name": name}).encode(), method="POST",
-                                         headers={"Authorization": "Bearer fake-bridge-token", "Content-Type": "application/json"})
+                                         headers={"Authorization": "Bearer fake-bridge-token", "Content-Type": "application/json",
+                                                  "X-Omarock": "1"})
         urllib.request.urlopen(request, timeout=5).read()
 
     url = f"http://127.0.0.1:{BRIDGE['port']}"

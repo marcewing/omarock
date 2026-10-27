@@ -63,6 +63,9 @@ class Handler(BaseHTTPRequestHandler):
             state.log.write(json.dumps({"method": method, "path": self.path}) + "\n")
             state.log.flush()
         parts = [p for p in self.path.split("?")[0].split("/") if p]
+        # As omarock-sxm: only requests that say they're omarock's.
+        if parts[:1] == ["v1"] and self.headers.get("X-Omarock") != "1":
+            return self.reply(403, {"error": "Only omarock asks here (X-Omarock: 1)."})
         if parts[:1] == ["art"]:
             colour, size = parts[1], int(parts[2].split("x")[0])
             top = tuple(int(colour[i:i + 2], 16) for i in (0, 2, 4))

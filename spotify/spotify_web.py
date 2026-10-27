@@ -22,6 +22,7 @@ Spotify ends a sign-in 6 months after it was given; then log in again.
 """
 import base64
 import hashlib
+import html
 import http.server
 import json
 import os
@@ -135,7 +136,7 @@ def login():
             ok = query.get("state", [""])[0] == state and "code" in query
             result.update(code=query.get("code", [""])[0] if ok else "", error=query.get("error", ["state mismatch"])[0])
             body = ("<h2>omarock is signed in to Spotify.</h2><p>You can close this tab.</p>" if ok
-                    else f"<h2>Spotify sign-in failed: {result['error']}</h2>").encode()
+                    else f"<h2>Spotify sign-in failed: {html.escape(result['error'])}</h2>").encode()
             self.send_response(200 if ok else 400)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()

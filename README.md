@@ -80,7 +80,9 @@ It sets up mpd (asking where your music is), then puts omarock on the bar, with
 a key that opens it from anywhere: Super+Ctrl+M (if nothing else has it). It
 checks first what's already there, shows each command before running it, and
 asks before changing anything: packages (with sudo), your mpd config, systemd
-units. Run it again any time: what's done is skipped.
+drop-ins, your key bindings. It starts mpd and mpd-mpris (the media keys) and
+has them start at each login, since that's what it's there to set up. Run it
+again any time: what's done is skipped.
 
 **Spotify, SiriusXM and Apple Music** come afterwards, one at a time, from
 omarock's settings (press `,` in the panel, or the gear in the expanded view),
@@ -135,8 +137,12 @@ Without `playlist_directory`, mpd turns stored playlists off, and omarock's
 playlists and radio favourites with them.
 
 omarock talks to mpd over a unix socket, so mpd must listen on one. Either:
-- **The easy way:** `systemctl --user enable --now mpd.socket`. The unit that comes
-  with mpd opens `$XDG_RUNTIME_DIR/mpd/socket`, and TCP port 6600 too.
+- **The quick way:** `systemctl --user enable --now mpd.socket`. The unit that comes
+  with mpd opens `$XDG_RUNTIME_DIR/mpd/socket`, and TCP port 6600 too, on every
+  network interface: without a password in mpd.conf, anyone who can reach this
+  machine (your LAN; your tailnet, which ufw doesn't cover) can play, stop and
+  change mpd. `./install` does it the next way instead (with port 6600 on
+  localhost only, for `mpc` and other clients).
 - **Socket only:** add `bind_to_address "/run/user/1000/mpd/socket"` to mpd.conf
   (your user id in place of 1000), with a drop-in that makes the folder:
   ```ini
@@ -320,8 +326,10 @@ stay until you remove them too.
   within 80 km (50 miles) come first, the next state's or country's too
   (Kansas City has Kansas's, Detroit Windsor's), then the rest of those
   states, the most listened first. omarock finds the place on your machine,
-  in `places.tsv` (from [GeoNames](https://www.geonames.org)), so nothing
-  but Radio Browser's searches leaves it. `/` finds stations by name, call sign, frequency
+  in `places.tsv` (from [GeoNames](https://www.geonames.org)). Radio Browser
+  sees the searches made from it (your area's names and its coordinates), and
+  which station you tune to (it counts plays, as its directory asks of
+  players); the station's own server sees you listening. `/` finds stations by name, call sign, frequency
   or genre; Enter tunes; `A` keeps a favourite (in the mpd playlist "Radio", so
   `mpc load Radio` plays them); `n`/`p` step through the favourites. Stations that
   send their song show it. HLS-only stations are dimmed: mpd can't play them.
@@ -373,7 +381,9 @@ change saves at once.
   those still apply until you change them.)
 - **Accounts and keys** (the SiriusXM login, Spotify's Client ID and Soloist
   key, the bridge's token) each keep their own file in `~/.config/omarock`,
-  readable only by you. The settings screen never shows a password or key: one
+  readable only by you. (Soloist, Spotify's player, takes its key only on its
+  command line, so while it runs another user on this machine could see it with
+  `ps`.) The settings screen never shows a password or key: one
   that's set shows as dots, and a new one replaces it. `tools/omarock-account`
   does the same from a terminal.
 - **The music folder** is mpd's `music_directory`. Changing it asks first, then

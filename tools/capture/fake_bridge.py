@@ -367,6 +367,9 @@ class Handler(BaseHTTPRequestHandler):
     def handle_any(self, method):
         bridge = self.server.bridge
         url = urlparse(self.path)
+        # As omarock-spotify: only requests that say they're omarock's.
+        if bridge.spotify and url.path.startswith("/v1/") and self.headers.get("X-Omarock") != "1":
+            return self.reply(403, {"error": "Only omarock asks here (X-Omarock: 1)."})
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
         length = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(length) or b"{}") if length else {}

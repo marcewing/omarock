@@ -16,8 +16,11 @@ function isForbidden(text) {
 }
 
 // One protocol argument: double-quoted, with backslashes and quotes escaped.
+// A line break can't be part of one (it would end the command, and what
+// followed would be another: a station's URL from Radio Browser, say), so
+// those go.
 function quote(value) {
-  return '"' + String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'
+  return '"' + String(value).replace(/[\r\n\0]/g, "").replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'
 }
 
 function command(name, args) {

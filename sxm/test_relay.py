@@ -1,5 +1,6 @@
-"""The relay's listeners, and the login's wait for the network: run with the
-service's venv, ~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py"""
+"""The relay's listeners, the login's wait for the network, and that only
+omarock's own requests are answered: run with the service's venv,
+~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py"""
 import asyncio
 import importlib.util
 from pathlib import Path
@@ -56,6 +57,34 @@ async def network():
     assert await sxm.wait_for_network("example.com", 0.05) is False, "no network: it gives up"
     assert len(asked) >= 2, "after asking more than once"
     print("ok: the login waits for the network")
+    await web_pages()
+
+
+async def web_pages():
+    """A web page can't drive the service: the real routes, on a spare port."""
+    import aiohttp
+    from aiohttp import web
+    runner = web.AppRunner(sxm.routes(SimpleNamespace()))
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    sxm.PORT = site._server.sockets[0].getsockname()[1]
+    base = f"http://127.0.0.1:{sxm.PORT}"
+    try:
+        async with aiohttp.ClientSession() as http:
+            async def status(path, headers=None):
+                async with http.get(base + path, headers=headers or {}) as reply:
+                    return reply.status
+            omarock = {"X-Omarock": "1"}
+            assert await status("/v1/nosuch", omarock) == 404, "omarock's request gets past the check"
+            assert await status("/v1/nosuch") == 403, "a request without X-Omarock is refused"
+            assert await status("/v1/nosuch", dict(omarock, Host=f"rebind.example:{sxm.PORT}")) == 403, \
+                "another name for this address is refused (DNS rebinding)"
+            assert await status("/stream") == 404, "a stream or cover needs no header (mpd and the panel's images)"
+            assert await status("/stream", {"Host": f"rebind.example:{sxm.PORT}"}) == 403, "but the right address"
+    finally:
+        await runner.cleanup()
+    print("ok: only omarock's own requests")
 
 
 asyncio.run(main())

@@ -36,7 +36,9 @@ asking for the login itself. By hand:
    ```bash
    tools/install-sxm --start
    ```
-   It makes a venv with aiosxm in `~/.local/share/omarock/sxm-venv`, puts the
+   It makes a venv in `~/.local/share/omarock/sxm-venv` with aiosxm and what it
+   needs, at the versions `sxm/requirements.txt` pins, each checked against its
+   hash (`tools/pin-sxm` writes that file). It puts the
    service in `~/.local/share/omarock/sxm/`, and starts it. It also creates
    `~/.config/omarock/siriusxm.json`, readable only by you.
 2. Put your SiriusXM login in that file:
@@ -46,9 +48,10 @@ asking for the login itself. By hand:
    Then `systemctl --user restart omarock-sxm`.
 3. Check it signed in:
    ```bash
-   curl -s 127.0.0.1:8720/v1/health
+   curl -s -H 'X-Omarock: 1' 127.0.0.1:8720/v1/health
    ```
-   It should say `"account": true` and `"loggedIn": true`.
+   It should say `"account": true` and `"loggedIn": true`. (omarock-sxm answers
+   only requests with that header, so a web page can't use it.)
 4. **Switch SiriusXM on** in omarock's settings (`,` in the panel). A SiriusXM
    button appears in the panel, and `m` goes round to it. The login can be
    changed there later too.
@@ -96,7 +99,8 @@ last asked.
 
 ## Testing
 
-`sxm/test_relay.py` checks the relay's listeners. Run it with the venv's Python:
+`sxm/test_relay.py` checks the relay's listeners, and that only omarock's own
+requests are answered. Run it with the venv's Python:
 `~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py`.
 
 Don't test with `ffplay` or `mpv`: they play to your default output, not through

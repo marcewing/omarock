@@ -17,7 +17,10 @@ Linux: omarock ◀──── bridge API :8710 (JSON, bearer token) ───�
   and every other app's sound are left alone, and the bridge's playback is muted on the
   Mac, so the Mac can be your everyday machine.
 - **Tailscale only.** The API and the stream listen on the Mac's Tailscale address and
-  on loopback, never on your LAN or the internet. Every API request needs the token.
+  on loopback, never on your LAN or the internet. Every API request needs the token,
+  except `/v1/health` (the bridge's version and state) and cover art (each image's
+  address carries a key made from the token). The stream needs none: anyone on your
+  tailnet can listen to what the bridge plays.
 - **It runs in the background:** no Dock icon, started at login, restarted if it
   crashes. With nobody listening to the stream for 30 s, it pauses.
 

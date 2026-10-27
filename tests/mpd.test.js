@@ -13,6 +13,14 @@ test("quote escapes backslashes and double quotes", () => {
   assert.equal(Mpd.command("add", ["Music/It's \"Live\".mp3"]), 'add "Music/It\'s \\"Live\\".mp3"')
 })
 
+test("a line break can't end the command early and start another", () => {
+  // A station's URL, as a community directory could hand it over.
+  const line = Mpd.command("addid", ['http://example.com/live"\nrm "Radio'])
+  assert.ok(!/[\r\n]/.test(line), line)
+  assert.equal(line, 'addid "http://example.com/live\\"rm \\"Radio"')
+  assert.equal(Mpd.quote("a\r\nb\0c"), '"abc"')
+})
+
 test("output commands are refused, anywhere in a command list", () => {
   assert.equal(Mpd.isForbidden("enableoutput 1"), true)
   assert.equal(Mpd.isForbidden("  toggleoutput 0"), true)

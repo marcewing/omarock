@@ -148,6 +148,8 @@ Item {
     xhr.open(method, root.baseUrl + path)
     if (root.token !== "") xhr.setRequestHeader("Authorization", "Bearer " + root.token)
     if (root.clientName !== "") xhr.setRequestHeader("X-Omarock-Client", root.clientName)
+    // What tells omarock-spotify the request is omarock's, not a web page's.
+    xhr.setRequestHeader("X-Omarock", "1")
     root.inflight = root.inflight.concat([entry])
     if (body !== undefined && body !== null) {
       xhr.setRequestHeader("Content-Type", "application/json")

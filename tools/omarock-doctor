@@ -16,7 +16,8 @@ private_file() {  # FILE WHAT [WHERE IT COMES FROM]: present and mode 600?
   if [[ $mode != 600 ]]; then bad "$2: $1 is mode $mode (chmod 600 it)"; return 1; fi
   ok "$2: $1 (mode 600)"
 }
-health() { curl -s -m 5 "$1/v1/health" 2>/dev/null; }
+# X-Omarock: omarock's own services answer only requests that carry it.
+health() { curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
 
 plugin=$HOME/.config/omarchy/plugins/mre.omarock
 shelljson=$HOME/.config/omarchy/shell.json

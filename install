@@ -32,7 +32,9 @@
 #
 # Secrets (the Soloist key, the SiriusXM login, the bridge's token) are typed
 # into hidden prompts and go straight into files only you can read
-# (~/.config/omarock, mode 600). Nothing is printed or passed on a command line.
+# (~/.config/omarock, mode 600). None is printed, and none is passed on a
+# command line here. Soloist itself takes its key only as an option
+# (--api-key), so while it runs, others on this machine can see it (ps).
 #
 # Each run says how it went in ~/.local/state/omarock/setup.json, which
 # omarock's settings follow: what it set up or removed, and whether it's still
@@ -275,7 +277,8 @@ declare -A preset=()
 manifest_version() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$1" 2>/dev/null; }
 newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1) == "$1" ]]; }
 active() { systemctl --user is-active --quiet "$1"; }
-health() { curl -s -m 5 "$1/v1/health" 2>/dev/null; }
+# X-Omarock: omarock's own services answer only requests that carry it.
+health() { curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
 
 mpd_socket=""
 mpd_answers() { [[ -S $mpd_socket ]] && MPD_HOST=$mpd_socket mpc status >/dev/null 2>&1; }
@@ -304,6 +307,9 @@ else:
 open(path, "w").write("".join(lines))
 PY
 }
+# FILE.new in FILE's place, with FILE's mode: an mpd.conf kept private (it
+# can hold mpd's passwords) stays private.
+swap_in() { chmod --reference="$1" "$1.new" && mv "$1.new" "$1"; }
 backed_up=""
 backup() {  # FILE: a copy beside it, once a run
   [[ -f $1 && $backed_up != *"|$1|"* ]] || return 0
@@ -326,7 +332,7 @@ installed_commit() { cat "$share/$1/INSTALLED" 2>/dev/null; }
 installs() {  # DIR: its files that get installed
   case $1 in
     spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist.service omarock-spotify.service ;;
-    sxm) echo omarock-sxm.py omarock-sxm.service ;;
+    sxm) echo omarock-sxm.py omarock-sxm.service requirements.txt ;;
     audio) echo omarock-bus.conf omarock-guard.py omarock-players.conf omarock-bus.service omarock-guard.service ;;
   esac
 }
@@ -545,8 +551,16 @@ step_plugin() {
     installed=$(manifest_version "$plugin_dir/manifest.json")
     ok "omarock $installed is installed ($plugin_dir)"
     if newer "$here" "$installed"; then
-      if confirm "This clone has omarock $here. Update the plugin?"; then
-        run omarchy plugin update "$plugin_id" --yes
+      # Omarchy's own update shows what changed, and asks. An answers file
+      # (tests) can't answer it, so then it's asked here instead.
+      local go=true
+      if [[ -n $answers ]]; then
+        { confirm "This clone has omarock $here. Update the plugin?" && run omarchy plugin update "$plugin_id" --yes; } || go=false
+      else
+        explain "This clone has omarock $here. Omarchy shows what changed in the plugin, then asks before updating it."
+        run omarchy plugin update "$plugin_id" || go=false
+      fi
+      if $go; then
         installed=$(manifest_version "$plugin_dir/manifest.json")
         if [[ $installed != "$here" ]]; then
           bad "the plugin is still $installed: its source ($(git -C "$plugin_dir" remote get-url origin 2>/dev/null)) didn't bring $here"
@@ -574,15 +588,22 @@ step_plugin() {
   src=$(git -C "$repo" remote get-url origin 2>/dev/null)
   [[ -z $src || $src == /* ]] && src="file://$repo"
   explain "omarock is added from $src, as Omarchy adds any plugin. Later, omarchy plugin update $plugin_id updates it."
-  section=$(choose "Where on the bar?" left left "On the left" center "In the middle" right "On the right") || exit 1
-  confirm "Add omarock to the bar?" || stopped
   # omarock's own folder, before omarock loads: it watches the files there,
   # and can't watch a folder that doesn't exist yet.
   install -d "$config"
   t0=$(date +%s)
-  run omarchy plugin add "$src" --yes || stopped
-  wait_until "Waiting for Omarchy to find it…" 15 plugin_known
-  run omarchy plugin enable "$plugin_id" --section "$section" || stopped
+  if [[ -z $answers ]]; then
+    # Omarchy's own questions: its warning that plugins run unsandboxed (so
+    # review the code first), then where on the bar.
+    run omarchy plugin add "$src" --enable || stopped
+  else
+    # An answers file (tests) can't answer Omarchy's, so they're asked here.
+    section=$(choose "Where on the bar?" left left "On the left" center "In the middle" right "On the right") || exit 1
+    confirm "Add omarock to the bar?" || stopped
+    run omarchy plugin add "$src" --yes || stopped
+    wait_until "Waiting for Omarchy to find it…" 15 plugin_known
+    run omarchy plugin enable "$plugin_id" --section "$section" || stopped
+  fi
   if wait_until "Waiting for the bar to load omarock…" 30 loaded_since "$t0" "$here"; then
     ok "omarock $here is on the bar"
   else
@@ -759,7 +780,7 @@ block = ['', 'audio_output {', '    type        "pipewire"', '    name        "o
          '    target      "omarock"', '    mixer_type  "none"', '}']
 open(path + ".new", "w").write("\n".join(out + block) + "\n")
 PY
-    mv "$conf.new" "$conf"
+    swap_in "$conf"
     run systemctl --user restart mpd
     local i
     for ((i = 0; i < 40; i++)); do mpd_answers && break; sleep 0.5; done
@@ -781,10 +802,27 @@ soloist_age() {  # days since the installed Soloist was built, or nothing
 sp_paired() { sp_health | jq -e '.soloist.loggedIn' >/dev/null; }
 sp_signed_in() { sp_health | jq -e '.web.signedIn' >/dev/null; }
 sp_up() { [[ -n $(sp_health) ]]; }
+# The pairing's firewall rules: only from the networks this machine is on
+# (the default route's: its IPv4 subnets, its IPv6 prefixes and link-local
+# addresses), never the internet. Each is "from NET to any port PORT proto
+# PROTO", as ufw takes it after allow and delete allow.
 added_rules=()
+firewall_timer=omarock-pairing-firewall
+lan_networks() {
+  local dev
+  dev=$(ip -j route show default 2>/dev/null | jq -r '.[0].dev // empty')
+  [[ -n $dev ]] || return 1
+  {
+    ip -j addr show dev "$dev" 2>/dev/null \
+      | jq -r '.[].addr_info[] | select(.scope == "global") | "\(.local)/\(.prefixlen)"' \
+      | python3 -I -c 'import ipaddress, sys; [print(ipaddress.ip_interface(l.strip()).network) for l in sys.stdin if l.strip()]'
+    ip -j -6 addr show dev "$dev" scope link 2>/dev/null | jq -e 'any(.[]; .addr_info | length > 0)' >/dev/null && echo fe80::/10
+  } | awk '!seen[$0]++' | { grep -qs '^IPV6=yes' /etc/default/ufw && cat || grep -v ':'; }
+}
 cleanup_firewall() {
   local r
-  for r in "${added_rules[@]}"; do run sudo ufw delete allow "$r" >/dev/null; done
+  for r in "${added_rules[@]}"; do run sudo ufw delete allow $r >/dev/null; done
+  ((${#added_rules[@]})) && sudo systemctl stop "$firewall_timer.timer" 2>/dev/null
   added_rules=()
 }
 # How this run went, into setup.json for omarock's settings: running while it
@@ -871,20 +909,33 @@ step_spotify() {
   else
     explain "Now you must pair Soloist with your account, once. Open Spotify on your phone or computer, on this network, then open Connect to a device, pick $(hostname), and play something."
     if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
-      local port
+      local port nets=()
       port=$(ss -ltnpH 2>/dev/null | awk '/"soloist"/ && $4 !~ /^127\./ {n = split($4, a, ":"); print a[n]; exit}')
+      mapfile -t nets < <(lan_networks)
       if [[ -z $port ]]; then
         note "Soloist isn't listening for Spotify apps: journalctl --user -u omarock-soloist"
+      elif ((${#nets[@]} == 0)); then
+        note "this machine isn't on a network (no default route), so there's nothing to pair over"
       else
-        explain "Your firewall (ufw) hides Soloist from the network. This opens its port ($port/tcp) and mDNS (5353/udp) while you pair, and closes them again afterwards."
+        explain "Your firewall (ufw) hides Soloist from the network. This opens its port ($port/tcp) and mDNS (5353/udp) to your local network only (${nets[*]}) while you pair. They close again afterwards, or in 11 minutes at the latest, even if this window is closed."
       fi
-      if [[ -n $port ]] && confirm "Open them for the pairing (sudo ufw)?"; then
-        local rule
-        for rule in "$port/tcp" 5353/udp; do
-          if ! sudo ufw status | grep -qE "^${rule}[[:space:]]"; then
-            run sudo ufw allow "$rule" >/dev/null && added_rules+=("$rule")
-          fi
+      if [[ -n $port ]] && ((${#nets[@]})) && confirm "Open them for the pairing (sudo ufw)?"; then
+        local net spec rule script=""
+        for net in "${nets[@]}"; do
+          for spec in "$port tcp" "5353 udp"; do
+            rule="from $net to any port ${spec% *} proto ${spec#* }"
+            # One that was there already stays, and isn't taken out after.
+            sudo ufw show added 2>/dev/null | grep -qxF "ufw allow $rule" && continue
+            run sudo ufw allow $rule >/dev/null && added_rules+=("$rule") && script+="ufw delete allow $rule >/dev/null; "
+          done
         done
+        # Root takes them out again even if this terminal is closed (sudo
+        # couldn't ask for the password then).
+        if [[ -n $script ]]; then
+          sudo systemctl stop "$firewall_timer.timer" 2>/dev/null
+          run sudo systemd-run --quiet --collect --unit="$firewall_timer" --on-active=11min /bin/sh -c "$script" \
+            || note "if this window is closed before the pairing ends, the rules stay: sudo ufw status numbered"
+        fi
       fi
     fi
     if wait_until "Waiting for the pairing… (Ctrl-C to do it later)" 600 sp_paired; then
@@ -1457,7 +1508,7 @@ un_bus() {
   fi
   if $block; then
     backup "$conf"
-    mpd_conf_undo "$conf" write && mv "$conf.new" "$conf" && ok "wrote $conf"
+    mpd_conf_undo "$conf" write && swap_in "$conf" && ok "wrote $conf"
   fi
   stop_units omarock-bus omarock-guard
   ((${#paths[@]} == 0)) || run rm -rf "${paths[@]}"
@@ -1514,7 +1565,7 @@ un_mpd() {
   confirm "Take these out too, and restart mpd?" no || { ok "kept them"; return 0; }
   if [[ -n $gone ]]; then
     backup "$conf"
-    mpd_socket_undo "$conf" write && mv "$conf.new" "$conf" && ok "wrote $conf"
+    mpd_socket_undo "$conf" write && swap_in "$conf" && ok "wrote $conf"
   fi
   ((${#dropins[@]} == 0)) || run rm -f "${dropins[@]}"
   rmdir "$units/mpd.service.d" "$units/mpd-mpris.service.d" 2>/dev/null
@@ -1544,6 +1595,16 @@ un_config() {
   fi
 }
 
+# What omarock keeps only to be quicker: the Top 100 charts and the radio's
+# local stations, fetched again whenever they're wanted.
+un_cache() {
+  local cache=${XDG_CACHE_HOME:-$HOME/.cache}/omarock
+  [[ -d $cache ]] || return 0
+  step "omarock's cache"
+  explain "${cache/#"$HOME"/\~} holds copies omarock fetches again when it needs them (the Top 100 charts, the radio's local stations)."
+  confirm "Delete it?" && run rm -rf "$cache" && ok "deleted"
+}
+
 uninstall() {
   again="./install --uninstall"
   printf '\n%sTaking omarock off this machine%s\n\n' "$bold" "$reset"
@@ -1561,10 +1622,14 @@ uninstall() {
   un_bus
   un_mpd
   un_config
+  un_cache
   [[ -d $share ]] && rmdir "$share" 2>/dev/null
+  # How the last setup went, for the settings, which are gone now.
+  [[ -d $state_dir ]] && rm -rf "$state_dir"
   ((step_no > before)) || ok "nothing of omarock's is set up here"
   printf '\n%sWhat stays%s\n' "$bold" "$reset"
   explain "mpd, mpc and mpd-mpris, with mpd's config, database and playlists. omarock's radio favourites are the mpd playlist \"Radio\"."
+  explain "If Apple Music's two fixes were built here, the packages they were built with stay too (base-devel, cmake, ninja, go, git): sudo pacman -Rs those you don't otherwise need."
   mapfile -t backups < <(compgen -G "$(mpd_conf).before-omarock-*")
   if ((${#backups[@]})); then explain "Copies of mpd.conf from before each change:"; listing "${backups[@]}"; fi
   mapfile -t backups < <(compgen -G "$bindings.before-omarock-*")

@@ -28,6 +28,7 @@ Also:
 
     omarock-spotify.py [--port 8730]
 """
+import html
 import json
 import os
 import re
@@ -44,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 # omarock's sound output (audio/, ./install sound): Soloist plays into it
@@ -749,8 +750,27 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self): self.handle_any("GET")
     def do_POST(self): self.handle_any("POST")
 
+    # Only omarock's own clients, never a web page. A page can't send a
+    # header of its own here without asking first (CORS), which this never
+    # allows, and a page that points a name of its own at 127.0.0.1 (DNS
+    # rebinding) arrives with that name as its Host. The sign-in comes back
+    # through the browser, so /callback needs only the right Host.
+    def refused(self, path):
+        port = self.server.server_address[1]
+        if self.headers.get("Host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+            return "Not this address."
+        if path != "/callback" and self.headers.get("X-Omarock") != "1":
+            return "Only omarock asks here (X-Omarock: 1)."
+        kind = self.headers.get("Content-Type", "").split(";")[0].strip()
+        if int(self.headers.get("Content-Length") or 0) and kind != "application/json":
+            return "The body has to be JSON (Content-Type: application/json)."
+        return None
+
     def handle_any(self, method):
         url = urllib.parse.urlparse(self.path)
+        why = self.refused(url.path)
+        if why:
+            return self.reply(403, {"error": why})
         query = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
         length = int(self.headers.get("Content-Length") or 0)
         try:
@@ -789,9 +809,9 @@ class Handler(BaseHTTPRequestHandler):
                 log("signed in to Spotify again")
                 page = "<h2>omarock is signed in to Spotify.</h2><p>You can close this tab.</p>"
             except (spotify_web.NotSignedIn, spotify_web.ApiError) as e:
-                ok, page = False, f"<h2>Spotify sign-in failed</h2><p>{e}</p>"
+                ok, page = False, f"<h2>Spotify sign-in failed</h2><p>{html.escape(str(e))}</p>"
         else:
-            page = f"<h2>Spotify sign-in failed: {query.get('error', 'no sign-in was started here')}</h2>"
+            page = f"<h2>Spotify sign-in failed: {html.escape(query.get('error', 'no sign-in was started here'))}</h2>"
         self.reply(200 if ok else 400, page.encode(), "text/html; charset=utf-8")
 
     def route(self, method, parts, query, body):

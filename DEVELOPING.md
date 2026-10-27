@@ -29,7 +29,7 @@
 | `sxm/` | omarock-sxm, the SiriusXM relay |
 | `bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
 | `patches/` | libFLAC and mpd-mpris patches that make Apple Music's stream play well (see bridge/README.md) |
-| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-libflac`, `build-mpd-mpris`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`), and the test harness (`capture/`) |
+| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-libflac`, `build-mpd-mpris`; `pin-sxm` writes `sxm/requirements.txt`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`), and the test harness (`capture/`) |
 | `tests/` | node tests for the pure helpers |
 
 ## How it works

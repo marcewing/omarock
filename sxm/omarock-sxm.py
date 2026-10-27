@@ -28,7 +28,7 @@ from aiosxm import SxmClient
 from aiosxm.models import build_image_url
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 HOST, PORT = "127.0.0.1", int(os.environ.get("OMAROCK_SXM_PORT", "8720"))
 CONFIG = Path(os.environ.get("OMAROCK_SXM_CONFIG", Path.home() / ".config/omarock/siriusxm.json"))
 BITRATE = "256k"
@@ -363,7 +363,20 @@ def now_json(now, base):
 
 
 def routes(service):
-    app = web.Application()
+    # Only omarock's own clients, never a web page: /v1 wants a header a page
+    # can't send without asking first (CORS, never allowed here), and every
+    # request this address as its Host, which a page that points a name of
+    # its own at 127.0.0.1 (DNS rebinding) doesn't have. mpd's streams and the
+    # panel's covers can't send headers, so those need only the Host.
+    @web.middleware
+    async def omarock_only(request, handler):
+        if request.host not in (f"{HOST}:{PORT}", f"localhost:{PORT}"):
+            return error(403, "Not this address.")
+        if request.path.startswith("/v1/") and request.headers.get("X-Omarock") != "1":
+            return error(403, "Only omarock asks here (X-Omarock: 1).")
+        return await handler(request)
+
+    app = web.Application(middlewares=[omarock_only])
     base = f"http://{HOST}:{PORT}"
 
     def error(status, message):

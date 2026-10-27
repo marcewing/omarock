@@ -43,10 +43,13 @@ call() {  # METHOD PATH [JSON]
   [[ -n $BRIDGE && -n $STREAM ]] || die "no bridge set up: put \"bridge\" and \"stream\" in $CONFIG (bridge/README.md), or set OMAROCK_BRIDGE and OMAROCK_STREAM"
   local token=""
   [[ -r $TOKEN_FILE ]] && token=$(<"$TOKEN_FILE")
-  local args=(-sS --max-time 30 -X "$1" -H "Authorization: Bearer ${token//[$'\n\r ']/}" -w '\n%{http_code}')
+  local args=(-sS --max-time 30 -X "$1" -w '\n%{http_code}')
   [[ $# -ge 3 ]] && args+=(-H "Content-Type: application/json" --data "$3")
   local out code
-  out=$(curl "${args[@]}" "$BRIDGE$2") || die "can't reach the bridge at $BRIDGE"
+  # The token goes to curl on stdin (-K -), never on its command line,
+  # where anyone on this machine could read it (ps).
+  out=$(printf 'header = "Authorization: Bearer %s"\n' "${token//[$'\n\r "\\']/}" \
+    | curl -K - "${args[@]}" "$BRIDGE$2") || die "can't reach the bridge at $BRIDGE"
   code=${out##*$'\n'}
   out=${out%$'\n'*}
   if [[ $code != 2* ]]; then

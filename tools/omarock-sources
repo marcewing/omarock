@@ -35,7 +35,7 @@ installed() { [[ -f $share/$1/INSTALLED ]]; }
 installs() {  # DIR: its files that get installed
   case $1 in
     spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist.service omarock-spotify.service ;;
-    sxm) echo omarock-sxm.py omarock-sxm.service ;;
+    sxm) echo omarock-sxm.py omarock-sxm.service requirements.txt ;;
     audio) echo omarock-bus.conf omarock-guard.py omarock-players.conf omarock-bus.service omarock-guard.service ;;
   esac
 }

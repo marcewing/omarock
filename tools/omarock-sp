@@ -25,7 +25,7 @@ BASE=${OMAROCK_SPOTIFY:-http://127.0.0.1:8730}
 die() { echo "omarock-sp: $*" >&2; exit 1; }
 call() {  # METHOD PATH [JSON]
   local out code
-  out=$(curl -sS -w '\n%{http_code}' -X "$1" -H 'Content-Type: application/json' ${3:+-d "$3"} "$BASE$2") \
+  out=$(curl -sS -w '\n%{http_code}' -X "$1" -H 'X-Omarock: 1' -H 'Content-Type: application/json' ${3:+-d "$3"} "$BASE$2") \
     || die "can't reach omarock-spotify ($BASE): systemctl --user status omarock-spotify"
   code=${out##*$'\n'}
   out=${out%$'\n'*}

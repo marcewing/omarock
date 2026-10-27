@@ -6,7 +6,8 @@
 #   tools/install-sxm [COMMIT]          install, and reload systemd
 #   tools/install-sxm --start [COMMIT]  ... then enable and (re)start it
 #
-# It makes a Python venv with aiosxm in ~/.local/share/omarock/sxm-venv (once),
+# It makes a Python venv in ~/.local/share/omarock/sxm-venv (once), with the
+# packages sxm/requirements.txt pins (aiosxm and what it needs, hash-checked),
 # puts the service in ~/.local/share/omarock/sxm/ and its unit in
 # ~/.config/systemd/user/, and creates ~/.config/omarock/siriusxm.json (mode
 # 600) for the account if it isn't there. It never prints the account.
@@ -27,7 +28,9 @@ if [[ ! -x $venv/bin/python ]]; then
   echo "making the venv in $venv"
   python3 -m venv "$venv"
 fi
-"$venv/bin/pip" install --quiet --disable-pip-version-check --upgrade "aiosxm==0.3.1" cryptography
+# The commit's pinned packages, each checked against its hash (tools/pin-sxm).
+"$venv/bin/pip" install --quiet --disable-pip-version-check --require-hashes \
+  -r <(git -C "$repo" show "$commit:sxm/requirements.txt")
 install -d "$dest" "$units" "$(dirname "$config")"
 git -C "$repo" show "$commit:sxm/omarock-sxm.py" > "$dest/omarock-sxm.py.new" && mv "$dest/omarock-sxm.py.new" "$dest/omarock-sxm.py"
 git -C "$repo" show "$commit:sxm/omarock-sxm.service" > "$units/omarock-sxm.service"
