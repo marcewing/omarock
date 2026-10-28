@@ -182,7 +182,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.3"
+  readonly property string version: "0.11.4"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -224,6 +224,8 @@ Panel {
   property var previewInfo: ({})
   property bool previewLoading: false
   property int previewSequence: 0
+  property bool previewBusy: false
+  property var previewWaiting: null
 
   // Adding to a playlist: the picker is open while pickerItem is set, to
   // { result, title } (what client.addToPlaylist adds, and its name).
@@ -2119,7 +2121,27 @@ Panel {
     root.previewRows = []
     root.previewInfo = root.placeholderInfo(entry)
     root.previewLoading = true
+    root.loadPreview(entry, sequence)
+  }
+
+  // Previews from Apple Music or Spotify load one at a time. Each costs the
+  // service several requests (a Spotify artist up to 13), and the cursor or
+  // the pointer going down a list of artists asked for a dozen at once:
+  // Spotify said 429, too many requests (Marc, 10-28). The rows passed
+  // while one loads never load; the one the cursor is on then does.
+  function loadPreview(entry, sequence) {
+    if (entry.apple && root.previewBusy) {
+      root.previewWaiting = { entry: entry, sequence: sequence }
+      return
+    }
+    if (entry.apple) root.previewBusy = true
     root.loadEntry(entry, function() {
+      if (entry.apple) {
+        root.previewBusy = false
+        var next = root.previewWaiting
+        root.previewWaiting = null
+        if (next && next.sequence === root.previewSequence) root.loadPreview(next.entry, next.sequence)
+      }
       if (sequence !== root.previewSequence) return
       root.previewRows = entry.rows
       root.previewInfo = entry.info

@@ -273,6 +273,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     lookup_scenario(host, output, socket_path, failures)
     spotify_scenario(host, output, socket_path, failures)
     spotify_volume_scenario(host, socket_path, failures)
+    spotify_previews_scenario(host, failures)
     sxm_scenario(host, output, socket_path, failures)
     radio_scenario(host, output, socket_path, failures)
     radio_tuning_scenario(host, socket_path, failures)
@@ -1250,6 +1251,44 @@ def spotify_volume_scenario(host, socket_path, failures):
     check(backwards == 0 and 0 < sent <= 15 and command_count(socket_path, "setvol") == setvol_before,
           f"a drag sets Spotify's volume ({sent} requests, the knob never backwards), and mpd's isn't touched", failures)
     spotify_post("/v1/fake/volume", {"on": False})
+    to_source(host, "local")
+    host.call("close")
+
+
+def spotify_previews_scenario(host, failures):
+    """The expanded panel's previews from Spotify load one at a time (Marc,
+    10-28: "spotify said 429: too many requests"). Going down the results
+    asked omarock-spotify for every row the cursor stopped on, all at once,
+    and a Spotify artist page is up to 14 requests to Spotify."""
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    to_source(host, "spotify")
+    wait_for(lambda: host.state()["spotifyMode"], "Spotify")
+    host.call("expand", "true")
+    host.settle(1)
+    host.call("type", "husker")
+    wait_for(lambda: not host.state()["searching"] and host.state()["previewRows"], "Spotify search, the top result previewed")
+    spotify_post("/v1/fake/slowpages", {"on": True})
+
+    def pages():
+        return len(spotify_requests("/v1/albums")) + len(spotify_requests("/v1/artists"))
+    before = pages()
+    passed = []
+    # The top result (already previewed), then an artist and two albums.
+    for _ in range(4):
+        host.call("move", 1)
+        host.settle(.3)
+        s = host.state()
+        passed.append(s["rows"][s["cursor"]])
+    wanted = passed[-1]
+    wait_for(lambda: host.state()["preview"] == wanted and host.state()["previewRows"], "the cursor's row previewed")
+    asked = pages() - before
+    check(len(set(passed)) == 4 and asked <= 2,
+          f"3 rows passed to be previewed ({', '.join(passed[1:])}): {asked} asked of omarock-spotify, the first and the last",
+          failures)
+    spotify_post("/v1/fake/slowpages", {"on": False})
+    host.call("back")
+    host.call("expand", "false")
     to_source(host, "local")
     host.call("close")
 
@@ -4063,6 +4102,9 @@ def time_machine_scenario(host, output, socket_path, failures):
           and s["subtitles"][0] == "5 of 12 found on Apple Music" and s["lookup"] == "apple" and s["cursor"] == 0
           and s["subtitles"][3] == "Hüsker Dü · New Day Rising" and s["subtitles"][5].endswith("not on Apple Music"),
           "its songs found on Apple Music, or not, the cursor on Play: " + ", ".join(s["rows"][:7]) + " | " + s["subtitles"][0], failures)
+    chart = [r["query"] for r in map(json.loads, BRIDGE["log"].read_text().splitlines()) if r["path"] == "/v1/search"][searches:]
+    check(len(chart) >= 12 and all(q.get("background") == "1" for q in chart),
+          f"the chart's {len(chart)} searches can wait their turn (background=1): omarock-spotify paces them", failures)
     check(len(bridge_requests("/v1/search")) - searches >= 12, "a search for each song", failures)
     check(s["levelButtons"]["current"][:4] == ["[Play]", "Shuffle", "Add to queue", "Add to playlist"],
           "the chart's buttons, the cursor on Play: " + str(s["levelButtons"]["current"]), failures)
@@ -5246,6 +5288,7 @@ def main():
                             elif name == "real-apple": real_apple_scenario(host, output, socket_path, failures)
                             elif name == "volume": volume_scenario(host, socket_path, failures)
                             elif name == "spotify-volume": spotify_volume_scenario(host, socket_path, failures)
+                            elif name == "spotify-previews": spotify_previews_scenario(host, failures)
                             elif name == "expanded-keys": expanded_keys_scenario(host, failures)
                             elif name == "sxm": sxm_scenario(host, output, socket_path, failures)
                             elif name == "real-sxm": real_sxm_scenario(host, output, socket_path, failures)

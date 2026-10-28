@@ -158,9 +158,11 @@ Item {
   function lookUp(target, entry, year, callback) {
     function search(text, then) {
       target.search(text, function(data, error) {
-        if (!data) { callback(null, error || "no answer"); return }
+        // A search whose catalog part failed (too many requests, say) found
+        // nothing yet: not kept as "not there".
+        if (!data || data.catalogError) { callback(null, (data && data.catalogError) || error || "no answer"); return }
         then(TimeMachine.bestMatch(entry, (data.catalog || {}).songs || [], year))
-      }, "catalog")
+      }, "catalog", true)
     }
     search(TimeMachine.searchText(entry), function(song) {
       var again = TimeMachine.searchAgain(entry)

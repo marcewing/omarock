@@ -26,6 +26,7 @@ import html
 import http.client
 import http.server
 import json
+import math
 import os
 import secrets
 import subprocess
@@ -103,6 +104,71 @@ def unanswered(e):
     if isinstance(cause, (ConnectionError, http.client.HTTPException)):
         return True, ApiError("Spotify closed the connection without answering; try again")
     return False, ApiError(f"Couldn't reach Spotify ({cause}); try again")
+
+
+# Too many requests (429): Spotify says how long to wait (Retry-After, in
+# seconds), and until then every request fails at once here. More of them
+# would only keep the limit on.
+paused_until = 0.0
+
+
+def pause_for(retry_after, method, url):
+    """The seconds a 429 asks for, now kept in paused_until."""
+    global paused_until
+    try:
+        wait = max(1.0, float(retry_after))
+    except (TypeError, ValueError):
+        wait = 5.0
+    now = time.monotonic()
+    if paused_until <= now:
+        print(f"omarock-spotify: Spotify said 429 (too many requests) to {method} "
+              f"{urllib.parse.urlparse(url).path}: waiting {wait:.0f} s", file=sys.stderr, flush=True)
+    paused_until = max(paused_until, now + wait)
+    return wait
+
+
+# Never as many as Spotify allows. Spotify doesn't say what its limit is,
+# only that it counts an app's requests over 30 s (one developer's apps
+# together), and less for apps in development mode; and it has shut apps out
+# for hours after a burst. So at most 20 at once, then one a second: no more
+# than 50 in any 30 s. Background work (filling in the queue's songs, the
+# Top 100's searches) leaves 15 of the 20 for what you're looking at.
+RATE, BURST, RESERVE = 1.0, 20, 15
+pacing = threading.Lock()
+due = 0.0  # when the next request is due at RATE (GCRA's arrival time)
+turns = threading.local()  # .background: this thread's requests can wait
+
+
+def take_turn():
+    """Wait until a request may go."""
+    global due
+    background = getattr(turns, "background", False)
+    ahead = (BURST - 1 - (RESERVE if background else 0)) / RATE
+    while True:
+        with pacing:
+            now = time.monotonic()
+            due = max(due, now)
+            start = due - ahead
+            if start <= now or not background:
+                due += 1 / RATE
+                break
+        # Background work books no turn ahead, so it never queues in front
+        # of what you're looking at.
+        time.sleep(start - now)
+    if start > now:
+        time.sleep(start - now)
+
+
+def not_paused():
+    wait = paused_until - time.monotonic()
+    if wait > 0:
+        raise too_many(wait)
+
+
+def too_many(wait):
+    when = (f"{math.ceil(wait)} s" if wait < 120 else f"{round(wait / 60)} min" if wait < 7200
+            else f"{round(wait / 3600)} h")
+    return ApiError(f"Spotify says too many requests: try again in {when}")
 
 
 def stored(data, previous=None):
@@ -206,19 +272,29 @@ def sign_out():
 
 def call(method, path, body=None):
     """(status, JSON or text) for one Web API request; raises NotSignedIn, or
-    ApiError when Spotify doesn't answer (a GET dropped unanswered is tried
-    once more first: it changes nothing)."""
+    ApiError when Spotify doesn't answer or says too many requests (a GET
+    dropped unanswered, or asked to wait 2 s or less, is tried once more
+    first: it changes nothing)."""
     url = path if path.startswith("http") else API + path
     data = json.dumps(body).encode() if body is not None else (b"" if method in ("PUT", "POST") else None)
-    request = urllib.request.Request(url, data=data, method=method,
-                                     headers={"Authorization": "Bearer " + access_token(), "Content-Type": "application/json"})
     for attempt in (1, 2):
+        not_paused()
+        take_turn()
+        not_paused()  # a 429 may have come while this waited its turn
+        request = urllib.request.Request(url, data=data, method=method,
+                                         headers={"Authorization": "Bearer " + access_token(), "Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(request, timeout=20) as reply:
                 text = reply.read().decode()
                 return reply.status, json.loads(text) if text.strip() else None
         except urllib.error.HTTPError as e:
             text = e.read().decode(errors="replace")
+            if e.code == 429:
+                wait = pause_for(e.headers.get("Retry-After"), method, url)
+                if method == "GET" and attempt == 1 and wait <= 2:
+                    time.sleep(wait + 0.05)
+                    continue
+                raise too_many(wait) from None
             try:
                 return e.code, json.loads(text)
             except ValueError:

@@ -96,6 +96,8 @@ def main():
     queue_jump()
     web_pages()
     dropped()
+    limited()
+    paced()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
 
@@ -448,6 +450,161 @@ def dropped():
         for server in (api, ours):
             server.shutdown()
             server.server_close()
+
+
+def limited():
+    """Marc, 10-28: "spotify said 429: too many requests". The expanded
+    panel's previews had asked for a dozen artist pages in a few seconds,
+    each up to 14 requests to Spotify, and every one went on asking."""
+    import http.client
+    import http.server
+    import json
+    import tempfile
+    web = service.spotify_web
+    web.call = REAL_CALL
+    folder = Path(tempfile.mkdtemp())
+    web.TOKENS = folder / "spotify-token.json"
+    web.TOKENS.write_text(json.dumps({"access_token": "a", "refresh_token": "r", "expires_at": time.time() + 3600}))
+    seen, limits = [], {"count": 0, "wait": "1"}
+
+    class Api(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+
+        def answer(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            seen.append(self.command + " " + self.path.split("?")[0])
+            if limits["count"]:
+                limits["count"] -= 1
+                body = b'{"error": {"status": 429, "message": "API rate limit exceeded"}}'
+                self.send_response(429)
+                self.send_header("Retry-After", limits["wait"])
+            else:
+                path = self.path.split("?")[0]
+                body = json.dumps({"tracks": {"items": []}} if path.endswith("/search")
+                                  else {"items": [], "next": None} if path.endswith("/albums")
+                                  else {"id": "x", "name": "Bush"}).encode()
+                self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        do_GET = do_POST = answer
+    api = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Api)
+    threading.Thread(target=api.serve_forever, daemon=True).start()
+    real_api, web.API = web.API, f"http://127.0.0.1:{api.server_address[1]}"
+    ours = service.ThreadingHTTPServer(("127.0.0.1", 0), service.Handler)
+    threading.Thread(target=ours.serve_forever, daemon=True).start()
+
+    def fails(method):
+        try:
+            web.call(method, "/albums/x")
+            return ""
+        except web.ApiError as e:
+            return str(e)
+    try:
+        web.paused_until = web.due = 0.0
+        limits.update(count=1, wait="1")
+        began = time.monotonic()
+        got = web.call("GET", "/albums/x")
+        check("429 asking for 1 s: a GET waits, then is tried again",
+              got[0] == 200 and len(seen) == 2 and time.monotonic() - began >= 1, f"{got} {seen}")
+        seen.clear(); limits.update(count=1, wait="30")
+        error = fails("GET")
+        check("429 asking for 30 s: says when to try again", "try again in 30 s" in error and len(seen) == 1,
+              f"{error!r} {seen}")
+        error = fails("GET")
+        check("while Spotify asks to wait, nothing is sent", "too many requests" in error and len(seen) == 1,
+              f"{error!r} {seen}")
+        conn = http.client.HTTPConnection("127.0.0.1", ours.server_address[1], timeout=5)
+        conn.request("GET", "/v1/search?q=bush&scope=catalog", headers={"X-Omarock": "1"})
+        reply = conn.getresponse()
+        text = reply.read().decode()
+        check("while Spotify asks to wait, a search says so",
+              reply.status == 200 and "too many requests" in json.loads(text).get("catalogError", ""),
+              f"{reply.status} {text}")
+        web.paused_until = 0.0
+        seen.clear(); limits.update(count=1, wait="1")
+        error = fails("POST")
+        check("429: a POST isn't tried again", "too many requests" in error and len(seen) == 1, f"{error!r} {seen}")
+        web.paused_until = 0.0
+        seen.clear()
+        pages = service.Web()
+        first = pages.artist("x")
+        asked = len(seen)
+        again = pages.artist("x")
+        check("an artist page is kept: the second costs Spotify nothing",
+              asked >= 4 and len(seen) == asked and again == first, f"{asked} then {len(seen)}")
+    finally:
+        web.API = real_api
+        web.paused_until = 0.0
+        for server in (api, ours):
+            server.shutdown()
+            server.server_close()
+
+
+def paced():
+    """Never as many requests as Spotify allows (Marc, 10-28: "I don't want
+    to abuse Spotify and have them shut us off"): BURST at once, then RATE
+    a second, with RESERVE of the burst kept from background work. Here 5
+    at once, then 10 a second, 3 kept."""
+    import http.server
+    import json
+    import tempfile
+    web = service.spotify_web
+    web.call = REAL_CALL
+    folder = Path(tempfile.mkdtemp())
+    web.TOKENS = folder / "spotify-token.json"
+    web.TOKENS.write_text(json.dumps({"access_token": "a", "refresh_token": "r", "expires_at": time.time() + 3600}))
+    arrived = []
+
+    class Api(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+
+        def do_GET(self):
+            arrived.append((time.monotonic(), self.path))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+    api = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Api)
+    threading.Thread(target=api.serve_forever, daemon=True).start()
+    real = web.API, web.RATE, web.BURST, web.RESERVE
+    web.API, web.RATE, web.BURST, web.RESERVE = f"http://127.0.0.1:{api.server_address[1]}", 10.0, 5, 3
+
+    def at_once(n, path, background=False):
+        def one():
+            web.turns.background = background
+            web.call("GET", path)
+        threads = [threading.Thread(target=one) for _ in range(n)]
+        for t in threads: t.start()
+        return threads
+    try:
+        web.paused_until = web.due = 0.0
+        began = time.monotonic()
+        for t in at_once(15, "/front"): t.join()
+        times = sorted(when - began for when, _ in arrived)
+        late = [round(t, 2) for i, t in enumerate(times) if t < (i - 5 + 1) / 10 - 0.02]
+        check("15 at once: 5 go, then 10 a second", len(times) == 15 and times[4] < 0.2 and not late and times[-1] >= 0.98,
+              f"{[round(t, 2) for t in times]}")
+        time.sleep(1.5)
+        arrived.clear()
+        web.due = 0.0
+        began = time.monotonic()
+        behind = at_once(10, "/background", background=True)
+        time.sleep(0.05)
+        front = at_once(3, "/front")
+        for t in front: t.join()
+        quick = [round(when - began, 2) for when, path in arrived if path == "/front"]
+        first = [when for when, path in arrived if path == "/background"]
+        check("background work leaves the reserve: 3 asked after 10 queued go at once",
+              len(quick) == 3 and max(quick) < 0.2 and len(first) <= 3, f"{quick}, {len(first)} of the background already")
+        for t in behind: t.join()
+        check("and the background work all goes, after", sum(path == "/background" for _, path in arrived) == 10)
+    finally:
+        web.API, web.RATE, web.BURST, web.RESERVE = real
+        web.turns.background = False
+        web.due = 0.0
+        api.shutdown()
+        api.server_close()
 
 if __name__ == "__main__":
     main()

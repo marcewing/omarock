@@ -138,6 +138,9 @@ class Bridge:
         self.orphan = False
         # Play answering 3 s late (POST /v1/fake/slow).
         self.slow = False
+        # Albums and artists answering 1 s late, as a Spotify artist page
+        # does (up to 13 Web API requests; POST /v1/fake/slowpages).
+        self.slowpages = False
         # The machine it plays for (X-Omarock-Client), as the bridge 0.5 and
         # omarock-spotify 0.2.3 tell it: to another, while playing, the
         # status says where (and Spotify's says paused), and pause, skip and
@@ -393,6 +396,8 @@ class Handler(BaseHTTPRequestHandler):
                                     "stream": f"http://127.0.0.1:{PORT}/omarock.ogg", "storefront": "us"})
         if self.server.token and self.headers.get("Authorization") != "Bearer " + self.server.token:
             return self.reply(401, {"error": "Wrong or missing token"})
+        if bridge.slowpages and method == "GET" and parts[1:2] in (["albums"], ["artists"]):
+            time.sleep(1)
         try:
             return self.reply(200, self.route(bridge, method, parts[1:], query, body))
         except NoEndpoint:
@@ -474,7 +479,7 @@ class Handler(BaseHTTPRequestHandler):
                         added += 1
                     b.changed()
                     return {"ok": True} if b.spotify else {"ok": True, "added": added}
-                if path in ("fake/bare", "fake/orphan", "fake/slow"):
+                if path in ("fake/bare", "fake/orphan", "fake/slow", "fake/slowpages"):
                     setattr(b, path[5:], bool(body["on"]))
                     b.changed()
                     return {"ok": True}

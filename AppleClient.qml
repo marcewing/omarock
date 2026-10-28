@@ -119,6 +119,7 @@ Item {
     }
     var xhr = new XMLHttpRequest()
     var entry = { xhr: xhr, deadline: Date.now() + (timeoutMs || 10000), timedOut: false, path: path.split("?")[0],
+      background: path.indexOf("&background=1") >= 0,
       sentAt: Date.now(), ahead: root.inflight.map(function(e) { return e.path }) }
     xhr.onreadystatechange = function() {
       // A reply that arrives after a plugin reload destroyed this client
@@ -167,7 +168,9 @@ Item {
   function logTiming(method, entry, status) {
     var took = Date.now() - entry.sentAt
     // A volume drag sends a run of POSTs: only a slow one is worth a line.
-    if (entry.path === "/v1/status" || ((method !== "POST" || entry.path === "/v1/volume") && took <= 2000)) return
+    // Background requests wait their turn: only a failure is.
+    if (entry.path === "/v1/status" || ((method !== "POST" || entry.path === "/v1/volume") && took <= 2000)
+        || (entry.background && status === 200)) return
     console.info("omarock: " + root.service + " " + method + " " + entry.path + " answered in " + took + " ms ("
       + (status || "no answer") + "), sent with " + entry.ahead.length + " in flight"
       + (entry.ahead.length > 0 ? ": " + entry.ahead.slice(0, 8).join(", ") : ""))
@@ -403,8 +406,11 @@ Item {
 
   // Browsing.
   // scope: "all" (the default), "library" or "catalog".
-  function search(query, callback, scope) {
-    root.get("/v1/search?scope=" + (scope || "all") + "&limit=8&q=" + encodeURIComponent(query), callback)
+  // background: the service may let it wait (omarock-spotify paces its
+  // requests to Spotify, and lets what you're looking at go first).
+  function search(query, callback, scope, background) {
+    root.get("/v1/search?scope=" + (scope || "all") + "&limit=8" + (background ? "&background=1" : "")
+      + "&q=" + encodeURIComponent(query), callback, background ? 60000 : 0)
   }
   function album(source, id, callback) { root.get("/v1/albums/" + source + "/" + encodeURIComponent(id), callback) }
   function artist(source, id, callback) { root.get("/v1/artists/" + source + "/" + encodeURIComponent(id), callback) }

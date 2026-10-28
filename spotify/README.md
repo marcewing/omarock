@@ -92,6 +92,16 @@ By hand, run the tools from your omarock clone: the plugin's folder,
   - the songs of other people's playlists (they still play);
   - taking songs out of Spotify's queue;
   - more than 10 search results of each kind.
+- **Asking Spotify gently.** Spotify limits how often an app may ask it
+  things, more tightly for one in development mode, as yours is, and it doesn't
+  say how often. So omarock-spotify sends at most 20 requests at once, then one a
+  second (no more than 50 in any 30 seconds). Background work (filling in the
+  queue's songs, finding the Top 100's songs) waits for what you're looking at.
+  So the first look at a year's Top 100 takes a minute or two; after that it's
+  kept. Artist pages, which cost the most requests (up to 13), are kept for 10
+  minutes. If Spotify still says too many requests, omarock-spotify asks
+  nothing more until the time Spotify gives is up, and the panel says when to
+  try again.
 - **`tools/omarock-sp`** drives it from a terminal: `status`, `search`, `play`,
   `pause`, `next`, `on` and `off` (make Spotify omarock's source, or not), and more
   (`--help`).

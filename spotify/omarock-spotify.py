@@ -45,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 # omarock's sound output (audio/, ./install sound): Soloist plays into it
@@ -423,6 +423,7 @@ class Soloist:
 
     def enrich_forever(self):
         """Artist names, album ids, track numbers: Soloist's events leave them out."""
+        spotify_web.turns.background = True  # one request a song: it can wait
         while True:
             if not self.wanted:
                 time.sleep(0.5)
@@ -529,6 +530,7 @@ class Web:
         self.library = None
         self.library_at = 0.0
         self.pending_login = None
+        self.artists = {}  # (id, source) -> (when, page)
 
     def get(self, path):
         status, data = spotify_web.call("GET", path)
@@ -614,7 +616,7 @@ class Web:
                     "albums": [album_obj(a) for a in (data.get("albums") or {}).get("items") or [] if a],
                     "artists": [artist_obj(a) for a in (data.get("artists") or {}).get("items") or [] if a],
                     "playlists": [playlist_obj(p, me) for p in (data.get("playlists") or {}).get("items") or [] if p]}
-            except (ApiError, LookupError) as e:
+            except (ApiError, spotify_web.ApiError, LookupError) as e:
                 out["catalog"] = {"songs": [], "albums": [], "artists": [], "playlists": []}
                 out["catalogError"] = str(e)
         return out
@@ -649,6 +651,11 @@ class Web:
         return out
 
     def artist(self, aid, source="catalog"):
+        # Kept 10 minutes: a page costs Spotify up to 13 requests, and the
+        # panel's previews come back to the same artists.
+        kept = self.artists.get((aid, source))
+        if kept and time.monotonic() - kept[0] < 600:
+            return kept[1]
         artist = self.get(f"/artists/{aid}")
         # An artist's albums come 10 at a time now (larger pages answer 400).
         albums = self.pages(f"/artists/{aid}/albums?include_groups=album,single,compilation&market=from_token", limit=10, most=100)
@@ -658,14 +665,19 @@ class Web:
             if key not in seen:
                 seen.add(key)
                 own.append(album_obj(a))
-        appears = self.pages(f"/artists/{aid}/albums?include_groups=appears_on&market=from_token", limit=10, most=20)
+        appears = self.pages(f"/artists/{aid}/albums?include_groups=appears_on&market=from_token", limit=10, most=10)
         # Spotify took away artist top tracks (2026): a search by artist stands in.
         found = self.get("/search?" + urllib.parse.urlencode(
             {"q": f'artist:"{artist.get("name", "")}"', "type": "track", "limit": 10, "market": "from_token"}))
         top = [song(t) for t in (found.get("tracks") or {}).get("items") or []
                if t and any(a.get("id") == aid for a in t.get("artists") or [])]
-        return {"artist": artist_obj(artist, source), "albums": own,
+        page = {"artist": artist_obj(artist, source), "albums": own,
                 "appearsOn": [album_obj(a) for a in appears], "topSongs": top}
+        if len(self.artists) >= 100:
+            oldest = min(list(self.artists.items()), key=lambda kv: kv[1][0])[0]
+            self.artists.pop(oldest, None)
+        self.artists[(aid, source)] = (time.monotonic(), page)
+        return page
 
     def playlist(self, pid):
         data = self.get(f"/playlists/{pid}?market=from_token")
@@ -772,6 +784,8 @@ class Handler(BaseHTTPRequestHandler):
         if why:
             return self.reply(403, {"error": why})
         query = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+        # The Top 100's searches can wait for what you're looking at.
+        spotify_web.turns.background = query.get("background") == "1"
         length = int(self.headers.get("Content-Length") or 0)
         try:
             body = json.loads(self.rfile.read(length) or b"{}") if length else {}
