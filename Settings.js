@@ -9,6 +9,8 @@
 //   "account" and "secret": a login or a key, in its own file in
 //     ~/.config/omarock (tools/omarock-account); a secret is never shown;
 //   "action": a button (signing in to Spotify, setting a source up);
+//     a field can have one too, beside it (`button`, and `action`, the key
+//     the panel is handed);
 //   "folder": mpd's music folder, in mpd.conf (changed after asking).
 //
 // A few settings are in the file only, never on the screen: `socket`
@@ -90,9 +92,8 @@ var schema = [
     setUpDescription: "Needs a Mac running omarock's bridge: on the Mac, ./install in omarock's clone sets it up (with your Apple Developer membership). Set up then connects this machine to it." },
   { key: "appleUpdate", type: "action", source: "apple", name: "Apple Music", when: "fix" },
   { key: "bridgeToken", type: "secret", label: "The bridge's token", source: "apple",
-    description: "On the Mac it's in ~/Library/Application Support/omarock-bridge/token: paste it here, or copy it with ssh (below). Never shown." },
-  { key: "bridgeTokenCopy", type: "action", label: "Copy the token from the Mac", button: "Copy with ssh", source: "apple",
-    description: "Straight from the bridge's folder on the Mac, with ssh: it needs the Mac's Remote Login (System Settings, General, Sharing). Never shown." },
+    button: "Copy with ssh", action: "bridgeTokenCopy",
+    description: "Paste it, or copy it from the Mac (needs its Remote Login)." },
   { key: "appleIdleStop", type: "integer", label: "Let go of the stream when the Mac is paused", source: "apple",
     min: 0, max: 3600, step: 10, defaultValue: 60, description: "After this many seconds (0: never)." },
   { key: "appleRemove", type: "action", label: "Remove Apple Music", button: "Remove…", source: "apple", remove: true,
@@ -123,7 +124,7 @@ var groups = [
   { tab: "omarock", title: "HISTORY", keys: ["history", "historyDays", "historyClear"] },
   { tab: "omarock", title: "TIME MACHINE", keys: ["timeMachine"] },
   { tab: "omarock", title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "scrollBarSong"] },
-  { tab: "Apple Music", title: "", keys: ["appleMusic", "appleUpdate", "bridgeToken", "bridgeTokenCopy", "appleIdleStop", "appleRemove"] },
+  { tab: "Apple Music", title: "", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },
   { tab: "SiriusXM", title: "", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
   { tab: "Spotify", title: "", keys: ["spotify", "spotifyUpdate", "spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"] },
   { tab: "Sound", title: "", keys: ["sound", "soundUpdate", "soundRemove"] }

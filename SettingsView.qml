@@ -16,7 +16,7 @@ import "Paging.js" as Paging
 // set), and a new one is typed into an empty, masked field. Tab and
 // Shift+Tab change tabs, ↑↓ move, Space or Enter toggles, edits, presses or
 // takes the next choice, ←→ change a number or a choice, Esc closes (or drops
-// an edit).
+// an edit). A field with a button of its own: → to the button, ← back.
 Rectangle {
   id: root
 
@@ -33,6 +33,9 @@ Rectangle {
   property int cursor: 0
   // The text setting being edited, or "".
   property string editing: ""
+  // The cursor is on its row's own button (a field's, beside it).
+  property bool onButton: false
+  onCursorChanged: root.onButton = false
   property bool wide: false
   property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
@@ -102,6 +105,7 @@ Rectangle {
   // Another tab, from its top. An edit going on is dropped, as with Esc.
   function showTab(tab) {
     root.cancelEdit()
+    root.onButton = false
     root.tab = tab
     root.cursor = 0
     flick.contentY = 0
@@ -116,6 +120,7 @@ Rectangle {
   // Opening: on the first tab, at the top, nothing being edited.
   function reset() {
     root.editing = ""
+    root.onButton = false
     root.tab = root.tabs[0]
     root.cursor = 0
     flick.contentY = 0
@@ -175,7 +180,8 @@ Rectangle {
   function activate() {
     var row = root.rows[root.cursor]
     if (!row) return
-    if (row.type === "boolean") root.change(row.key, !(root.valueOf(row.key) === true))
+    if (root.onButton) root.actionRequested(row.action)
+    else if (row.type === "boolean") root.change(row.key, !(root.valueOf(row.key) === true))
     else if (row.type === "enum") root.choose(row, 1)
     else if (row.type === "action") root.actionRequested(row.key)
     else if (row.type !== "info") root.startEdit(row.key)
@@ -191,9 +197,14 @@ Rectangle {
   }
 
   // ←→ on a number: one step down or up; on a choice, the previous or next
-  // option. Elsewhere ← closes.
+  // option; on a field with a button, to the button and back. Elsewhere ←
+  // closes.
   function adjust(dx) {
     var row = root.rows[root.cursor]
+    if (row && row.action && (dx > 0 || root.onButton)) {
+      root.onButton = dx > 0
+      return
+    }
     if (row && row.type === "enum") {
       root.choose(row, dx)
       return
@@ -427,12 +438,18 @@ Rectangle {
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
+              // A field's own button: beside it, or under it in the compact panel.
+              readonly property bool hasButton: editor.visible && !!rowItem.row.action
+              readonly property bool beside: hasButton && root.wide
+              readonly property real fieldWidth: Math.min(Style.space(320), parent.width * 0.5)
               // A line ("info") has no control.
               width: rowItem.row.type === "boolean" ? toggle.implicitWidth : rowItem.row.type === "enum" ? choice.implicitWidth
                 : rowItem.row.type === "action" ? action.implicitWidth : rowItem.row.type === "info" ? 0
-                : Math.min(Style.space(320), parent.width * 0.5)
+                : hasButton && !beside ? Math.max(fieldWidth, fieldButton.implicitWidth) : fieldWidth
               height: rowItem.row.type === "boolean" ? toggle.implicitHeight : rowItem.row.type === "enum" ? choice.implicitHeight
-                : rowItem.row.type === "action" ? action.implicitHeight : rowItem.row.type === "info" ? 0 : editor.implicitHeight
+                : rowItem.row.type === "action" ? action.implicitHeight : rowItem.row.type === "info" ? 0
+                : beside ? Math.max(editor.implicitHeight, fieldButton.implicitHeight)
+                : hasButton ? editor.implicitHeight + Style.space(4) + fieldButton.implicitHeight : editor.implicitHeight
 
               ToggleSwitch {
                 id: toggle
@@ -489,10 +506,12 @@ Rectangle {
                   && rowItem.row.type !== "info"
                 password: rowItem.row.type === "secret"
                 passwordCharacter: "●"
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                hasCursor: rowItem.current
+                x: control.hasButton && !control.beside ? control.width - width : 0
+                y: control.hasButton && !control.beside ? 0 : (control.height - height) / 2
+                // Beside its button, the two take a field's width, so the
+                // fields line up.
+                width: control.beside ? control.fieldWidth - Style.space(6) - fieldButton.implicitWidth : control.fieldWidth
+                hasCursor: rowItem.current && !root.onButton
                 foreground: root.foreground
                 font.family: root.fontFamily
                 inputMethodHints: rowItem.row.type === "integer" ? Qt.ImhDigitsOnly : Qt.ImhNone
@@ -506,6 +525,7 @@ Rectangle {
                 onActiveFocusChanged: {
                   if (activeFocus && root.editing !== rowItem.row.key) {
                     root.cursor = rowItem.index
+                    root.onButton = false
                     root.editing = rowItem.row.key
                   }
                   if (!activeFocus && root.editing === rowItem.row.key) {
@@ -540,6 +560,24 @@ Rectangle {
                   font: editor.font
                 }
               }
+
+              // The field's own button (Copy with ssh by the bridge's token).
+              Button {
+                id: fieldButton
+                objectName: "settingButton:" + (rowItem.row.key || "")
+                visible: control.hasButton
+                x: control.width - width
+                y: control.beside ? (control.height - height) / 2 : editor.height + Style.space(4)
+                text: rowItem.row.button || ""
+                bordered: true
+                hasCursor: rowItem.current && root.onButton
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: {
+                  root.cursor = rowItem.index
+                  root.actionRequested(rowItem.row.action)
+                }
+              }
             }
           }
         }
@@ -556,6 +594,8 @@ Rectangle {
     textFormat: Text.PlainText
     text: root.notice !== "" ? root.notice
       : root.editing !== "" ? "Enter save · Esc cancel"
+      : root.onButton ? "Enter " + (root.rows[root.cursor] || {}).button + " · ← back to the field · Esc close"
+      : (root.rows[root.cursor] || {}).action ? "→ " + root.rows[root.cursor].button + " · Tab next tab · ↑↓ move · Enter edit · Esc close"
       : "Tab next tab · ↑↓ move · Space or Enter change · ←→ a number or a choice · Esc close · saved in ~/.config/omarock"
     color: root.notice !== "" ? root.foreground : root.dim
     font.family: root.fontFamily

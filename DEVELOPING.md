@@ -16,6 +16,7 @@
 | `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`, over the panel or in its own window), the info card (`i`), the playlist picker (`A`) |
 | `Hints.js` | Pure helpers: the hint line's keys, fitted to its fixed number of lines |
 | `Paging.js` | Pure helpers: where PgUp and PgDn take the cursor (the first or last row in full view, then a page on), for the panel's lists, the settings and the playlist picker |
+| `Wave.js`, `WavyOutline.qml` | The search box's wavy outline while Time Machine keeps search to its year: the path (pure, tested), and the shape drawing it in the field's own colours |
 | `SettingsView.qml` | The settings (`,` or the gear): Settings.js as a form, each source with its service's state; settings go into settings.json, accounts, keys and the music folder through `tools/omarock-account` |
 | `Setup.js`, `SetupView.qml` | A piece's setup window (Set up…): how it works, what it needs, links, and its fields (checked live against the bridge for Apple Music); Start setup saves them through `tools/omarock-account`, then runs `./install PIECE` in a terminal with the window's choices (`--yes terms`, `--output NAME`) |
 | `Info.js` | Pure helpers: the info card's contents for each source |

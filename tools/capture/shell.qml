@@ -368,6 +368,8 @@ ShellRoot {
         spotifyMode: p.spotifyMode, spotifyError: p.spotifyMode ? p.player.lastError : "",
         settingsOpen: p.settingsOpen, settingsEditing: p.settingsOpen ? host.settingsView().editing : "",
         settingsCursor: p.settingsOpen ? host.settingsView().cursor : -1,
+        // The cursor is on its row's own button (Copy with ssh by the token).
+        settingsOnButton: p.settingsOpen ? host.settingsView().onButton : false,
         // The rows on the tab showing; settingsAllRows, every tab's.
         settingsRows: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key }) : [],
         settingsAllRows: p.settingsOpen ? host.settingsView().allRows.map(function(r) { return r.key }) : [],
@@ -398,7 +400,7 @@ ShellRoot {
         bridgeSong: p.bridgeMode ? p.bridge.song : null, playingIds: p.bridgeMode ? p.playingIds() : null,
         lookup: p.lookupService, accounts: p.accounts,
         // Time Machine: its year, the chip and Top 100 button as shown, the picker.
-        timeMachine: { enabled: p.timeMachineEnabled, year: p.timeYear, chartService: p.chartService,
+        timeMachine: { enabled: p.timeMachineEnabled, year: p.timeYear, chartService: p.chartService, wavy: p.searchWavy,
           chip: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "timeMachineChip")
             ? host.findNamed(popup().contentItem[0].parent.parent, "timeMachineChip").text : "",
           top100: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "top100Button")

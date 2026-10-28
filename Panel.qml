@@ -131,6 +131,9 @@ Panel {
   // A live station's song looked up keeps every year: it's what's on.
   property bool lookupLive: false
   readonly property int listYear: root.lookupLive ? 0 : root.timeYear
+  // The search box waves while search keeps to the year (Marc: "a cue that it
+  // is in time machine mode"); stations and channels have none.
+  readonly property bool searchWavy: root.listYear > 0 && !root.radioMode && !root.sxmMode
   // Where Top 100 plays: the service playing, else the lookup's.
   readonly property string chartService: root.bridgeMode ? root.bridge.serviceKey : root.lookupTarget
   // History (H): what's been played here, from every source, for the last
@@ -183,7 +186,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.9"
+  readonly property string version: "0.11.10"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -364,9 +367,9 @@ Panel {
           .toLocaleDateString(Qt.locale(), "MMMM d, yyyy") + ", when Spotify asks again", "ok")
         : note("Signed in", "ok"),
       musicFolder: note(client.musicDirectory === "" ? "mpd doesn't say: it tells only clients on its unix socket" : ""),
-      bridgeToken: root.appleEnabled && apple.tokenRefused
-        ? note("The bridge refused it: a new bridge makes a new token. Paste that, or copy it with ssh (below)", "bad") : note(""),
-      bridgeTokenCopy: note(root.tokenCopyNote.text, root.tokenCopyNote.kind)
+      // How Copy with ssh went, else whether the bridge takes it.
+      bridgeToken: root.tokenCopyNote.text !== "" ? note(root.tokenCopyNote.text, root.tokenCopyNote.kind)
+        : root.appleEnabled && apple.tokenRefused ? note("The bridge refused it: a new bridge has a new one", "bad") : note("")
     }
   }
   property int infoSequence: 0
@@ -2270,6 +2273,15 @@ Panel {
   // opens instead: a library song whose album the bridge doesn't count as
   // yours carries an artist id its artist route can't find.
   function loadAppleArtist(entry, show, shown) {
+    // Time Machine can leave nothing: it says so, rather than that the
+    // service has nothing by them.
+    var year = root.listYear
+    var showView = show
+    show = function(view) {
+      if (year > 0 && view.rows.length === 0)
+        view.info.emptyText = "Nothing by " + (view.info.title || entry.title) + " is from " + year + " or before (Time Machine)."
+      showView(view)
+    }
     var bridge = root.browseBridge
     var ref = entry.apple
     var other = ref.source === "library" ? "catalog" : "library"
@@ -4136,6 +4148,27 @@ Panel {
       : "Artists, albums, songs, genres, playlists  ( / )"
     foreground: root.foreground
     font.family: root.fontFamily
+    // While Time Machine keeps search to its year, the box's top and bottom
+    // edges wave (root.searchWavy). Else the shell's own box.
+    readonly property bool wavy: root.searchWavy
+    background: Item {
+      BorderSurface {
+        anchors.fill: parent
+        visible: !field.wavy
+        color: Style.controlFill(field._focused, field._hot, field.foreground, field.accent)
+        borderSpec: field._borderSpec
+        radius: Style.cornerRadius
+      }
+      WavyOutline {
+        objectName: "searchWave"
+        anchors.fill: parent
+        visible: field.wavy
+        fill: Style.controlFill(field._focused, field._hot, field.foreground, field.accent)
+        stroke: Commons.Border.color(field._borderSpec)
+        strokeWidth: Math.max(1, Commons.Border.uniformWidth(field._borderSpec))
+        radius: Style.cornerRadius
+      }
+    }
     Component.onCompleted: {
       field.text = root.query
       root.searchField = field

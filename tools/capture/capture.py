@@ -41,7 +41,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
-                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js",
+                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -4109,8 +4109,8 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("setSetting", "timeMachine", "true", "true")
     wait_for(lambda: host.state()["timeMachine"]["chip"] == "OFF", "the chip, off")
     s = host.state()
-    check(s["timeMachine"]["top100"] == "" and "t time machine" in s["hint"],
-          "switched on: the chip says OFF, t picks a year, and no Top 100 yet: " + s["hint"], failures)
+    check(s["timeMachine"]["top100"] == "" and "t time machine" in s["hint"] and not s["timeMachine"]["wavy"],
+          "switched on: the chip says OFF, t picks a year, no Top 100 yet, and the search box is straight: " + s["hint"], failures)
     host.call("expand", "true")
     host.settle(.5)
     check(host.state()["timeMachine"]["chip"] == "Time Machine: OFF" and "Time Machine: OFF" in host.state()["headerButtons"],
@@ -4160,6 +4160,7 @@ def time_machine_scenario(host, output, socket_path, failures):
           and settings_file().get("timeMachineYear") == 1988,
           "a year picked: the chip says it, Top 100 shows, and settings.json keeps it", failures)
     check("T top 100" in s["hint"], "and T is in the hints: " + s["hint"], failures)
+    check(s["timeMachine"]["wavy"], "and the search box's outline waves (compact-time-machine.png)", failures)
     wait_for(lambda: mpd_files(socket_path) == [mixed[1], mixed[3]], "the later songs out of the queue")
     wait_for(lambda: host.state()["nowPlaying"].startswith("Fernweh"), "the next song up to 1988 plays")
     check(mpd_state(socket_path)["state"] == "play" and "2 songs from after it came out of the queue" in host.state()["notice"],
@@ -4168,6 +4169,11 @@ def time_machine_scenario(host, output, socket_path, failures):
     wait_for(lambda: mpd_files(socket_path) == [mixed[1], mixed[3]], "a later song added comes out again", timeout=6)
     check(True, "a 2021 song added from another client (mpc) comes out too", failures)
     host.grab(output / "compact-time-machine.png")
+    host.call("expand", "true")
+    host.settle(.5)
+    host.grab(output / "expanded-time-machine.png")
+    host.call("expand", "false")
+    host.settle(.5)
 
     def results(query):
         host.call("type", query)
@@ -4258,6 +4264,15 @@ def time_machine_scenario(host, output, socket_path, failures):
     s = results("bob mould")
     check("artist:Bob Mould" in s["rows"] and "album:Workbook" not in s["rows"] and "song:Sunspots" not in s["rows"],
           "Apple Music's search leaves out 1989's Workbook, and keeps the artist: " + ", ".join(s["rows"]), failures)
+    # Marc, 10-28, with 1969 set: Foo Fighters' page said Apple Music had
+    # nothing by them. Bob Mould's only album is from 1989.
+    host.call("activate", s["rows"].index("artist:Bob Mould"), "open")
+    wait_for(lambda: host.state()["browse"] == "artist:Bob Mould" and not host.state()["browseLoading"], "Bob Mould's page")
+    s = host.state()
+    check(s["rows"] == [] and s["browseInfo"].get("emptyText") == "Nothing by Bob Mould is from 1985 or before (Time Machine).",
+          "an artist with nothing to the year: the page says Time Machine left it all out: " + str(s["browseInfo"].get("emptyText")),
+          failures)
+    host.call("back")
     s = results("husker")
     check("album:Zen Arcade" in s["rows"] and "album:New Day Rising" in s["rows"],
           "and keeps 1984's and 1985's albums: " + ", ".join(s["rows"]), failures)
@@ -4410,8 +4425,9 @@ def time_machine_scenario(host, output, socket_path, failures):
     # Off: everything again, and no Top 100.
     pick("off")
     s = host.state()
-    check(s["timeMachine"]["year"] == 0 and s["timeMachine"]["chip"] == "OFF" and s["timeMachine"]["top100"] == "",
-          "Off: the chip says OFF, and Top 100 goes", failures)
+    check(s["timeMachine"]["year"] == 0 and s["timeMachine"]["chip"] == "OFF" and s["timeMachine"]["top100"] == ""
+          and not s["timeMachine"]["wavy"],
+          "Off: the chip says OFF, Top 100 goes, and the search box is straight again", failures)
     s = results("glass")
     check("album:Low Tide Signals" in s["rows"], "and search finds everything again", failures)
     host.call("back")
@@ -4961,23 +4977,48 @@ def setup_scenario(host, output, failures):
     s = host.state()
     check(s["settingsTabTips"].get("Apple Music •") == "Apple Music: The bridge refused omarock's token"
           and "appleUpdate:action:Fix…" in s["settingKinds"] and "refused it" in s["settingNotes"]["bridgeToken"]["text"]
-          and "bridgeTokenCopy:action:Copy with ssh" in s["settingKinds"],
-          "a refused token: the tab's dot (its hover says why), Fix…, the token's note, and Copy with ssh: "
+          and "bridgeToken:secret:Copy with ssh" in s["settingKinds"] and "bridgeTokenCopy" not in s["settingsAllRows"],
+          "a refused token: the tab's dot (its hover says why), Fix…, the token's note, and Copy with ssh by the token: "
           + str(s["settingsTabTips"]), failures)
+    # Marc: "make it so the copy with ssh is right near the other entry box":
+    # under it in the compact panel, beside it expanded.
+    # By the keys: → onto the field's button, ← back, → and Enter presses it.
     ssh_mode.write_text("refused")
-    press_row("bridgeTokenCopy")
-    wait_for(lambda: host.state()["settingNotes"]["bridgeTokenCopy"]["text"].startswith("Remote Login is off"), "Remote Login off")
-    check(token_file.read_text() == "stale-token", "Remote Login off: Copy with ssh says so, and the token stays", failures)
+    settings_cursor_to(host, "bridgeToken")
+    host.grab(output / "compact-settings-token.png")
+    host.call("press", "e")
+    wait_for(lambda: host.state()["expanded"], "expanded settings")
+    host.settle(.5)
+    host.grab(output / "expanded-settings-token.png")
+    host.call("press", "e")
+    wait_for(lambda: not host.state()["expanded"], "compact settings")
+    host.settle(.5)
+    settings_cursor_to(host, "bridgeToken")
+    host.call("press", "Right")
+    on = host.state()["settingsOnButton"]
+    host.call("press", "Left")
+    check(on and not host.state()["settingsOnButton"] and host.state()["settingsOpen"],
+          "→ goes to the token's button, ← back to the field (the settings stay open)", failures)
+    host.call("press", "Right")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingNotes"]["bridgeToken"]["text"].startswith("Remote Login is off"), "Remote Login off")
+    check(token_file.read_text() == "stale-token" and host.state()["settingsEditing"] == "",
+          "Remote Login off: Copy with ssh says so under the token, which stays (and isn't being edited)", failures)
+    host.call("press", "Down")
+    host.call("press", "Up")
+    check(not host.state()["settingsOnButton"], "another row and back: the field again", failures)
+    # And a click.
     ssh_mode.write_text("on")
-    press_row("bridgeTokenCopy")
-    wait_for(lambda: host.state()["settingNotes"]["bridgeTokenCopy"]["text"] == "Copied from the Mac", "copied")
+    check(host.call("clickPanel", "settingButton:bridgeToken") == "ok", "the button can be clicked", failures)
+    wait_for(lambda: host.state()["settingNotes"]["bridgeToken"]["text"] == "Copied from the Mac", "copied")
     copied = ssh_log.read_text().splitlines()[-1]
     check(token_file.read_text() == "fake-bridge-token" and token_file.stat().st_mode & 0o777 == 0o600
           and copied == "-o BatchMode=yes -o ConnectTimeout=8 127.0.0.1 cat 'Library/Application Support/omarock-bridge/token'",
           "Copy with ssh: the Mac's token, from ssh in batch mode into the token file (mode 600): " + copied, failures)
     wait_for(lambda: "Apple Music" in host.state()["settingsTabs"] and "appleUpdate:action:Fix…" not in host.state()["settingKinds"],
              "the mark gone", timeout=15)
-    check(not host.state()["settingNotes"]["bridgeToken"]["text"], "the bridge takes it: the dot, Fix… and the note go", failures)
+    check(host.state()["settingNotes"]["bridgeToken"] == {"text": "Copied from the Mac", "kind": "ok"},
+          "the bridge takes it: the dot and Fix… go, and the note says it was copied", failures)
     (home / ".fake-mac-token").unlink()
     for f, data in before.items():
         if data is None: f.unlink(missing_ok=True)
