@@ -576,12 +576,32 @@ def apple_scenario(host, output, socket_path, failures):
     s = host.state()
     check(s["rows"][0] == "playall:Play top songs" and s["rows"][1] == "song:Something I Learned Today"
           and s["rows"][s["sections"].index("YOUR ALBUMS")] == "album:Zen Arcade"
-          and s["rows"][s["sections"].index("ON APPLE MUSIC")] == "album:New Day Rising"
+          and s["rows"][s["sections"].index("APPLE MUSIC ALBUMS")] == "album:New Day Rising"
           and "SINGLES & EPS" in s["sections"] and s["rows"].count("album:Zen Arcade") == 1,
           "your artist's view has the catalog too: " + ", ".join(s["rows"]), failures)
     check(("GET", "/v1/artists/catalog/c-ar-1") in [(m, p) for m, p, _ in bridge_requests("/v1/artists/")],
           "it found the catalog's artist by name", failures)
     host.grab(output / "compact-apple-artist.png")
+    # Marc: "a setting that puts the top songs at the top or the bottom ...
+    # I'm constantly scrolling past those to see the list of albums".
+    host.call("setSetting", "topSongs", "At the bottom", "false")
+    host.call("press", "Left")
+    wait_for(lambda: host.state()["browse"] == "" or not host.state()["browse"].startswith("artist:"), "back to the results")
+    host.call("press", "Right")
+    wait_for(lambda: browsed(host, "artist:Hüsker Dü"), "Apple artist again")
+    s = host.state()
+    top = s["sections"].index("TOP SONGS") if "TOP SONGS" in s["sections"] else -1
+    check(s["rows"][0] == "playall:Play top songs" and s["sections"][1] == "YOUR ALBUMS" and top > s["sections"].index("APPEARS ON" if "APPEARS ON" in s["sections"] else "SINGLES & EPS")
+          and s["rows"][top] == "song:Something I Learned Today" and all(r.startswith("song:") for r in s["rows"][top:]),
+          "top songs at the bottom: Play top songs first, then the albums, the songs last: " + ", ".join(s["rows"]), failures)
+    host.grab(output / "compact-apple-artist-top-last.png")
+    host.call("setSetting", "topSongs", "At the top", "false")
+    host.call("press", "Left")
+    wait_for(lambda: host.state()["browse"] == "" or not host.state()["browse"].startswith("artist:"), "back to the results")
+    host.call("press", "Right")
+    wait_for(lambda: browsed(host, "artist:Hüsker Dü"), "Apple artist again")
+    s = host.state()
+    check(s["rows"][1] == "song:Something I Learned Today", "and at the top again", failures)
     # → into Zen Arcade (yours), then Enter on its third song plays the album from it.
     for _ in range(s["sections"].index("YOUR ALBUMS") - s["cursor"]): host.call("press", "Down")
     host.call("press", "Right")
@@ -4498,7 +4518,7 @@ def settings_scenario(host, output, failures):
     check([t.removesuffix(" •") for t in s["settingsTabs"]] == ["omarock", "Apple Music", "SiriusXM", "Spotify", "Sound"]
           and s["settingsTab"] == "omarock"
           and s["settingsRows"] == ["musicFolder", "radio", "radioArea", "lookup", "history", "historyDays", "historyClear",
-                                    "timeMachine", "closeOnLeave", "maxLabelWidth", "scrollBarSong"],
+                                    "timeMachine", "topSongs", "closeOnLeave", "maxLabelWidth", "scrollBarSong"],
           ", opens the settings on the omarock tab: your music and the radio, History, Time Machine, the panel and the bar: "
           + str(s["settingsTabs"]) + " | " + ", ".join(s["settingsRows"]), failures)
     check(all(k in s["settingsAllRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",

@@ -176,16 +176,7 @@ function searchRows(results, genres, service) {
     items.forEach(function(item, i) { rows.push(make(item, i === 0 ? section : "")) })
   }
   add(library.playlists || [], "YOUR PLAYLISTS", playlistRow)
-  // One you have that the catalog has too says so: it isn't in the catalog's
-  // list, and opens to both.
-  var catalogArtists = {}
-  ;(catalog.artists || []).forEach(function(artist) { catalogArtists[foldKey(artist.name)] = artist })
-  add(library.artists || [], "YOUR ARTISTS", function(artist, section) {
-    var row = artistRow(artist, section)
-    var there = catalogArtists[foldKey(artist.name)]
-    if (there) row.subtitle = join([row.subtitle || (there.genres || [])[0], "also on " + service])
-    return row
-  })
+  add(library.artists || [], "YOUR ARTISTS", artistRow)
   add(library.albums || [], "YOUR ALBUMS", function(a, s) { return albumRow(a, s) })
   add(library.songs || [], "YOUR SONGS", songRow)
   add(genres || [], "GENRES", genreRow)
@@ -262,17 +253,25 @@ function topSongRows(top) {
   return rows
 }
 
+// An artist's top songs above their albums, or below them (the setting
+// topSongs, Marc: "I'm constantly scrolling past those"). Play top songs is
+// the page's button, under the heading, either way.
+function withTopSongs(top, rows, last) {
+  return last ? top.slice(0, 1).concat(rows, top.slice(1)) : top.concat(rows)
+}
+
 // The artist view: their top songs, then albums by year (singles and EPs
-// after the albums), then the albums they appear on.
-function artistView(artist, data, service) {
-  var rows = topSongRows(data.topSongs || [])
+// after the albums), then the albums they appear on; or the top songs last.
+function artistView(artist, data, service, topLast) {
+  var top = topSongRows(data.topSongs || [])
+  var rows = []
   var albums = (data.albums || []).slice().sort(byYear)
   var full = albums.filter(function(album) { return !isShort(album) })
   var singles = albums.filter(isShort)
   full.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "ALBUMS" : "", false)) })
   singles.forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "SINGLES & EPS" : "", false)) })
   ;(data.appearsOn || []).forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "APPEARS ON" : "")) })
-  return { rows: rows, info: {
+  return { rows: withTopSongs(top, rows, topLast), info: {
     title: artist.name, artwork: artist.artwork,
     subtitle: join(["Artist", (artist.genres || [])[0]]),
     detail: artist.source === "library" ? "In your library" : "",
@@ -327,10 +326,11 @@ function partly(album, have) {
 // One artist from both sides, each { artist, data } as the bridge's artist
 // route gives it: the catalog's top songs, your albums, then the catalog's
 // albums you don't have, its singles and EPs, and the albums they appear on.
-function mergedArtistView(mine, theirs, service) {
+function mergedArtistView(mine, theirs, service, topLast) {
   service = service || "Apple Music"
-  var top = theirs.data.topSongs || []
-  var rows = topSongRows(top.length > 0 ? top : mine.data.topSongs || [])
+  var topSongs = theirs.data.topSongs || []
+  var top = topSongRows(topSongs.length > 0 ? topSongs : mine.data.topSongs || [])
+  var rows = []
   var yours = (mine.data.albums || []).slice().sort(byYear)
   var catalog = theirs.data.albums || []
   // An album you have all of is yours only; one you have part of is in both
@@ -357,11 +357,11 @@ function mergedArtistView(mine, theirs, service) {
     rows.push(albumRow(album, i === 0 ? "YOUR ALBUMS" : "", false,
       album.trackCount > 0 && of > album.trackCount ? album.trackCount + " of " + of + " songs" : undefined))
   })
-  full.forEach(function(album, i) { rows.push(theirRow(album, i === 0 ? "ON " + service.toUpperCase() : "")) })
+  full.forEach(function(album, i) { rows.push(theirRow(album, i === 0 ? service.toUpperCase() + " ALBUMS" : "")) })
   singles.forEach(function(album, i) { rows.push(theirRow(album, i === 0 ? "SINGLES & EPS" : "")) })
   ;(theirs.data.appearsOn || []).forEach(function(album, i) { rows.push(albumRow(album, i === 0 ? "APPEARS ON" : "")) })
   var artist = theirs.artist
-  return { rows: rows, info: {
+  return { rows: withTopSongs(top, rows, topLast), info: {
     title: artist.name || mine.artist.name, artwork: artist.artwork || mine.artist.artwork,
     subtitle: join(["Artist", (artist.genres || mine.artist.genres || [])[0]]),
     detail: "In your library",

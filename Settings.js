@@ -107,6 +107,9 @@ var schema = [
   { key: "soundRemove", type: "action", label: "Remove omarock's sound output", button: "Remove…", source: "sound", remove: true,
     description: "omarock then plays into your default output, and follows it when that changes." },
 
+  { key: "topSongs", type: "enum", label: "An artist's top songs", options: ["At the top", "At the bottom"],
+    defaultValue: "At the top",
+    description: "On Apple Music's and Spotify's artist pages: above the albums, or below them. Play top songs stays at the top." },
   { key: "closeOnLeave", type: "boolean", label: "Close the panel when the pointer leaves it", defaultValue: true,
     description: "3 seconds after it leaves, unless it comes back." },
   { key: "maxLabelWidth", type: "integer", label: "How wide the song gets on the bar",
@@ -123,7 +126,7 @@ var groups = [
   { tab: "omarock", title: "YOUR MUSIC AND THE RADIO", keys: ["localSetUp", "musicFolder", "radio", "radioArea", "lookup"] },
   { tab: "omarock", title: "HISTORY", keys: ["history", "historyDays", "historyClear"] },
   { tab: "omarock", title: "TIME MACHINE", keys: ["timeMachine"] },
-  { tab: "omarock", title: "THE PANEL AND THE BAR", keys: ["closeOnLeave", "maxLabelWidth", "scrollBarSong"] },
+  { tab: "omarock", title: "THE PANEL AND THE BAR", keys: ["topSongs", "closeOnLeave", "maxLabelWidth", "scrollBarSong"] },
   { tab: "Apple Music", title: "", keys: ["appleMusic", "appleUpdate", "bridgeToken", "appleIdleStop", "appleRemove"] },
   { tab: "SiriusXM", title: "", keys: ["siriusXM", "sxmUpdate", "sxmUser", "sxmPassword", "sxmRemove"] },
   { tab: "Spotify", title: "", keys: ["spotify", "spotifyUpdate", "spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"] },

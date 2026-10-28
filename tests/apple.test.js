@@ -78,22 +78,6 @@ test("searchRows lists an artist you have once, as yours", () => {
   assert.deepEqual(rows.map(r => r.section + ":" + r.apple.id), ["YOUR ARTISTS:l.9", "APPLE MUSIC · ARTISTS:8"])
 })
 
-// Marc, searching Foo Fighters: "they do not show up in the apple artists
-// (only nirvana oddly)". Yours says it's Apple Music's too.
-test("searchRows: an artist you have says Apple Music has them too", () => {
-  const rows = Apple.searchRows({
-    library: { artists: [{ kind: "artist", id: "l.1", source: "library", name: "Foo Fighters" },
-      { kind: "artist", id: "l.2", source: "library", name: "Mine Alone" }] },
-    catalog: { artists: [{ kind: "artist", id: "1", source: "catalog", name: "Foo Fighters", genres: ["Rock"] },
-      { kind: "artist", id: "2", source: "catalog", name: "Nirvana", genres: ["Alternative"] }] }
-  })
-  assert.deepEqual(rows.map(r => r.title + ": " + r.subtitle),
-    ["Foo Fighters: Rock · also on Apple Music", "Mine Alone: ", "Nirvana: Alternative"])
-  const spotify = Apple.searchRows({ library: { artists: [{ id: "a", name: "Foo Fighters", genres: ["Rock"] }] },
-    catalog: { artists: [{ id: "a", name: "Foo Fighters", genres: ["Rock"] }] } }, [], "Spotify")
-  assert.equal(spotify[0].subtitle, "Rock · also on Spotify")
-})
-
 test("findArtist matches a name on the other side, case and accents aside", () => {
   const results = { library: { artists: [{ id: "l.1", name: "Husker Du" }] },
     catalog: { artists: [{ id: "2", name: "Hüsker Dü Tribute" }, { id: "1", name: "Hüsker Dü" }] } }
@@ -119,7 +103,7 @@ test("mergedArtistView: your albums, then the catalog's others, singles and appe
   assert.deepEqual(view.rows.map(r => (r.section || "") + "|" + r.kind + ":" + r.title + ":" + (r.apple ? r.apple.source : "")),
     ["|playall:Play top songs:", "TOP SONGS|song:Hit:catalog",
      "YOUR ALBUMS|album:Lvl IV:library", "|album:B-Sides:library", "|album:Dark Paradise:library",
-     "ON APPLE MUSIC|album:Second:catalog", "SINGLES & EPS|album:Let Me Out - Single:catalog",
+     "APPLE MUSIC ALBUMS|album:Second:catalog", "SINGLES & EPS|album:Let Me Out - Single:catalog",
      "|album:Unplugged - EP:catalog", "APPEARS ON|album:Comp:catalog"])
   assert.equal(view.info.title, "F")
   assert.equal(view.info.subtitle, "Artist · Rock")
@@ -127,7 +111,18 @@ test("mergedArtistView: your albums, then the catalog's others, singles and appe
   // Without catalog top songs, the library's.
   theirs.data.topSongs = []
   assert.equal(Apple.mergedArtistView(mine, theirs, "Spotify").rows[1].title, "Mine")
-  assert.equal(Apple.mergedArtistView(mine, theirs, "Spotify").rows[5].section, "ON SPOTIFY")
+  assert.equal(Apple.mergedArtistView(mine, theirs, "Spotify").rows[5].section, "SPOTIFY ALBUMS")
+  // Marc: "a setting that puts the top songs at the top or the bottom",
+  // being "constantly scrolling past those": Play top songs stays first.
+  theirs.data.topSongs = [song("s1", "Hit"), song("s2", "Other")]
+  assert.deepEqual(Apple.mergedArtistView(mine, theirs, "Apple Music", true).rows.map(r => (r.section || "") + "|" + r.title),
+    ["|Play top songs", "YOUR ALBUMS|Lvl IV", "|B-Sides", "|Dark Paradise", "APPLE MUSIC ALBUMS|Second",
+     "SINGLES & EPS|Let Me Out - Single", "|Unplugged - EP", "APPEARS ON|Comp", "TOP SONGS|Hit", "|Other"])
+  const alone = Apple.artistView(theirs.artist, theirs.data, "Apple Music", true).rows.map(r => r.kind + ":" + r.title)
+  assert.deepEqual([alone[0], alone[alone.length - 2], alone[alone.length - 1]], ["playall:Play top songs", "song:Hit", "song:Other"])
+  assert.equal(Apple.artistView(theirs.artist, theirs.data, "Apple Music", false).rows[1].title, "Hit")
+  // No top songs: nothing moves, and no button.
+  assert.equal(Apple.artistView(mine.artist, { albums: mine.data.albums }, "Apple Music", true).rows[0].title, "Lvl IV")
 })
 
 test("an album you have only part of is in both lists, each saying how much", () => {
@@ -143,7 +138,7 @@ test("an album you have only part of is in both lists, each saying how much", ()
   const view = Apple.mergedArtistView(mine, theirs)
   assert.deepEqual(view.rows.map(r => (r.section || "") + "|" + r.title + "|" + r.subtitle),
     ["YOUR ALBUMS|Whole|2001 · 10 songs", "|Part|2003 · 1 of 12 songs", "|Twice|2005 · 2 of 9 songs", "|TWICE|2005 · 9 songs",
-     "ON APPLE MUSIC|Part|2003 · 12 songs · you have 1"])
+     "APPLE MUSIC ALBUMS|Part|2003 · 12 songs · you have 1"])
 
   const rows = Apple.searchRows({
     library: { albums: [album("l.2", "library", "Part", 2003, 1), album("l.1", "library", "Whole", 2001, 10)] },

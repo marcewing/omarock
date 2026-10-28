@@ -41,6 +41,19 @@ Panel {
   }
   // Close when the pointer leaves the panel, once it has been over it.
   readonly property bool closeOnLeave: root.setting("closeOnLeave", true) === true
+  // An artist's top songs below their albums (Apple.withTopSongs). A
+  // preview built the other way goes, and the columns build it again.
+  readonly property bool topSongsLast: root.setting("topSongs", "At the top") === "At the bottom"
+  onTopSongsLastChanged: {
+    if (!root.previewEntry) return
+    root.clearPreview()
+    root.updatePreview()
+  }
+  // A level built before the setting changed, which is built again rather
+  // than shown as it was.
+  function stale(entry) {
+    return entry.topLast !== undefined && entry.topLast !== root.topSongsLast
+  }
   property bool pointerArmed: false
 
   // Apple Music (apple-bridge/API.md): the bridge on the Mac, and the stream mpd
@@ -186,7 +199,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.11"
+  readonly property string version: "0.11.12"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -2078,7 +2091,7 @@ Panel {
     root.clearPreview()
     root.leaveSearch()
     // The columns already loaded it as the preview: move it over as is.
-    if (preview && preview.loaded && root.sameEntry(preview, entry)) {
+    if (preview && preview.loaded && !root.stale(preview) && root.sameEntry(preview, entry)) {
       preview.from = index
       root.browseSequence++
       root.browseStack = root.browseStack.concat([preview])
@@ -2105,7 +2118,7 @@ Panel {
     root.cursorActive = root.rows.length > 0 && left.from >= 0
     root.cursorIndex = Math.max(0, Math.min(left.from, root.rows.length - 1))
     // Back at the results, the level just left is the preview again.
-    if (!top && left.loaded && root.searchMode) root.setPreview(left)
+    if (!top && left.loaded && !root.stale(left) && root.searchMode) root.setPreview(left)
     if (!top) root.browseRoot = "search"
   }
 
@@ -2280,6 +2293,8 @@ Panel {
     show = function(view) {
       if (year > 0 && view.rows.length === 0)
         view.info.emptyText = "Nothing by " + (view.info.title || entry.title) + " is from " + year + " or before (Time Machine)."
+      // Built with the top songs where the setting put them (stale()).
+      entry.topLast = root.topSongsLast
       showView(view)
     }
     var bridge = root.browseBridge
@@ -2293,13 +2308,14 @@ Panel {
       data = TimeMachine.filterArtist(data, root.listYear)
       var mine = ref.source === "library" ? main : data
       var theirs = ref.source === "library" ? data : main
-      show(Apple.mergedArtistView({ artist: mine.artist, data: mine }, { artist: theirs.artist, data: theirs }, bridge.service))
+      show(Apple.mergedArtistView({ artist: mine.artist, data: mine }, { artist: theirs.artist, data: theirs }, bridge.service,
+        root.topSongsLast))
     }
     function instead() {
       var match = found ? Apple.findArtist(found, other, entry.title) : null
       if (!match) { failed(null, mainError); return }
       bridge.artist(other, match.id, function(data) {
-        if (data) show(Apple.artistView(data.artist, TimeMachine.filterArtist(data, root.listYear), bridge.service))
+        if (data) show(Apple.artistView(data.artist, TimeMachine.filterArtist(data, root.listYear), bridge.service, root.topSongsLast))
         else failed(null, mainError)
       })
     }
@@ -2309,12 +2325,12 @@ Panel {
       if (!main) return
       var match = found ? Apple.findArtist(found, other, main.artist.name || entry.title) : null
       if (!match || match.id === ref.id) {
-        show(Apple.artistView(main.artist, main, bridge.service))
+        show(Apple.artistView(main.artist, main, bridge.service, root.topSongsLast))
         return
       }
       bridge.artist(other, match.id, function(data) {
         if (data) merge(data)
-        else show(Apple.artistView(main.artist, main, bridge.service))
+        else show(Apple.artistView(main.artist, main, bridge.service, root.topSongsLast))
       })
     }
     bridge.artist(ref.source, ref.id, function(data, error) {
