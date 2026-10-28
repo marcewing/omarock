@@ -3747,15 +3747,17 @@ def history_scenario(host, output, socket_path, failures):
     check(True, "a song of yours plays again from mpd, on local music", failures)
 
     # Spotify's song plays there, by its id; the station's is looked up.
+    # By name, not place: what was heard again since (a second is enough
+    # here) goes on top.
     before = len(spotify_requests("/v1/play"))
-    open_history()
-    host.call("activate", 2, "open")
+    s = open_history()
+    host.call("activate", s["rows"].index("history:Sunspots"), "open")
     wait_for(lambda: len(spotify_requests("/v1/play")) > before, "Spotify asked to play it")
     body = spotify_requests("/v1/play")[-1][2] or {}
     check(song["id"] in json.dumps(body), "a Spotify song plays on Spotify by its id: " + json.dumps(body), failures)
     wait_for(lambda: host.state()["source"] == "spotify", "Spotify the source")
-    open_history()
-    host.call("activate", 0, "open")
+    s = open_history()
+    host.call("activate", s["rows"].index("historylookup:Gimme Shelter"), "open")
     wait_for(lambda: host.state()["query"] == "Gimme Shelter The Rolling Stones", "the station's song looked up")
     check(host.state()["lookup"] in ("apple", "spotify"), "a station's song is looked up in Apple Music or Spotify: "
           + host.state()["lookup"], failures)
