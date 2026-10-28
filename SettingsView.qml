@@ -87,6 +87,12 @@ Rectangle {
     return root.allRows.some(function(r) { return r.tab === tab && r.when === "fix" })
   }
 
+  // What the tab's dot is for, on hover: "Apple Music: The bridge refused …".
+  function attentionDetail(tab) {
+    return root.allRows.filter(function(r) { return r.tab === tab && r.when === "fix" })
+      .map(function(r) { return r.detail || r.label }).join("; ")
+  }
+
   // The panel closing mid-edit: nothing is saved, as with Esc.
   function cancelEdit() {
     var item = repeater.itemAt(root.cursor)
@@ -285,7 +291,7 @@ Rectangle {
         foreground: root.foreground
         fontFamily: root.fontFamily
         fontSize: Style.font.caption
-        tooltipText: attention ? "Something here needs updating or fixing" : ""
+        tooltipText: attention ? root.attentionDetail(modelData) : ""
         onClicked: root.showTab(modelData)
       }
     }

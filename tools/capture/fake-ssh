@@ -2,11 +2,16 @@
 # The harness's ssh: never a real machine. It logs its words to
 # $HOME/ssh.log and answers as $HOME/.fake-ssh says the Mac's Remote Login
 # is: on (the default, with a key that's let in), password (on, no key), or
-# refused (off).
+# refused (off). The Mac's bridge token, for a cat of it, is
+# $HOME/.fake-mac-token.
 echo "$*" >>"$HOME/ssh.log"
 host=${*: -2:1}
 case $(cat "$HOME/.fake-ssh" 2>/dev/null || echo on) in
   refused) echo "ssh: connect to host $host port 22: Connection refused" >&2; exit 255 ;;
   password) echo "you@$host: Permission denied (publickey,password,keyboard-interactive)." >&2; exit 255 ;;
-  *) exit 0 ;;
 esac
+if [[ ${*: -1} == "cat 'Library/Application Support/omarock-bridge/token'" ]]; then
+  [[ -f $HOME/.fake-mac-token ]] || { echo "cat: Library/Application Support/omarock-bridge/token: No such file or directory" >&2; exit 1; }
+  cat "$HOME/.fake-mac-token"
+fi
+exit 0

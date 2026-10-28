@@ -33,6 +33,13 @@ Item {
   property string bridgeName: "The Apple Music bridge"
   property string unreachableText: "Can't reach the Apple Music bridge on the Mac"
   property string unauthorizedText: "Apple Music access isn't allowed on the Mac yet"
+  // The token was refused (HTTP 401) the last time it was sent. With
+  // checksToken, each health check sends it too: the bridge's health needs no
+  // token, so a refused one showed only once something was asked for.
+  property bool tokenRefused: false
+  property bool checksToken: false
+  // Said after "refused omarock's token": where to put it right.
+  property string refusedHint: ""
   // How long to wait before trying again when the status fails.
   property int retryMs: 3000
   // Follow the bridge's status (a long poll) while true: in Apple Music mode;
@@ -133,12 +140,14 @@ Item {
       try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null } catch (e) {}
       if (xhr.status >= 200 && xhr.status < 300) {
         root.reachable = true
+        if (entry.path !== "/v1/health") root.tokenRefused = false
         if (callback) callback(data, "")
         return
       }
+      if (xhr.status === 401) root.tokenRefused = true
       var error = entry.timedOut ? root.bridgeName + " didn't answer"
         : xhr.status === 0 ? root.unreachableText
-        : xhr.status === 401 ? root.bridgeName + " refused omarock's token"
+        : xhr.status === 401 ? root.bridgeName + " refused omarock's token" + root.refusedHint
         : (data && data.error) || root.bridgeName + " said " + xhr.status
       if (xhr.status === 0) {
         if (root.reachable) root.dropouts++
@@ -203,6 +212,10 @@ Item {
       root.lastError = !data ? error
         : !root.authorized ? root.unauthorizedText : ""
       if (root.ready && root.genres.length === 0) root.refreshGenres()
+      if (data && root.checksToken) {
+        if (root.token === "") root.tokenRefused = false
+        else root.get("/v1/status", null, 5000)
+      }
       if (callback) callback(root.ready, root.lastError)
     }, 5000)
   }

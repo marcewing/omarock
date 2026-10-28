@@ -130,6 +130,18 @@ test("the Mac's Remote Login, from ssh in batch mode", () => {
   assert.equal(Setup.bridgeHost("http://my-mac:8710"), "my-mac")
 })
 
+test("tokenCopyState: what Copy with ssh says, by ssh's exit and its errors", () => {
+  assert.deepEqual(Setup.tokenCopyState(0, "", "mac"), { kind: "ok", text: "Copied from the Mac" })
+  assert.match(Setup.tokenCopyState(255, "ssh: connect to host mac port 22: Connection refused", "mac").text, /^Remote Login is off/)
+  assert.match(Setup.tokenCopyState(255, "marc@mac: Permission denied (publickey,password).", "mac").text, /password/)
+  assert.match(Setup.tokenCopyState(255, "Host key verification failed.", "100.64.0.10").text, /run ssh 100\.64\.0\.10 once/)
+  assert.match(Setup.tokenCopyState(1, "cat: Library/Application Support/omarock-bridge/token: No such file or directory", "mac").text,
+    /no bridge token/)
+  assert.match(Setup.tokenCopyState(3, "", "mac").text, /empty/)
+  assert.equal(Setup.tokenCopyState(4, "omarock-account: nothing on stdin\n", "mac").text, "Couldn't save it: omarock-account: nothing on stdin")
+  assert.equal(Setup.tokenCopyState(255, "ssh: Could not resolve hostname mac", "mac").kind, "bad")
+})
+
 test("the windows as Marc laid them out: no Tailscale link, no list of what the terminal does", () => {
   const all = Object.values(Setup.pages)
   assert.ok(!all.some(p => p.after || p.introLinks))

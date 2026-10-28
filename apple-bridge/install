@@ -1,7 +1,7 @@
 #!/bin/zsh
 # apple-bridge/install: set up omarock's Apple Music bridge on this Mac, or check it.
 # It walks through what the bridge needs (Xcode, Homebrew's tools, Tailscale),
-# your App ID with MusicKit, the build, the Mac's permissions, and what your
+# your bundle ID with MusicKit, the build, the Mac's permissions, and what your
 # Omarchy machine needs next. Each step checks what's there first, says what it
 # will change, and asks before changing it; every command it runs is shown.
 # Run it again whenever you like: what's done is skipped, and the bridge is
@@ -140,9 +140,9 @@ wait_until() {
 
 # ---- What's there ----
 
-# A value from apple-bridge/app/Local.xcconfig (your Team ID and bundle id; not in git).
+# A value from apple-bridge/app/Local.xcconfig (your Team ID and bundle ID; not in git).
 xc_value() { sed -n "s/^$1 *= *//p" "$here/Local.xcconfig" 2>/dev/null | tail -1; }
-# The installed app's bundle id, version and team.
+# The installed app's bundle ID, version and team.
 installed_id() { /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null; }
 installed_version() { /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null; }
 installed_team() { codesign -dv "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p'; }
@@ -316,10 +316,10 @@ step_requirements() {
 }
 tailnet_address_set() { [[ -n $(tailnet_address) ]]; }
 
-# ---- 2. The App ID ----
+# ---- 2. The bundle ID ----
 
 step_appid() {
-  step "Your App ID with MusicKit"
+  step "Your bundle ID, with MusicKit"
   if ! has_cert; then
     explain "Xcode signs the bridge with your Apple Development certificate. In Xcode: Settings, Accounts, + to add the Apple ID of your developer membership, pick your team, Manage Certificates, + and Apple Development."
     [[ -z $answers ]] && confirm "Open Xcode?" && run open -a Xcode
@@ -331,11 +331,11 @@ step_appid() {
   team=$(xc_value DEVELOPMENT_TEAM)
   bundle=$(xc_value OMAROCK_BUNDLE_ID)
   if [[ -n $team && -n $bundle ]]; then
-    ok "Team $team, bundle id $bundle (apple-bridge/app/Local.xcconfig)"
+    ok "Team $team, bundle ID $bundle (apple-bridge/app/Local.xcconfig)"
     return
   fi
 
-  explain "MusicKit works only for an app whose bundle id is registered to you, with MusicKit switched on. At developer.apple.com: Certificates, IDs & Profiles, Identifiers, + and App IDs (type App). Give it an explicit bundle id of your own, such as com.yourname.omarock.bridge, and register it. Then open it again, tick MusicKit on the App Services tab, and Save. A new App ID can take a few minutes to work."
+  explain "MusicKit works only for an app whose bundle ID is registered to you, with MusicKit switched on. At developer.apple.com: Certificates, Identifiers & Profiles, Identifiers, then + and App IDs (type App). Give it a description and an explicit bundle ID of your own, such as com.yourname.omarock.bridge, and register it. Then open it again (the Identifiers list shows your bundle ID in its Identifier column), tick MusicKit on the App Services tab, and Save. A new bundle ID can take a few minutes to work."
   if [[ -z $answers ]] && confirm "Open the Identifiers page?"; then
     run open https://developer.apple.com/account/resources/identifiers/list
   fi
@@ -352,10 +352,10 @@ step_appid() {
   fi
   if [[ -z $bundle ]]; then
     while :; do
-      bundle=$(ask "Your App ID's bundle id (Enter to stop here):" "" "com.yourname.omarock.bridge") || exit 1
+      bundle=$(ask "Your bundle ID (Enter to stop here):" "" "com.yourname.omarock.bridge") || exit 1
       [[ -z $bundle ]] && stopped
       [[ $bundle =~ '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$' ]] && break
-      bad "A bundle id is like com.yourname.omarock.bridge."
+      bad "A bundle ID is like com.yourname.omarock.bridge."
     done
   fi
   {
@@ -379,7 +379,7 @@ step_build() {
     confirm "Build and install it?" || stopped
     why=new
   elif [[ $(installed_id) != "$label" || $(installed_team) != "$team" ]]; then
-    explain "~/Applications/OmarockBridge.app is $(installed_id) (team $(installed_team)), and this checkout's Local.xcconfig says $label (team $team). There's one bridge per Mac: building replaces it, and a new bundle id asks for the Mac's permissions again."
+    explain "~/Applications/OmarockBridge.app is $(installed_id) (team $(installed_team)), and this checkout's Local.xcconfig says $label (team $team). There's one bridge per Mac: building replaces it, and a new bundle ID asks for the Mac's permissions again."
     confirm "Replace it with $label?" no || { note "kept the installed bridge"; return; }
     why=replace
   elif ! up_to_date; then
@@ -473,7 +473,7 @@ step_health() {
   if health_true authorized; then ok "it may use Apple Music"; else bad "it may not use Apple Music yet"; fi
 
   if health_true authorized && ! health_true canPlayCatalog && ! wait_until "Checking the subscription…" 10 catalog_now; then
-    explain "MusicKit says this Mac can't play Apple Music's catalog. Check that the Music app is signed in to an Apple ID with an Apple Music subscription, and that MusicKit is ticked for the App ID $label. A new App ID can take a few minutes."
+    explain "MusicKit says this Mac can't play Apple Music's catalog. Check that the Music app is signed in to an Apple ID with an Apple Music subscription, and that MusicKit is ticked for $label (Identifiers, on developer.apple.com). A new bundle ID can take a few minutes."
     wait_until "Checking again every few seconds… (Ctrl-C to skip)" 600 catalog_now
   fi
   if health_true canPlayCatalog; then ok "it can play Apple Music's catalog"
@@ -577,7 +577,7 @@ uninstall() {
         sleep 2
       fi
       pgrep -qf "$(icecast_pattern)" && run pkill -TERM -f "$(icecast_pattern)"
-      # tccutil finds the app by its bundle id, so before it's deleted.
+      # tccutil finds the app by its bundle ID, so before it's deleted.
       if $forget && ! run tccutil reset All "$id"; then
         note "tccutil didn't: switch it off in System Settings, Privacy & Security instead"
         forget=false
@@ -612,8 +612,8 @@ uninstall() {
   local -a stays=(
     "Homebrew's xcodegen, ffmpeg, icecast and gum: brew uninstall them if nothing else uses them."
     "Xcode, and your Apple Development certificate."
-    "This clone, with your Team ID and bundle id in apple-bridge/app/Local.xcconfig, and the build in apple-bridge/app/build: delete the clone to remove them."
-    "Your App ID, on developer.apple.com (Certificates, IDs & Profiles, Identifiers): delete it there."
+    "This clone, with your Team ID and bundle ID in apple-bridge/app/Local.xcconfig, and the build in apple-bridge/app/build: delete the clone to remove them."
+    "Your bundle ID on developer.apple.com (Certificates, Identifiers & Profiles, Identifiers): delete it there."
     "The Music app in your Login Items, if setup put it there: take it out in System Settings, General, Login Items & Extensions, unless you want Music opening at login."
     "omarock on your Omarchy machine: run ./install --uninstall there, or switch Apple Music off in its settings."
   )

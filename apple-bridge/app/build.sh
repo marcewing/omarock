@@ -15,7 +15,7 @@ support=${OMAROCK_BRIDGE_SUPPORT:-$HOME/Library/Application Support/omarock-brid
 app=~/Applications/OmarockBridge.app
 
 bundle_id() { sed -n 's/^OMAROCK_BUNDLE_ID *= *//p' Local.xcconfig 2>/dev/null | tail -1; }
-# The bundle id of the app installed in ~/Applications, if any.
+# The bundle ID of the app installed in ~/Applications, if any.
 installed_id() { /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null || true; }
 
 # Listeners on the bridge's Icecast mount, from its admin stats (0 if Icecast isn't up).
@@ -90,11 +90,11 @@ if [[ ! -f Local.xcconfig ]]; then
   fi
   [[ $team =~ '^[A-Z0-9]{10}$' ]] || { print "That isn't a Team ID (10 letters and digits)."; exit 1; }
   if [[ -z $bundle && -t 0 ]]; then
-    print "The bundle id of your App ID with MusicKit (see apple-bridge/README.md)."
-    read -r "bundle?Bundle id [org.omarock.bridge]: " || true
+    print "Your bundle ID, registered with MusicKit (see apple-bridge/README.md)."
+    read -r "bundle?Bundle ID [org.omarock.bridge]: " || true
   fi
   bundle=${bundle:-org.omarock.bridge}
-  [[ $bundle =~ '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$' ]] || { print "That isn't a bundle id (like com.example.omarock.bridge)."; exit 1; }
+  [[ $bundle =~ '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$' ]] || { print "That isn't a bundle ID (like com.example.omarock.bridge)."; exit 1; }
   print "DEVELOPMENT_TEAM = $team\nOMAROCK_BUNDLE_ID = $bundle" >Local.xcconfig
   print "Wrote ${0:A:h}/Local.xcconfig (edit it to change these)."
 fi
@@ -122,7 +122,7 @@ fi
 if [[ $mode == --run || $mode == --run-now ]]; then
   previous=$(installed_id)
   if [[ -n $previous && $previous != $label ]]; then
-    # One bridge per Mac: the one installed under another bundle id goes.
+    # One bridge per Mac: the one installed under another bundle ID goes.
     print "Replacing $app ($previous) with $label."
     stop_bridge $previous || true
     launchctl bootout gui/$UID/$previous 2>/dev/null || true

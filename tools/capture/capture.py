@@ -4946,6 +4946,39 @@ def setup_scenario(host, output, failures):
     open_settings()
     finished()
     wait_for(lambda: "appleMusic:boolean" in host.state()["settingKinds"], "Apple Music set up")
+
+    # Marc, 10-28, after setting the Mac's bridge up again (a new token):
+    # "omarock still allows you to select Apple Music, but says refused token"
+    # and "we should have an option in the Apple settings to grab the token
+    # with ssh". A refused token marks the tab, with the dot updates use and
+    # the reason on hover, and Fix…; Copy with ssh brings the new one over,
+    # from ssh straight into omarock-account.
+    token_file.write_text("stale-token")
+    (home / ".fake-mac-token").write_text("fake-bridge-token\n")
+    host.call("close")
+    open_settings()
+    wait_for(lambda: "Apple Music •" in host.state()["settingsTabs"], "the refused token marks the tab", timeout=15)
+    s = host.state()
+    check(s["settingsTabTips"].get("Apple Music •") == "Apple Music: The bridge refused omarock's token"
+          and "appleUpdate:action:Fix…" in s["settingKinds"] and "refused it" in s["settingNotes"]["bridgeToken"]["text"]
+          and "bridgeTokenCopy:action:Copy with ssh" in s["settingKinds"],
+          "a refused token: the tab's dot (its hover says why), Fix…, the token's note, and Copy with ssh: "
+          + str(s["settingsTabTips"]), failures)
+    ssh_mode.write_text("refused")
+    press_row("bridgeTokenCopy")
+    wait_for(lambda: host.state()["settingNotes"]["bridgeTokenCopy"]["text"].startswith("Remote Login is off"), "Remote Login off")
+    check(token_file.read_text() == "stale-token", "Remote Login off: Copy with ssh says so, and the token stays", failures)
+    ssh_mode.write_text("on")
+    press_row("bridgeTokenCopy")
+    wait_for(lambda: host.state()["settingNotes"]["bridgeTokenCopy"]["text"] == "Copied from the Mac", "copied")
+    copied = ssh_log.read_text().splitlines()[-1]
+    check(token_file.read_text() == "fake-bridge-token" and token_file.stat().st_mode & 0o777 == 0o600
+          and copied == "-o BatchMode=yes -o ConnectTimeout=8 127.0.0.1 cat 'Library/Application Support/omarock-bridge/token'",
+          "Copy with ssh: the Mac's token, from ssh in batch mode into the token file (mode 600): " + copied, failures)
+    wait_for(lambda: "Apple Music" in host.state()["settingsTabs"] and "appleUpdate:action:Fix…" not in host.state()["settingKinds"],
+             "the mark gone", timeout=15)
+    check(not host.state()["settingNotes"]["bridgeToken"]["text"], "the bridge takes it: the dot, Fix… and the note go", failures)
+    (home / ".fake-mac-token").unlink()
     for f, data in before.items():
         if data is None: f.unlink(missing_ok=True)
         else: f.write_bytes(data)

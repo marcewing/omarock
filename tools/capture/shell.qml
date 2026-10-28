@@ -167,6 +167,17 @@ ShellRoot {
     return out
   }
 
+  // Each marked tab's hover text: what its dot is for.
+  function settingsTabTips() {
+    var bar = host.findNamed(host.settingsView(), "settingsTabs")
+    var out = {}
+    for (var i = 0; bar && i < bar.children.length; i++) {
+      var tab = bar.children[i]
+      if (tab.visible && tab.text !== undefined && tab.tooltipText) out[tab.text] = tab.tooltipText
+    }
+    return out
+  }
+
   function popup() {
     var data = host.panel ? host.panel.data : []
     for (var i = 0; i < data.length; i++)
@@ -374,6 +385,7 @@ ShellRoot {
             ? Math.round(host.findNamed(popup().contentItem[0].parent.parent, "infoCard").scrolled) : -1 },
         // The tabs as shown, a marked one with its •.
         settingsTabs: p.settingsOpen ? host.settingsTabs() : [],
+        settingsTabTips: p.settingsOpen ? host.settingsTabTips() : ({}),
         // Each row's key, type and button, on every tab: "spotify:action:Set up…".
         settingKinds: p.settingsOpen ? host.settingsView().allRows.map(function(r) { return r.key + ":" + r.type + (r.button ? ":" + r.button : "") }) : [],
         // The secrets showing their dots, on every tab.

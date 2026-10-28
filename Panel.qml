@@ -183,7 +183,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.8"
+  readonly property string version: "0.11.9"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -291,6 +291,7 @@ Panel {
           : !root.appleConfigured ? "The bridge's address isn't set"
           : !apple.healthKnown ? ""
           : !apple.reachable ? "Can't reach the bridge at " + root.appleBridge
+          : apple.tokenRefused ? "The bridge refused omarock's token"
           : !apple.healthAuthorized ? "The bridge can't use Apple Music yet" : ""
       },
       sound: { setUp: !!so && so.setUp, update: !!so && so.setUp && !so.upToDate, attention: "" }
@@ -362,7 +363,10 @@ Panel {
         : spotify.health.web.signInEndsAt ? note("Until " + new Date(spotify.health.web.signInEndsAt * 1000)
           .toLocaleDateString(Qt.locale(), "MMMM d, yyyy") + ", when Spotify asks again", "ok")
         : note("Signed in", "ok"),
-      musicFolder: note(client.musicDirectory === "" ? "mpd doesn't say: it tells only clients on its unix socket" : "")
+      musicFolder: note(client.musicDirectory === "" ? "mpd doesn't say: it tells only clients on its unix socket" : ""),
+      bridgeToken: root.appleEnabled && apple.tokenRefused
+        ? note("The bridge refused it: a new bridge makes a new token. Paste that, or copy it with ssh (below)", "bad") : note(""),
+      bridgeTokenCopy: note(root.tokenCopyNote.text, root.tokenCopyNote.kind)
     }
   }
   property int infoSequence: 0
@@ -2896,6 +2900,7 @@ Panel {
   }
 
   function openSettings() {
+    root.tokenCopyNote = { text: "", kind: "" }
     root.keysOpen = false
     root.closeInfo()
     settingsView.reset()
@@ -3020,6 +3025,7 @@ Panel {
       root.confirmTarget = { clearHistory: true }
       return
     }
+    if (key === "bridgeTokenCopy") return root.copyBridgeToken()
     if (key !== "spotifyLogin") return
     if (root.settingStates.spotify.signedIn) {
       root.confirmTarget = { signOut: true }
@@ -3451,6 +3457,47 @@ Panel {
     }
   }
 
+  // Copy with ssh, for the bridge's token: it goes from ssh straight into
+  // omarock-account, never through the panel. BatchMode, so ssh asks nothing
+  // (no password, no new host key); what it says goes under the button
+  // (Setup.tokenCopyState).
+  property var tokenCopyNote: ({ text: "", kind: "" })
+  function copyBridgeToken() {
+    if (tokenCopier.running || accountWriter.running) return
+    var host = Setup.bridgeHost(root.appleBridge)
+    if (host === "") {
+      root.tokenCopyNote = { text: "The bridge's address isn't set: Fix… asks for it", kind: "bad" }
+      return
+    }
+    tokenCopier.host = host
+    tokenCopier.command = ["bash", "-c",
+      "t=$(ssh -o BatchMode=yes -o ConnectTimeout=8 \"$1\" \"cat 'Library/Application Support/omarock-bridge/token'\") || exit; "
+        + "[ -n \"$t\" ] || exit 3; printf '%s\\n' \"$t\" | \"$2\" bridge-token || exit 4",
+      "omarock-copy-token", host, root.accountTool]
+    root.tokenCopyNote = { text: "Copying…", kind: "" }
+    tokenCopier.running = true
+    tokenCopyDeadline.restart()
+  }
+  Process {
+    id: tokenCopier
+    property string host: ""
+    stderr: StdioCollector { id: tokenCopierErrors; waitForEnd: true }
+    onExited: function(exitCode) {
+      tokenCopyDeadline.stop()
+      root.tokenCopyNote = Setup.tokenCopyState(exitCode, tokenCopierErrors.text, tokenCopier.host)
+      if (exitCode !== 0) return
+      root.say("Copied the bridge's token from the Mac")
+      apple.reloadToken()
+      serviceRecheck.restart()
+      accountReader.running = true
+    }
+  }
+  Timer {
+    id: tokenCopyDeadline
+    interval: 20000
+    onTriggered: tokenCopier.running = false
+  }
+
   // Saves an account, a key or the music folder (saveAccount).
   Process {
     id: accountWriter
@@ -3612,6 +3659,8 @@ Panel {
     mpd: client
     clientName: root.clientName
     active: root.mpdOnApple
+    checksToken: true
+    refusedHint: ": the settings' Apple Music tab copies the new one"
     idleStopSeconds: Math.max(0, Number(root.setting("appleIdleStop", 60)) || 0)
     // On unless switched off: only a patched libFLAC keeps up without it.
     rejoinAfterChange: root.setting("appleRejoin", true) === true

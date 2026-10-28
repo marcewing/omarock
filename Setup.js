@@ -258,6 +258,25 @@ function scpState(code, stderr) {
   return { kind: "bad", text: "Can't reach the Mac with ssh: paste the token" }
 }
 
+// What Copy with ssh (the settings' Apple Music tab) came to, as a note
+// { kind, text }: ssh copying the token from the Mac (BatchMode, so it asks
+// nothing) into omarock-account. 3: the Mac's token file was empty; 4:
+// omarock-account couldn't save it.
+function tokenCopyState(code, stderr, host) {
+  var e = String(stderr || "")
+  if (code === 0) return { kind: "ok", text: "Copied from the Mac" }
+  if (code === 3) return { kind: "bad", text: "The bridge's token file on the Mac is empty" }
+  if (code === 4) return { kind: "bad", text: "Couldn't save it: " + (e.trim().split("\n").pop() || "no reason given") }
+  if (/Host key verification failed/.test(e))
+    return { kind: "bad", text: "ssh doesn't know the Mac yet: run ssh " + host + " once in a terminal to trust it, then copy again" }
+  if (/Permission denied/.test(e))
+    return { kind: "bad", text: "ssh needs a password for the Mac, and can't ask for one here: paste the token, or give ssh a key for the Mac" }
+  if (/Connection refused/.test(e))
+    return { kind: "bad", text: "Remote Login is off on the Mac: turn it on (System Settings, General, Sharing), or paste the token" }
+  if (/No such file/.test(e)) return { kind: "bad", text: "The Mac has no bridge token: is the bridge set up there?" }
+  return { kind: "bad", text: "Can't reach the Mac with ssh: paste the token" }
+}
+
 // The Macs on a tailnet, from `tailscale status --json`: [{ address, name }].
 function tailnetMacs(text) {
   var status
@@ -291,6 +310,6 @@ function outputList(text) {
 
 if (typeof module !== "undefined") {
   module.exports = { pages: pages, REDIRECT: REDIRECT, title: title, fields: fields, bridgeUrl: bridgeUrl, initial: initial,
-    problem: problem, blocker: blocker, writes: writes, args: args, bridgeHost: bridgeHost, scpState: scpState,
+    problem: problem, blocker: blocker, writes: writes, args: args, bridgeHost: bridgeHost, scpState: scpState, tokenCopyState: tokenCopyState,
     tailnetMacs: tailnetMacs, outputList: outputList }
 }

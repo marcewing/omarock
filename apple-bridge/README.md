@@ -33,21 +33,24 @@ account for MusicKit to work.
   on Apple silicon; Intel Macs should work but haven't been tried.
 - **Xcode** from the App Store, and [Homebrew](https://brew.sh) for `xcodegen`, `ffmpeg`
   and `icecast`.
-- **A paid Apple Developer Program membership** ($99 a year). MusicKit needs it, and an
-  App ID with MusicKit switched on (below).
+- **A paid Apple Developer Program membership** ($99 a year). MusicKit needs it, and a
+  bundle ID registered with MusicKit switched on (below).
 - **An Apple Music subscription** on the Apple ID the Mac's Music app uses.
 - **Tailscale** on the Mac and the Linux machine, in the same tailnet.
 - **On Linux:** omarock with mpd, as in the [main README](../README.md).
 
-## 1. An App ID with MusicKit
+## 1. A bundle ID with MusicKit
 
 1. At [developer.apple.com/account](https://developer.apple.com/account), open
-   **Certificates, IDs & Profiles → Identifiers** and add an **App ID** (type App).
-2. Give it an explicit bundle id of your own, such as `com.example.omarock.bridge`.
-3. Register it, open it again, and on the **App Services** tab tick **MusicKit**. Save.
+   **Certificates, Identifiers & Profiles → Identifiers**, then **+** and **App IDs**
+   (type App).
+2. Give it a description and an explicit **bundle ID** of your own, such as
+   `com.example.omarock.bridge`.
+3. Register it, open it again (the Identifiers list shows your bundle ID in its
+   **Identifier** column), and on the **App Services** tab tick **MusicKit**. Save.
 4. Note your **Team ID** (Account → Membership details: 10 letters and digits).
 
-Apple can take a few minutes before MusicKit answers for a new App ID; until then
+Apple can take a few minutes before MusicKit answers for a new bundle ID; until then
 catalog requests come back empty.
 
 You also need an **Apple Development** signing certificate: Xcode → Settings → Accounts →
@@ -62,7 +65,7 @@ cd omarock && ./install
 
 On a Mac, `./install` sets up the bridge (`apple-bridge/install`), one step at a time. It
 checks the requirements and offers to install what's missing from Homebrew (`xcodegen`,
-`ffmpeg`, `icecast`, and `gum` for its prompts). It asks for your Team ID and bundle id
+`ffmpeg`, `icecast`, and `gum` for its prompts). It asks for your Team ID and bundle ID
 and saves them in `apple-bridge/app/Local.xcconfig`, which git ignores. Then it builds and
 signs the app, installs it to `~/Applications/OmarockBridge.app`, starts it, and goes
 through the Mac's permissions with you. It ends with what your Omarchy machine needs.
@@ -108,7 +111,7 @@ brew install xcodegen ffmpeg icecast
 apple-bridge/app/build.sh --run
 ```
 
-It checks the requirements, asks once for your Team ID and bundle id, builds, installs
+It checks the requirements, asks once for your Team ID and bundle ID, builds, installs
 and starts the app, and prints what the Linux side needs.
 
 Check it from the Mac or Linux (`/v1/health` needs no token):
@@ -175,9 +178,11 @@ scp you@100.64.0.10:'Library/Application Support/omarock-bridge/token' ~/.config
 chmod 600 ~/.config/omarock/bridge-token
 ```
 
-Then switch Apple Music on in omarock's settings (`,` in the panel), where the
-token can be pasted later too. If the Mac's address changes, **Fix…** there (or
-`./install apple-music`) asks again. Its other setting there, also in
+Then switch Apple Music on in omarock's settings (`,` in the panel). The token can be
+pasted there later too, or copied again with **Copy with ssh** (Remote Login again).
+A reinstalled bridge makes a new token: the old one is refused, and the Apple Music
+tab is marked • until the new one is in (hover over the tab for why). If the Mac's
+address changes, **Fix…** there (or `./install apple-music`) asks again. Its other setting there, also in
 `~/.config/omarock/settings.json`:
 - `appleIdleStop`: after the bridge has been paused this many seconds, mpd lets go of the
   stream.
@@ -200,13 +205,13 @@ the Linux side: `apple.json`, the token file, the bridge's `/v1/health` and libF
   `curl -X POST -H "Authorization: Bearer $(cat ~/.config/omarock/bridge-token)" http://…:8710/v1/authorize`
   (the dialog shows on the Mac).
 - **`canPlayCatalog: false`, or catalog searches fail:** check the Apple Music
-  subscription, that MusicKit is ticked for the App ID whose bundle id is in
-  `Local.xcconfig`, and give a new App ID a few minutes.
+  subscription, that MusicKit is ticked for the bundle ID in `Local.xcconfig`
+  (Identifiers, on developer.apple.com), and give a new bundle ID a few minutes.
 - **`capturing: false`, or the stream is silent:** the audio capture permission (above).
   It belongs to the app's code signature, so building with another identity or bundle
   id asks again.
 - **Nothing answers on :8710:** `bridge.log` says "waiting for a Tailscale address" until
-  Tailscale is up. Check `launchctl print gui/$UID/<your bundle id>`.
+  Tailscale is up. Check `launchctl print gui/$UID/<your bundle ID>`.
 - **mpd far behind live:** see [patches/README.md](../patches/README.md).
 - **On Linux,** run `tools/omarock-doctor`.
 - **Another Icecast on port 8000:** the bridge uses whatever answers on 127.0.0.1:8000,
@@ -223,20 +228,20 @@ Each part is its own step, and asks first. It stops the bridge and its Icecast, 
 the launch agent and `~/Applications/OmarockBridge.app`, and offers to make macOS forget
 the app's permissions. It also offers to delete the support folder (the token, the
 passwords, `config.json`, the logs). The default is to keep that, so a reinstall works
-with your Omarchy machine as it is. It only removes an app whose bundle id matches this
+with your Omarchy machine as it is. It only removes an app whose bundle ID matches this
 checkout's `Local.xcconfig`. At the end it lists what stays: Homebrew's tools, Xcode,
-the clone and its `Local.xcconfig`, and your App ID, which you can delete on
-developer.apple.com.
+the clone and its `Local.xcconfig`, and your bundle ID on developer.apple.com, which you
+can delete there (Identifiers).
 
 By hand:
 
 ```sh
-tccutil reset All com.example.omarock.bridge   # your bundle id: forgets its permissions
+tccutil reset All com.example.omarock.bridge   # your bundle ID: forgets its permissions
 apple-bridge/app/build.sh --uninstall          # stops it and removes the app
 rm -rf ~/Library/Application\ Support/omarock-bridge
 ```
 
-`tccutil` finds the app by its bundle id, so run it before the app is removed.
+`tccutil` finds the app by its bundle ID, so run it before the app is removed.
 
 On the Omarchy machine, **Remove…** on the Apple Music tab of omarock's settings (or
 `./install --remove apple-music`) deletes the bridge's address and token there,
