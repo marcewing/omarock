@@ -182,7 +182,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.4"
+  readonly property string version: "0.11.5"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -5128,8 +5128,10 @@ Panel {
 
         readonly property real gap: Style.space(16)
         readonly property real columnWidth: Math.floor((width - gap) / 2)
-        // Both headings as tall as the taller, so the lists line up.
-        readonly property real headingHeight: Math.max(leftHeading.implicitHeight, rightHeading.implicitHeight)
+        // Each list starts under its own heading. Made as tall as the
+        // other, the results' heading followed the preview's buttons as the
+        // cursor moved: a gap above the results, and the list jumping under
+        // the pointer (Marc, 10-28).
         readonly property var parentInfo: root.browseStack.length >= 2
           ? root.browseStack[root.browseStack.length - 2].info
           : root.browseRoot === "queue" ? { title: "Queue", subtitle: root.queueSummary, coverFile: "" }
@@ -5140,7 +5142,6 @@ Panel {
           anchors.left: parent.left
           anchors.top: parent.top
           width: columnsArea.columnWidth
-          height: columnsArea.headingHeight
           role: root.browsing ? "parent" : ""
           showBack: root.browsing
           title: root.browsing ? columnsArea.parentInfo.title : "Results"
@@ -5150,6 +5151,7 @@ Panel {
         }
 
         TrackList {
+          objectName: "leftColumnList"
           anchors.left: parent.left
           anchors.top: leftHeading.bottom
           anchors.topMargin: Style.space(8)
@@ -5175,7 +5177,6 @@ Panel {
           anchors.right: parent.right
           anchors.top: parent.top
           width: columnsArea.columnWidth
-          height: columnsArea.headingHeight
           role: root.browsing ? "current" : "preview"
           title: root.browsing ? (root.browseInfo.title || "") : (root.previewInfo.title || "")
           subtitle: root.infoSubtitle(root.browsing ? root.browseInfo : root.previewInfo)

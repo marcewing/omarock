@@ -516,6 +516,15 @@ ShellRoot {
         bottom ? list.height - row.height / 4 : row.height / 4)
       return JSON.stringify({ index: index, x: at.x, y: at.y, listY: Math.round(list.contentY) })
     }
+    // Where a named item is on the card: {x, y}, or {} when it isn't shown.
+    function itemAt(name: string): string {
+      var popupWindow = popup()
+      var card = popupWindow ? popupWindow.contentItem[0].parent.parent : null
+      var item = card ? host.findNamed(card, name) : null
+      if (!item) return "{}"
+      var at = item.mapToItem(card, 0, 0)
+      return JSON.stringify({ x: Math.round(at.x), y: Math.round(at.y) })
+    }
     function cardSize(): string {
       var card = popup().contentItem[0].parent.parent
       return JSON.stringify({ width: card.width, height: card.height })

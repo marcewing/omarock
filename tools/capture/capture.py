@@ -1272,16 +1272,26 @@ def spotify_previews_scenario(host, failures):
 
     def pages():
         return len(spotify_requests("/v1/albums")) + len(spotify_requests("/v1/artists"))
+
+    def results_top():
+        return json.loads(host.call("itemAt", "leftColumnList")).get("y")
     before = pages()
     passed = []
+    # The results stay where they are while the preview loads and when it
+    # has (its heading grows by a row of buttons): they used to follow it.
+    tops = [results_top()]
     # The top result (already previewed), then an artist and two albums.
     for _ in range(4):
         host.call("move", 1)
         host.settle(.3)
         s = host.state()
         passed.append(s["rows"][s["cursor"]])
+        tops.append(results_top())
     wanted = passed[-1]
     wait_for(lambda: host.state()["preview"] == wanted and host.state()["previewRows"], "the cursor's row previewed")
+    tops.append(results_top())
+    check(tops[0] is not None and len(set(tops)) == 1,
+          f"the results don't move as the preview loads and changes: {tops}", failures)
     asked = pages() - before
     check(len(set(passed)) == 4 and asked <= 2,
           f"3 rows passed to be previewed ({', '.join(passed[1:])}): {asked} asked of omarock-spotify, the first and the last",
