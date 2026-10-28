@@ -28,7 +28,7 @@ requests: they carry an `X-Omarock: 1` header, which a web page can't send.
 
 ## Set it up
 
-The easy way: **Set up…** under SPOTIFY in omarock's settings (`,` in the panel).
+The easy way: **Set up…** on the Spotify tab of omarock's settings (`,` in the panel).
 Its window links to the dashboard and takes the Client ID and the Soloist key;
 then a terminal does the rest of what follows, opens the firewall for the
 pairing and closes it again, and switches Spotify on. `./install spotify` from
@@ -111,7 +111,7 @@ By hand, run the tools from your omarock clone: the plugin's folder,
 - **Soloist builds expire after 90 days.** omarock's settings offer **Update…**
   ten days before, which fetches a new one; or run `tools/update-soloist`.
 - **The Web API sign-in lasts 6 months.** omarock's settings show when it ends,
-  under Spotify. Then **Sign in** there, or run `tools/omarock-sp login` again.
+  on the Spotify tab. Then **Sign in** there, or run `tools/omarock-sp login` again.
   **Sign out** there forgets it (Spotify's player stays paired: **Remove…** takes
   everything off).
 - **Logs:** `journalctl --user -u omarock-spotify -u omarock-soloist`.
@@ -132,7 +132,7 @@ By hand, run the tools from your omarock clone: the plugin's folder,
 
 ## Remove it
 
-**Remove…** under SPOTIFY in omarock's settings, or `./install --remove spotify`,
+**Remove…** on the Spotify tab of omarock's settings, or `./install --remove spotify`,
 does this, asking first; `./install --uninstall` too. By hand, switch Spotify
 off in omarock's settings, then:
 

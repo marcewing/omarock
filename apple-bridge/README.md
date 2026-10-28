@@ -56,7 +56,7 @@ add your Apple ID → your team → Manage Certificates → + → Apple Developm
 ## 2. Build and install
 
 ```sh
-git clone https://github.com/marcewing/omarock.git
+git clone https://github.com/marcewing/omarock
 cd omarock && ./install
 ```
 
@@ -154,13 +154,16 @@ stream, because restarting the bridge under mpd gives mpd errors until it's back
 
 ## 3. The Linux side
 
-On your Omarchy machine, **Set up…** under APPLE MUSIC in omarock's settings (or
-`./install apple-music` in your clone there) connects to the bridge. Its window lists the Macs among
-your Tailscale machines, checks the bridge answers, and takes the bridge's token, checked too, or, left blank, has setup copy it with `scp` once it has checked the Mac's Remote Login.
-Paste it (on the Mac, `pbcopy < ~/Library/Application\ Support/omarock-bridge/token`
-puts it on the clipboard without showing it; the Mac's `./install` offers to), or let
-it copy the token with `scp`, which needs the Mac's Remote Login (System Settings →
-General → Sharing).
+On your Omarchy machine, **Set up…** on the Apple Music tab of omarock's settings (`,`
+in the panel), or `./install apple-music` in your clone there, connects to the bridge.
+Its window lists the Macs among your Tailscale machines and checks that the bridge
+answers. Then the bridge's token:
+- **Left blank,** setup copies it from the Mac with `scp`. That needs the Mac's Remote
+  Login (System Settings → General → Sharing), which the window checks first.
+- **Or paste it,** and the window checks it. On the Mac it's in
+  `~/Library/Application Support/omarock-bridge/token`; `pbcopy < ~/Library/Application\
+  Support/omarock-bridge/token` copies it without showing it (the Mac's `./install`
+  offers to). The Mac's clipboard doesn't reach Linux, so bring it across your own way.
 
 By hand instead (`build.sh` prints these with your addresses filled in):
 
@@ -185,8 +188,9 @@ And in the file only:
   has the patched one.
 - `appleBridge` and `appleStream`: the addresses, instead of `apple.json`'s.
 
-For smooth playback on the Linux side (a patched libFLAC for mpd, and when `appleRejoin`
-is needed), see [patches/README.md](../patches/README.md). `tools/omarock-doctor` checks
+For smooth playback, the setup window's two ticks (on to start) build a patched libFLAC
+for mpd and a patched mpd-mpris on the Linux side; [patches/README.md](../patches/README.md)
+says what they fix, and when `appleRejoin` is needed. `tools/omarock-doctor` checks
 the Linux side: `apple.json`, the token file, the bridge's `/v1/health` and libFLAC.
 
 ## Troubleshooting
@@ -234,7 +238,7 @@ rm -rf ~/Library/Application\ Support/omarock-bridge
 
 `tccutil` finds the app by its bundle id, so run it before the app is removed.
 
-On the Omarchy machine, **Remove…** under APPLE MUSIC in omarock's settings (or
+On the Omarchy machine, **Remove…** on the Apple Music tab of omarock's settings (or
 `./install --remove apple-music`) deletes the bridge's address and token there,
 and the patched builds for its stream.
 

@@ -26,7 +26,7 @@ while mpd plays it. Whether that's acceptable is your call.
 
 ## Set it up
 
-The easy way: **Set up…** under SIRIUSXM in omarock's settings (`,` in the panel).
+The easy way: **Set up…** on the SiriusXM tab of omarock's settings (`,` in the panel).
 Its window takes your login; then a terminal installs omarock-sxm, signs in,
 and switches SiriusXM on. `./install siriusxm` from your clone does the same,
 asking for the login itself. By hand:
@@ -71,7 +71,7 @@ sees the change too.
 
 ## Remove it
 
-**Remove…** under SIRIUSXM in omarock's settings, or `./install --remove siriusxm`,
+**Remove…** on the SiriusXM tab of omarock's settings, or `./install --remove siriusxm`,
 does this, asking first, your login included; `./install --uninstall` too. By
 hand, switch SiriusXM off in omarock's settings, then:
 

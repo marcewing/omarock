@@ -22,7 +22,7 @@ Soloist ─────┘
 
 ## Set it up
 
-The easy way: **Set up…** under SOUND in omarock's settings: pick the output in
+The easy way: **Set up…** on the Sound tab of omarock's settings: pick the output in
 its window, then a terminal does what follows (asking before it changes
 mpd.conf), and restarts Spotify's player (if you have it) to play into the bus.
 `./install sound` from your clone asks which output itself. By hand:
@@ -77,7 +77,7 @@ half-done edit can't change where the sound goes on the next restart.
 
 ## Remove it, in reverse
 
-**Remove…** under SOUND in omarock's settings, `./install --remove sound`, and
+**Remove…** on the Sound tab of omarock's settings, `./install --remove sound`, and
 `./install --uninstall` do this, asking first, and put back the output mpd had
 before. By hand:
 
