@@ -40,7 +40,9 @@ CHART_1985 = """Some words about the year.
 {{reflist}}
 """
 
-PAGES = {"Billboard Year-End Hot 100 singles of 1985": CHART_1985}
+# 1984's is 1985's songs again: a chart no service has looked up yet.
+PAGES = {"Billboard Year-End Hot 100 singles of 1985": CHART_1985,
+         "Billboard Year-End Hot 100 singles of 1984": CHART_1985}
 
 
 class Handler(BaseHTTPRequestHandler):

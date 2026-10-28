@@ -182,7 +182,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.6"
+  readonly property string version: "0.11.7"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1226,7 +1226,7 @@ Panel {
     root.saveSetting("timeMachineYear", year)
     root.say(year > 0 ? "Time Machine: " + year + ". Only music from then or before; "
       + TimeMachine.chartName(year) + " (T) has its chart" : "Time Machine is off: all your music again")
-    charts.stopOthers(year)
+    charts.keepOnly(root.chartService, year)
     if (year > 0) {
       root.keepQueueInYear(true)
       root.preloadTop100(year)
@@ -1241,6 +1241,25 @@ Panel {
     charts.chart(year, function(chart) {
       if (chart && target) root.findChartSongs(year, target, function() {})
     })
+  }
+
+  // Where the Top 100 plays changed (the lookup setting, the source, a
+  // service switched on or off): the year's songs are looked up there
+  // instead, the other service's lookups stopped, and an open Top 100
+  // follows (Marc, 10-28). A moment later, so m going round the sources
+  // doesn't start one at each.
+  onChartServiceChanged: chartFollow.restart()
+
+  function followChartService() {
+    var year = root.timeYear
+    if (year === 0) return
+    charts.keepOnly(root.chartService, year)
+    var top = root.browseTop
+    if (root.browseRoot === "queue" && root.browseStack.length === 1 && top && top.kind === "top100"
+        && top.service !== root.chartService && !root.chartStarting) {
+      root.browseStack = []
+      root.openTop100()
+    } else root.preloadTop100(year)
   }
 
   // charts.findSongs once target answers; failed(error) if it doesn't.
@@ -3648,6 +3667,12 @@ Panel {
     id: previewDelay
     interval: 120
     onTriggered: root.updatePreview()
+  }
+
+  Timer {
+    id: chartFollow
+    interval: 1500
+    onTriggered: root.followChartService()
   }
 
   Timer {

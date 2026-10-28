@@ -4202,6 +4202,30 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("setSetting", "lookup", "Apple Music", "false")
     to_source(host, "local")
 
+    # Where songs are looked up, changed while the Top 100's are being
+    # found: those stop, they're found there instead, and the open Top 100
+    # follows (Marc, 10-28). 1984's chart has the same songs, looked up on
+    # neither yet.
+    host.call("setSetting", "lookup", "Spotify", "false")
+    spotify_post("/v1/fake/slowsearch", {"on": True, "seconds": 1})
+    on_spotify, on_apple = len(spotify_requests("/v1/search")), len(bridge_requests("/v1/search"))
+    pick("1984")
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1984" and spotify_requests("/v1/search")[on_spotify:],
+             "1984's chart looked up on Spotify")
+    host.call("setSetting", "lookup", "Apple Music", "false")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1984" and host.state()["lookup"] == "apple"
+             and host.state()["subtitles"][0] == "5 of 12 found on Apple Music", "the Top 100 follows to Apple Music")
+    host.settle(1.2)
+    stopped = len(spotify_requests("/v1/search")) - on_spotify
+    host.settle(2.5)
+    check(stopped < 12 and len(spotify_requests("/v1/search")) - on_spotify == stopped
+          and len(bridge_requests("/v1/search")) - on_apple >= 12,
+          f"the setting changed mid-lookup: Spotify's stop ({stopped} asked), and Apple Music finds them, the Top 100 with it",
+          failures)
+    spotify_post("/v1/fake/slowsearch", {"on": False})
+    host.call("back")
+
     # A year Wikipedia has no page for says so.
     pick("1988")
     host.call("press", "T")

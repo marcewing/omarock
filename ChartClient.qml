@@ -130,12 +130,12 @@ Item {
     root.readFound(key, go)
   }
 
-  // Lookups for other years stop where they are, what they found kept:
-  // Time Machine's year changed (a year, or 0 for off), and only its chart
-  // shows.
-  function stopOthers(year) {
+  // Every lookup but this service's for this year stops where it is, what
+  // it found kept: Time Machine's year changed (0 for off), or where its
+  // Top 100 plays, and only that chart shows.
+  function keepOnly(service, year) {
     for (var key in Store.states)
-      if (key.split(":")[1] !== String(year) && Store.states[key].looking) Store.states[key].stop = true
+      if (key !== service + ":" + year && Store.states[key].looking) Store.states[key].stop = true
   }
 
   // What was found before, from the cache, once; then().
