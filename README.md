@@ -1,60 +1,54 @@
+<img src="preview.png" alt="omarock: Spotify, Apple Music, SiriusXM and radio, beside the panel playing Drive Like Jehu">
+
 # omarock
 
-**A music player that lives in your Omarchy bar.** omarock shows what's playing
-(the cover, the artist and the song) in the bar. Click it for a keyboard-driven
-player: search and browse your music library, build playlists, and switch to
-internet radio, Spotify, Apple Music or SiriusXM in the same panel.
+**A music player that lives in your Omarchy bar.** omarock has all the usual music player
+features: search, browse, build playlists, cover art, etc.  Unlike many music players,
+in addition to your local music library, omarock can also play internet radio stations, **Spotify**,
+**Apple Music**, and **SiriusXM** all integrated in the same panel.  Note that these last three
+require paid subscriptions.
 
-omarock is a client for [mpd](https://www.musicpd.org), the Music Player Daemon.
-Your queue, playlists and playback live in mpd, not in omarock, so `mpc`, your
-media keys and any other mpd client always agree with it.
-
-<!-- Placeholders from the test harness (a made-up library); real ones to come. -->
-![The expanded panel: search results on the left, an artist on the right](docs/screenshots/expanded.png)
-
-| In the bar | The compact panel |
-| --- | --- |
-| ![The bar: the cover, then "Artist — Song"](docs/screenshots/bar.png) | ![The compact panel: now playing, search and the queue](docs/screenshots/compact.png) |
+omarock works as a client for [mpd](https://www.musicpd.org), the Music Player Daemon.
+The music queue, playlists and playback live in mpd, not in omarock, so `mpc`, your
+media keys and any other mpd client are always in sync.
 
 ## Features
 
-- **In the bar:** the album cover and "Artist — Song". Click for the player;
-  middle-click to play or pause.
-- **Compact or expanded:** now playing, transport, volume and the queue.
-  **Expand** turns the same popup into a two-column browser.
-- **Search that forgives you:** artists, albums, songs, genres and playlists,
-  ignoring case and accents ("husker" finds Hüsker Dü).
-- **Browse like a file manager:** → opens an artist, then one of their albums;
-  ← goes back. A genre opens to its artists. Album covers throughout.
-- **From what's playing:** click the artist, the album or its cover, or the
-  genre, to open them. **Add to library** and **Add to playlist** are right
-  under the song.
-- **Playlists as you go:** press **A** on any song, album, artist or genre to
-  add it to a playlist (mpd's own stored playlists).
-- **Everything about a song or album (`i`):** its tags, format, bitrate and
+- **Keyboard or Mouse**: You can drive omarock either way. `Super+Ctrl+M` opens omarock. `?` shows all the keys used for navigation and control.
+- **Compact or expanded:** Expanded view allows browsing in a two-column view.
+- **Search that forgives:** Use `/` to search ignoring case and accents
+  ("husker" finds Hüsker Dü).
+- **Browse like a file manager:** `→` opens an artist, then one of their albums;
+  `←` goes back. A genre opens to its artists. Album covers are displayed throughout.
+- **Now Playing:** click the artist, the album or its cover, or the
+  genre, to open them.
+- **Build Playlists:** `A` adds any song, album, artist or genre to
+  a playlist (mpd's playlists).
+- **Song and Album Info:** `i` show tags, format, bitrate and
   size, and, on a streaming service, whether it's in your library.
-- **Time Machine:** enter a year, and only music from then or before shows and
-  plays, with that year's Billboard Top 100 to play on Apple Music or Spotify.
-- **History (`H`):** what you've played this past week, from every source, the
-  radio's songs included; Enter plays one again.
-- **Keys that do what you'd guess,** and the full list is a `?` away.
-- **One volume for every source** (with omarock's optional audio bus).
+- **Time Machine:** Enter a year to pretend you are listening in that year.  Only music released prior shows or
+  plays, and there's a Billboard Top 100 from that year to play on Apple Music or Spotify. Fun.
+- **History:** `H` shows you what you've played this past week, from every source,
+  radio songs included.
+- **One volume for every source:** With omarock's optional audio bus, all sources are routed through omarock's volume control.
 
 ## Music sources
 
 Local music and internet radio need nothing beyond mpd. Spotify, Apple Music
-and SiriusXM are add-ons: set up the service, then switch the source on in
-omarock's settings (each has its own switch). Only then does it get a button
-in the panel, and only then does omarock talk to its service. Internet radio
-has a switch too, on until you turn it off.
+and SiriusXM are add-ons: After installing omarock, set up each service in
+omarock's settings (each has its own switch). Only enabled services get a button
+in the panel. Internet radio
+has a switch too if you don't want to see that either.
+
+The table below shows the details, but don't worry, the setup process in settings will walk you through it all.
 
 | Source | What you need |
 | --- | --- |
 | **Local music** | mpd and your music folder. |
 | **Internet radio** | Nothing more: stations come from [Radio Browser](https://www.radio-browser.info), a free community directory, and mpd plays them. Your favourites are an mpd playlist. |
-| **Spotify** | Spotify Premium, your own (free) Spotify developer app, and the `omarock-spotify` service, which drives Spotify's own player, Soloist ([spotify/](spotify/README.md)). |
-| **Apple Music** | An Apple Music subscription and a Mac running the omarock bridge ([apple-bridge/](apple-bridge/API.md)). The bridge is built with your own Apple Developer membership (for MusicKit), and the Mac must be reachable from your Omarchy machine (omarock uses Tailscale). Advanced. |
-| **SiriusXM** | A SiriusXM subscription that includes streaming, and the `omarock-sxm` service ([sxm/](sxm/README.md)). It's unofficial: it signs in as SiriusXM's web player does, which their terms may not allow. |
+| **Spotify** | Spotify Premium, your own (free) Spotify developer app, Soloist (Spotify's own player) and the `omarock-spotify` service, which drives it ([spotify/README.md](spotify/README.md)). |
+| **Apple Music** | An Apple Music subscription and a Mac running the `omarock-bridge`. The bridge is built with your own Apple Developer membership (for MusicKit), and the Mac must be reachable from your Omarchy machine (I use Tailscale). Advanced.  ([apple-bridge/README.md](apple-bridge/README.md))|
+| **SiriusXM** | A SiriusXM subscription that includes streaming, and the `omarock-sxm` service. It's unofficial: it signs in as SiriusXM's web player does, which their terms may not allow.  ([sxm/README.md](sxm/README.md))|
 
 ## Requirements
 
@@ -66,11 +60,9 @@ has a switch too, on until you turn it off.
 - **Album covers:** an image in each album folder, such as `cover.jpg`. Art embedded
   in the files isn't shown.
 
-omarock is young. It's used every day on one Omarchy desktop.
-
 ## Install
 
-The installer sets up your own music and the radio:
+The installer sets up omarock with your own music and internet radio:
 
 ```bash
 git clone https://github.com/marcewing/omarock
@@ -78,44 +70,44 @@ cd omarock
 ./install
 ```
 
-It sets up mpd (asking where your music is), then puts omarock on the bar, with
-a key that opens it from anywhere: Super+Ctrl+M (if nothing else has it). It
-checks first what's already there, shows each command before running it, and
+The install sets up mpd (asking where your music is), and puts omarock on the bar.
+It first checks what's already installed, shows each command before running it, and
 asks before changing anything: packages (with sudo), your mpd config, systemd
-drop-ins, your key bindings. It starts mpd and mpd-mpris (the media keys) and
-has them start at each login, since that's what it's there to set up. Run it
-again any time: what's done is skipped.
+drop-ins, and your key bindings. It starts mpd and mpd-mpris (the media keys) and
+has them start at each login. Run it again any time.
 
-**Spotify, SiriusXM and Apple Music** come afterwards, one at a time, from
-omarock's settings (press `,` in the panel, or the gear in the expanded view),
-each on its own tab. Each has a **Set up…** button, which opens a window of its
-own: how the source works, what it needs and where to get it (with links), and
-fields for its keys or login, checked as you type where they can be. **Start
-setup** puts those into files only you can read, then finishes in a terminal,
-as Omarchy's own installs do: the downloads and services, and the steps only
-you can take there (pairing Spotify from your phone, say). Once it's set up, the source has a
+**Spotify, SiriusXM and Apple Music** are set up from omarock's settings, one at a time.
+Each has a **Set up…** button in their tab which will walk you through each step,
+and the actual install and setup procedure executes in a terminal.
+Once set up, each source has a
 switch (off stops its services and keeps your accounts and keys), its settings,
-and **Remove…**, which takes it off again, accounts and keys included. From a
-terminal it's the same, with every question asked there: `./install spotify`,
-`./install siriusxm`, `./install apple-music`, and `./install --remove spotify`
-and so on.
+and **Remove…**, which removes the source and configuration, accounts and keys included.
 
-**Apple Music** also needs the bridge on a Mac: clone omarock there too and run
-`./install` on the Mac first.
+**Apple Music** also needs a bridge running on a Mac: clone omarock on your Mac and run
+`./install` there first.
 
-**omarock's sound output** (also in the settings, optional) sends everything
+**omarock's sound output** (also in settings, optional but highly recommended) sends everything
 omarock plays into one output you pick, with one volume, and never anywhere
 else. Most don't need it; it matters if some output must never carry music.
 
-Keep the clone: the plugin and the services install from it. When the plugin
-has a newer version of a service than the one running, its settings offer
+If you keep your plugin up to date with `omarchy plugin update mre.omarock`, when the plugin
+detects a newer version of a service than the one running, its settings offer
 **Update…**, and its tab is marked •.
 
-**Using Claude Code?** Open the clone in it and ask it to set omarock up. Its
+
+## Get Rocking
+
+If you accepted the keybinding at install, `Super+Ctrl+M` will open up omarock and the rest I'm sure you can figure out.  If you like, you can read the entirely claude-generated **Using Omarock** and **Settings** sections below, but I doubt you need to.
+
+
+## Install by hand (not recommended)
+
+
+**Using Claude Code?** Run claude in the clone directory and ask it to set omarock up. Its
 `omarock-setup` skill knows the steps and the usual snags, and checks before it
 changes anything.
 
-To do it by hand instead, follow the three steps below.
+To install omarock by hand instead, follow the three steps below.
 
 ### 1. mpd
 
