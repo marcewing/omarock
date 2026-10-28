@@ -182,7 +182,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.5"
+  readonly property string version: "0.11.6"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -1219,14 +1219,37 @@ Panel {
   }
 
   // A year (0: off), kept in settings.json. The queue's songs from after it
-  // come out of it, as the picker warned.
+  // come out of it, as the picker warned, and its Top 100 is looked up.
   function pickYear(year) {
     root.closeYearPicker()
     if (year === root.timeYear) return
     root.saveSetting("timeMachineYear", year)
     root.say(year > 0 ? "Time Machine: " + year + ". Only music from then or before; "
       + TimeMachine.chartName(year) + " (T) has its chart" : "Time Machine is off: all your music again")
-    if (year > 0) root.keepQueueInYear(true)
+    charts.stopOthers(year)
+    if (year > 0) {
+      root.keepQueueInYear(true)
+      root.preloadTop100(year)
+    }
+  }
+
+  // The year's chart and its songs on chartService, looked up in the
+  // background as soon as the year is picked, so T opens with them (Marc,
+  // 10-28): Spotify's take a minute or two, as omarock-spotify paces them.
+  function preloadTop100(year) {
+    var target = root.chartService === "apple" ? apple : root.chartService === "spotify" ? spotify : null
+    charts.chart(year, function(chart) {
+      if (chart && target) root.findChartSongs(year, target, function() {})
+    })
+  }
+
+  // charts.findSongs once target answers; failed(error) if it doesn't.
+  function findChartSongs(year, target, failed) {
+    if (target.ready) charts.findSongs(year, target)
+    else target.checkHealth(function(ok, error) {
+      if (ok) charts.findSongs(year, target)
+      else failed(error || "can't reach it")
+    })
   }
 
   // Time Machine keeps the queue to its year: songs from after it come out
@@ -1361,13 +1384,9 @@ Panel {
       root.showTop100(entry)
       done()
       if (!target) return
-      if (target.ready) charts.findSongs(entry.year, target)
-      else target.checkHealth(function(ok, healthError) {
-        if (ok) charts.findSongs(entry.year, target)
-        else {
-          entry.error = healthError || "can't reach it"
-          root.top100Changed()
-        }
+      root.findChartSongs(entry.year, target, function(error) {
+        entry.error = error
+        root.top100Changed()
       })
     })
   }

@@ -1,11 +1,13 @@
 import QtQuick
 import Quickshell.Io
 import "TimeMachine.js" as TimeMachine
+import "ChartStore.js" as Store
 
 // Time Machine's Top 100: Billboard's year-end chart, read from Wikipedia's
 // page for the year (TimeMachine.parseChart), and its songs found on Apple
 // Music or Spotify, a search for each (TimeMachine.bestMatch). Both are kept
-// in ~/.cache/omarock/charts, so a year looked up once opens at once.
+// in ~/.cache/omarock/charts, so a year looked up once opens at once, and
+// shared by the panels (ChartStore.js).
 Item {
   id: root
 
@@ -17,28 +19,24 @@ Item {
   property int parallel: 3
   property int spotifyParallel: 2
 
-  // year -> the chart, once read.
-  property var charts: ({})
-  // "service:year" -> { rank: the service's Song, or null for none }.
-  property var found: ({})
-  // "service:year" -> { looking, error, read (the cache was tried) }.
-  property var states: ({})
-
-  // Something new to show: a chart read, a song found.
+  // Something new to show: a chart read, a song found (in any panel).
   signal changed()
+
+  Component.onCompleted: Store.listen(root)
+  Component.onDestruction: Store.forget(root)
 
   readonly property string userAgent: "omarock (https://github.com/marcewing/omarock)"
 
-  function chartOf(year) { return root.charts[year] || [] }
-  function foundFor(service, year) { return root.found[service + ":" + year] || ({}) }
-  function stateOf(service, year) { return root.states[service + ":" + year] || ({}) }
+  function chartOf(year) { return Store.charts[year] || [] }
+  function foundFor(service, year) { return Store.found[service + ":" + year] || ({}) }
+  function stateOf(service, year) { return Store.states[service + ":" + year] || ({}) }
 
   // The chart for a year; callback(chart, error).
   function chart(year, callback) {
-    if (root.charts[year]) { callback(root.charts[year], ""); return }
+    if (Store.charts[year]) { callback(Store.charts[year], ""); return }
     root.readCache(year + ".json", function(data) {
       if (data && data.chart && data.chart.length > 0) {
-        root.charts[year] = data.chart
+        Store.charts[year] = data.chart
         callback(data.chart, "")
         return
       }
@@ -65,7 +63,7 @@ Item {
           : "Wikipedia said: " + (data.error.info || data.error.code))
       var chart = data && data.parse ? TimeMachine.parseChart(data.parse.wikitext) : []
       if (chart.length < 10) { callback(null, "Couldn't read " + year + "'s chart on Wikipedia (" + page + ")"); return }
-      root.charts[year] = chart
+      Store.charts[year] = chart
       root.writeCache(year + ".json", { page: page, chart: chart })
       callback(chart, "")
     }
@@ -80,33 +78,39 @@ Item {
   // yet, a few at a time; changed() as each is found.
   function findSongs(year, target) {
     var key = target.serviceKey + ":" + year
-    var state = root.states[key] || (root.states[key] = { looking: false, error: "", read: false })
-    if (state.looking) return
+    var state = Store.states[key] || (Store.states[key] = { looking: false, error: "", read: false })
+    if (state.looking) {
+      // Stopping for another year, and wanted again: on it goes.
+      state.stop = false
+      return
+    }
     var chart = root.chartOf(year)
     if (chart.length === 0) return
     state.looking = true
+    state.stop = false
+    state.owner = root
     state.error = ""
     function go() {
-      var have = root.found[key] || (root.found[key] = {})
+      var have = Store.found[key] || (Store.found[key] = {})
       var left = chart.filter(function(entry) { return have[entry.rank] === undefined })
       var running = 0
       var failures = 0
       if (left.length === 0) {
         state.looking = false
-        root.changed()
+        Store.tell()
         return
       }
-      root.changed()
+      Store.tell()
       function finished() {
         state.looking = false
         if (failures > 0) state.error = failures + " didn't answer: open it again to try them again"
         root.writeCache(key.replace(":", "-") + ".json", { found: have })
-        root.changed()
+        Store.tell()
       }
       function next() {
         // A plugin reload, mid-search.
         if (!root || typeof root.findSongs !== "function") return
-        if (left.length === 0) {
+        if (left.length === 0 || state.stop) {
           if (running === 0) finished()
           return
         }
@@ -116,7 +120,7 @@ Item {
           running--
           if (error !== "") failures++
           else have[entry.rank] = song ? TimeMachine.keep(song) : null
-          root.changed()
+          Store.tell()
           next()
         })
       }
@@ -126,13 +130,21 @@ Item {
     root.readFound(key, go)
   }
 
+  // Lookups for other years stop where they are, what they found kept:
+  // Time Machine's year changed (a year, or 0 for off), and only its chart
+  // shows.
+  function stopOthers(year) {
+    for (var key in Store.states)
+      if (key.split(":")[1] !== String(year) && Store.states[key].looking) Store.states[key].stop = true
+  }
+
   // What was found before, from the cache, once; then().
   function readFound(key, then) {
-    var state = root.states[key] || (root.states[key] = { looking: false, error: "", read: false })
+    var state = Store.states[key] || (Store.states[key] = { looking: false, error: "", read: false })
     if (state.read) { then(); return }
     root.readCache(key.replace(":", "-") + ".json", function(data) {
       if (!state.read && data && data.found) {
-        var have = root.found[key] || (root.found[key] = {})
+        var have = Store.found[key] || (Store.found[key] = {})
         for (var rank in data.found) if (have[rank] === undefined) have[rank] = data.found[rank]
       }
       state.read = true
@@ -147,7 +159,7 @@ Item {
     var key = service + ":" + year
     root.readFound(key, function() {
       var ids = {}
-      var have = root.found[key] || {}
+      var have = Store.found[key] || {}
       for (var rank in have) if (have[rank]) ids[have[rank].id] = true
       callback(ids)
     })

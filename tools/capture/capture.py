@@ -40,7 +40,7 @@ TOOLS = Path(__file__).resolve().parent
 PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "PlayerCard.qml", "SettingsView.qml",
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
-                "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartClient.qml", "YearPicker.qml",
+                "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
                 "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
@@ -4061,6 +4061,24 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("hide")
     host.call("open")
     wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    picked = len(bridge_requests("/v1/search"))
+
+    def chart_searches():
+        return sum(1 for r in map(json.loads, BRIDGE["log"].read_text().splitlines())
+                   if r["path"] == "/v1/search" and r["query"].get("background") == "1")
+    # Picking a year looks its chart's songs up at once; another year picked
+    # stops them where they are, and the first again goes on from there.
+    before = chart_searches()
+    fake_bridge_info(True, "slowsearch")
+    pick("1985")
+    wait_for(lambda: chart_searches() - before >= 2, "1985's chart looked up")
+    pick("1988")
+    host.settle(1.5)
+    stopped = chart_searches() - before
+    host.settle(1.5)
+    check(stopped < 12 and chart_searches() - before == stopped,
+          f"another year picked: 1985's lookups stop where they are ({stopped} of 12 asked)", failures)
+    fake_bridge_info(False, "slowsearch")
     pick("1985")
     host.call("setSource", "apple")
     wait_for(lambda: host.state()["appleMode"] and host.state()["appleReady"], "Apple Music")
@@ -4073,17 +4091,21 @@ def time_machine_scenario(host, output, socket_path, failures):
     host.call("back")
 
     # Apple Music's queue, as another device left it: 1989's songs either
-    # side of 1984's, the first playing. It moves on to 1984's, and 1989's go.
+    # side of 1984's, the first playing. It moves on to 1984's, and 1989's
+    # Sunspots goes; See a Little Light, a later version of a song on 1985's
+    # chart (looked up as 1985 was picked), stays.
     def songs(*ids): return [{"kind": "song", "id": i, "source": "catalog"} for i in ids]
     request = urllib.request.Request(f"http://127.0.0.1:{BRIDGE['port']}/v1/play", method="POST",
                                      data=json.dumps({"items": songs("c-so-8", "c-so-1", "c-so-9", "c-so-11"), "mode": "play"}).encode(),
                                      headers={"Authorization": "Bearer fake-bridge-token", "Content-Type": "application/json"})
+    removes = len(bridge_requests("/v1/queue/remove"))
     urllib.request.urlopen(request, timeout=5).read()
-    wait_for(lambda: host.state()["rows"] == ["queue:Something I Learned Today", "queue:Keep On Loving You"],
-             "Apple Music's queue to 1985")
-    removed = [b["index"] for _, _, b in bridge_requests("/v1/queue/remove")]
-    check(host.state()["nowPlaying"].startswith("Something I Learned Today") and removed[-2:] == [2, 0],
-          "Apple Music's queue: past 1989's song playing to 1984's, and 1989's taken out, the last first: " + str(removed), failures)
+    wait_for(lambda: host.state()["rows"] == ["queue:Something I Learned Today", "queue:See a Little Light",
+                                              "queue:Keep On Loving You"], "Apple Music's queue to 1985")
+    removed = [b["index"] for _, _, b in bridge_requests("/v1/queue/remove")][removes:]
+    check(host.state()["nowPlaying"].startswith("Something I Learned Today") and removed == [0],
+          "Apple Music's queue: past 1989's song playing to 1984's, it taken out, and the chart's song kept: " + str(removed),
+          failures)
     to_source(host, "local")
 
     # Spotify's queue can't be changed: a later song playing is skipped.
@@ -4103,7 +4125,7 @@ def time_machine_scenario(host, output, socket_path, failures):
     wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1985" and len(host.state()["rows"]) == 14, "the Top 100")
     wait_for(lambda: "found on Apple Music" in host.state()["subtitles"][0], "its songs looked up")
     s = host.state()
-    asked = chart_requests()[-1]
+    asked = [r for r in chart_requests() if r["query"].get("page", "").endswith("1985")][-1]
     check(asked["query"].get("page") == "Billboard Year-End Hot 100 singles of 1985" and asked["agent"].startswith("omarock"),
           "T reads Billboard's chart from Wikipedia, saying who's asking: " + json.dumps(asked["query"].get("page")), failures)
     check(s["rows"][:7] == ["playtop:Play the Top 100", "shuffletop:Shuffle the Top 100", "track:New Day Rising",
@@ -4112,10 +4134,13 @@ def time_machine_scenario(host, output, socket_path, failures):
           and s["subtitles"][0] == "5 of 12 found on Apple Music" and s["lookup"] == "apple" and s["cursor"] == 0
           and s["subtitles"][3] == "Hüsker Dü · New Day Rising" and s["subtitles"][5].endswith("not on Apple Music"),
           "its songs found on Apple Music, or not, the cursor on Play: " + ", ".join(s["rows"][:7]) + " | " + s["subtitles"][0], failures)
-    chart = [r["query"] for r in map(json.loads, BRIDGE["log"].read_text().splitlines()) if r["path"] == "/v1/search"][searches:]
-    check(len(chart) >= 12 and all(q.get("background") == "1" for q in chart),
-          f"the chart's {len(chart)} searches can wait their turn (background=1): omarock-spotify paces them", failures)
-    check(len(bridge_requests("/v1/search")) - searches >= 12, "a search for each song", failures)
+    asked = [r["query"] for r in map(json.loads, BRIDGE["log"].read_text().splitlines()) if r["path"] == "/v1/search"]
+    preloaded = [q for q in asked[picked:searches] if q.get("background") == "1"]
+    check(len(preloaded) >= 12 and not asked[searches:],
+          f"picking 1985 looked its chart's songs up at once ({len(preloaded)} searches), and T asked nothing more: "
+          + str(len(asked[searches:])), failures)
+    check(all(q.get("background") == "1" for q in preloaded),
+          "the chart's searches can wait their turn (background=1): omarock-spotify paces them", failures)
     check(s["levelButtons"]["current"][:4] == ["[Play]", "Shuffle", "Add to queue", "Add to playlist"],
           "the chart's buttons, the cursor on Play: " + str(s["levelButtons"]["current"]), failures)
     host.grab(output / "compact-top100.png")

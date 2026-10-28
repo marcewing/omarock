@@ -286,8 +286,10 @@ stay until you remove them too.
   - **Top 100** (or `T`), beside Playlists: Billboard's year-end Hot 100 for the
     year, from Wikipedia (a top 50 for 1956–58, a top 30 for 1949–55). omarock
     finds each song on Apple Music or Spotify: the one playing, else the
-    `lookup` setting's. Enter plays the chart from that song; the Play button
-    plays it all, and Shuffle plays it in an order of its own. The
+    `lookup` setting's. It starts in the background as soon as you pick the
+    year, so the chart is usually ready by the time you open it. Enter plays
+    the chart from that song; the Play button plays it all, and Shuffle plays
+    it in an order of its own. The
     Mac can take ten seconds or more to load a hundred songs: the chart stays,
     saying so, until they play. A chart's songs stay in the queue even where
     the version found is a later one. What it found is kept in
