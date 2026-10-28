@@ -30,6 +30,15 @@ Rectangle {
     flick.contentY = Math.max(0, Math.min(most, flick.contentY + dy * Style.space(48)))
   }
 
+  readonly property real scrolled: flick.contentY
+
+  // PgUp and PgDn: a page, keeping a line of the last in view.
+  function page(direction) {
+    var most = Math.max(0, flick.contentHeight - flick.height)
+    var step = Math.max(Style.space(48), flick.height - Style.space(48))
+    flick.contentY = Math.max(0, Math.min(most, flick.contentY + direction * step))
+  }
+
   onInfoChanged: if (!root.loading) flick.contentY = 0
 
   // Opaque, in the card's own colour, so the panel underneath doesn't show.

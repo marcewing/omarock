@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Mpd.js" as Mpd
+import "Paging.js" as Paging
 
 // Add to a playlist: a card over the panel. Type to find a playlist or to
 // name a new one; ↑↓ choose, Enter adds, Esc cancels. The playlist changed
@@ -44,6 +45,13 @@ Item {
   function move(delta) {
     root.index = Math.max(0, Math.min(root.choices.length - 1, root.index + delta))
     root.newChosen = root.choices[root.index].isNew
+  }
+
+  // PgUp and PgDn: to the first or last playlist in full view, then a page on.
+  function page(direction) {
+    var rows = Paging.shown(Paging.listBoxes(list), list.contentY, list.contentY + list.height)
+    var to = Paging.page(root.index, root.choices.length, rows, direction)
+    if (to >= 0) root.move(to - root.index)
   }
 
   function pick(i) {
@@ -151,6 +159,8 @@ Item {
             root.move(1)
           } else if (event.key === Qt.Key_Up) {
             root.move(-1)
+          } else if (event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp) {
+            root.page(event.key === Qt.Key_PageDown ? 1 : -1)
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             root.pick(root.index)
           } else if (event.key !== Qt.Key_Tab && event.key !== Qt.Key_Backtab) {

@@ -13,6 +13,7 @@ import "Info.js" as Info
 import "Settings.js" as Settings
 import "Setup.js" as Setup
 import "Hints.js" as Hints
+import "Paging.js" as Paging
 import "TimeMachine.js" as TimeMachine
 import "Keeper.js" as Keeper
 import "History.js" as History
@@ -182,7 +183,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.7"
+  readonly property string version: "0.11.8"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -202,6 +203,8 @@ Panel {
   property var albumCoverFiles: ({})
   property var searchField: null
   property var listView: null
+  // The TrackList the keys move in, showing: PgUp and PgDn page through it.
+  property var pageList: null
   readonly property alias picker: playlistPicker
   readonly property alias yearPicker: yearPicker
 
@@ -2639,6 +2642,26 @@ Panel {
     root.cursorIndex = index
   }
 
+  // PgUp and PgDn: to the first or last row in full view, then a page on
+  // (Paging.js). Without a cursor, it starts where ↓ would put it.
+  function pageCursor(direction) {
+    if (root.rows.length === 0) return
+    if (!root.cursorActive) root.moveCursor(direction)
+    var list = root.pageList
+    root.cursorIndex = list ? list.pageFrom(root.cursorIndex, direction)
+      : Paging.page(root.cursorIndex, root.rows.length, null, direction)
+  }
+
+  // PgUp and PgDn on whatever shows. In the now playing card, PgDn goes
+  // back down to the list.
+  function pageBy(direction) {
+    if (root.settingsOpen) settingsView.page(direction)
+    else if (root.infoOpen) infoView.page(direction)
+    else if (root.keysOpen) keysView.page(direction)
+    else if (root.cardFocus !== "") { if (direction > 0) root.leaveCard(true) }
+    else root.pageCursor(direction)
+  }
+
   // mode "open" is Enter or a click: it opens an artist or album and plays
   // anything else. "play" replaces the queue; "add" appends to it.
   function activateRow(index, mode) {
@@ -3737,7 +3760,10 @@ Panel {
           else if (dx < 0) root.closeInfo()
           return
         }
-        if (root.keysOpen) return
+        if (root.keysOpen) {
+          if (dy !== 0) keysView.stepBy(dy)
+          return
+        }
         if (root.cardFocus !== "") { root.moveInCard(dx, dy); return }
         // ↑ from the top of the list: up into the now playing card.
         if (dy < 0 && (root.rows.length === 0 || (root.cursorActive && root.cursorIndex === 0)) && root.enterCard()) return
@@ -3768,6 +3794,11 @@ Panel {
         else if (root.bar && typeof root.bar.switchPanelFrom === "function") root.bar.switchPanelFrom(root.barIdentity, direction)
       }
       onTextKey: function(text) {
+        // e expands or compacts whatever shows.
+        if (text === "e" && (root.settingsOpen || root.infoOpen || root.keysOpen)) {
+          root.expanded = !root.expanded
+          return
+        }
         if (root.settingsOpen) {
           if (text === ",") root.closeSettings()
           else if (text === "+" || text === "=") settingsView.adjust(1)
@@ -3782,6 +3813,16 @@ Panel {
         if (root.keysOpen && text === "w") root.openKeysWindow()
         if (root.keysOpen && text !== "?") return
         root.handleText(text)
+      }
+      // PgUp and PgDn, which the catcher passes on (it has no signal for
+      // them): a page through the list, the settings, the info card or the
+      // keys.
+      Keys.onPressed: function(event) {
+        if (keyCatcher.blocked || event.accepted) return
+        var direction = event.key === Qt.Key_PageDown ? 1 : event.key === Qt.Key_PageUp ? -1 : 0
+        if (direction === 0) return
+        root.pageBy(direction)
+        event.accepted = true
       }
 
       // The whole card, padding included.
@@ -3810,6 +3851,8 @@ Panel {
       }
 
       KeysHelp {
+        id: keysView
+        objectName: "keysHelp"
         anchors.fill: parent
         visible: root.keysOpen
         foreground: root.foreground
@@ -4150,6 +4193,26 @@ Panel {
     property string shownKey: ""
     // The rows its heading shows as buttons (root.buttonRows), left out here.
     readonly property int buttonRows: root.buttonRows(listRoot.model)
+    // The list the keys move in, while it shows: PgUp and PgDn page here.
+    readonly property bool paging: listRoot.role === "current" && listRoot.visible
+    onPagingChanged: listRoot.claimPaging()
+    Component.onCompleted: listRoot.claimPaging()
+    Component.onDestruction: if (root && root.pageList === listRoot) root.pageList = null
+    function claimPaging() {
+      if (listRoot.paging) root.pageList = listRoot
+      else if (root.pageList === listRoot) root.pageList = null
+    }
+    readonly property real scrolled: list.contentY
+    readonly property bool atTop: list.atYBeginning
+    // The rows in full view, { first, last }, or null.
+    function shownRows() {
+      var boxes = Paging.listBoxes(list, function(item) { return item.rowTop })
+      return Paging.shown(boxes, list.contentY, list.contentY + list.height)
+    }
+    // Where PgUp or PgDn takes the cursor from cursor (Paging.js).
+    function pageFrom(cursor, direction) {
+      return Paging.page(cursor, list.count, listRoot.shownRows(), direction)
+    }
     onMarkIndexChanged: Qt.callLater(listRoot.keepMarkVisible)
     // Not the row under the pointer: the pointer put the cursor there, and
     // scrolling a row half off the edge into view moved the list under the
@@ -4229,6 +4292,8 @@ Panel {
         // The row, read by index (the model is the count).
         readonly property var modelData: listRoot.model[entryColumn.index] || ({})
         readonly property bool pointerOver: trackRow.pointerOver
+        // Where the row starts, under its section's title.
+        readonly property real rowTop: trackRow.y
         readonly property bool asButton: entryColumn.index < listRoot.buttonRows
         onModelDataChanged: root.requestCover(entryColumn.modelData)
         Component.onCompleted: root.requestCover(entryColumn.modelData)

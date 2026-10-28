@@ -24,14 +24,24 @@ Rectangle {
     flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY + dy))
   }
 
+  // ↑↓ (or j k) a line, PgUp PgDn a page: in the window, and from the panel.
+  function stepBy(dy) {
+    root.scroll(dy * Style.space(40))
+  }
+
+  function page(direction) {
+    root.scroll(direction * (flick.height - Style.space(40)))
+  }
+
+  readonly property real scrolled: flick.contentY
+
   Keys.enabled: root.windowed
   Keys.onPressed: function(event) {
-    var step = Style.space(40)
     if (event.key === Qt.Key_Escape || event.text === "q" || event.text === "?") root.closeRequested()
-    else if (event.key === Qt.Key_Down || event.text === "j") root.scroll(step)
-    else if (event.key === Qt.Key_Up || event.text === "k") root.scroll(-step)
-    else if (event.key === Qt.Key_PageDown || event.key === Qt.Key_Space) root.scroll(flick.height - step)
-    else if (event.key === Qt.Key_PageUp) root.scroll(step - flick.height)
+    else if (event.key === Qt.Key_Down || event.text === "j") root.stepBy(1)
+    else if (event.key === Qt.Key_Up || event.text === "k") root.stepBy(-1)
+    else if (event.key === Qt.Key_PageDown || event.key === Qt.Key_Space) root.page(1)
+    else if (event.key === Qt.Key_PageUp) root.page(-1)
     else if (event.key === Qt.Key_Home) flick.contentY = 0
     else if (event.key === Qt.Key_End) root.scroll(flick.contentHeight)
     else return
@@ -49,6 +59,7 @@ Rectangle {
     ] },
     { title: "LISTS", keys: [
       ["↑  ↓", "Move through the list (or j k)"],
+      ["PgUp  PgDn", "A page up or down the list (in the settings, the info card and these keys too)"],
       ["→  Enter", "Open an artist, album, genre or playlist (or l)"],
       ["←  Esc  ⌫", "Go back a level (or h)"],
       ["Enter", "Play a song: from search it replaces the queue; in an album or playlist it plays from that song"],
@@ -80,7 +91,7 @@ Rectangle {
     ] },
     { title: "PANEL", keys: [
       ["m", "Next source: local music, Apple Music, Spotify, SiriusXM, the radio (the ones set up)"],
-      ["e", "Expand or compact"],
+      ["e", "Expand or compact (in the settings, the info card and these keys too)"],
       [",", "Settings, on tabs: omarock's own, then Apple Music, SiriusXM, Spotify and the sound output (Tab goes between them)"],
       ["?", "Show or hide these keys"],
       ["w", "With the keys showing: keep them open in a window of their own"],

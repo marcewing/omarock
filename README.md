@@ -315,8 +315,8 @@ stay until you remove them too.
   Spotify and Apple Music, whether it's in your library. For a local song: its
   tags, format, average bitrate, size and path.
 - **Keys** do what you'd guess: Space play/pause, `/` search, arrows to move,
-  open and go back, Shift+←/→ to seek, `n`/`p`, `+`/`-`, `m` the next source, `,`
-  settings, `?` for the full list.
+  open and go back, PgUp/PgDn a page, Shift+←/→ to seek, `n`/`p`, `+`/`-`, `m`
+  the next source, `e` expand or compact, `,` settings, `?` for the full list.
   - **The hint line** under the list shows the keys that work where you are: on
     the row under the cursor, or in the search box while you type. It never
     changes the panel's height. When there are too many for it, the least used

@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Settings.js" as Settings
+import "Paging.js" as Paging
 
 // The settings (the gear, or ,): omarock's settings (Settings.js), on tabs
 // (omarock's own, then one for each piece set up on its own), in groups, each
@@ -143,6 +144,25 @@ Rectangle {
     if (item.y < flick.contentY) flick.contentY = Math.max(0, item.y - Style.space(30))
     else if (item.y + item.height > flick.contentY + flick.height)
       flick.contentY = Math.min(flick.contentHeight - flick.height, item.y + item.height - flick.height + Style.space(8))
+  }
+
+  readonly property real scrolled: flick.contentY
+
+  // The rows in full view, { first, last }, or null.
+  function shownRows() {
+    var boxes = []
+    for (var i = 0; i < root.rows.length; i++) {
+      var item = repeater.itemAt(i)
+      if (item) boxes.push({ index: i, y: item.y + item.rowTop, height: item.height - item.rowTop })
+    }
+    return Paging.shown(boxes, flick.contentY, flick.contentY + flick.height)
+  }
+
+  // PgUp and PgDn: to the first or last row in full view, then a page on.
+  function page(direction) {
+    if (root.editing !== "") return
+    var to = Paging.page(root.cursor, root.rows.length, root.shownRows(), direction)
+    if (to >= 0) root.move(to - root.cursor)
   }
 
   // Space or Enter on the cursor's row.
@@ -299,6 +319,8 @@ Rectangle {
           readonly property var value: root.valueOf(row.key)
           readonly property var note: root.notes[row.key] || null
           readonly property bool current: root.cursor === index
+          // Where the row starts, under its section's rule and heading.
+          readonly property real rowTop: rowBox.y
           width: content.width
           spacing: Style.space(2)
 
@@ -338,6 +360,7 @@ Rectangle {
           }
 
           Rectangle {
+            id: rowBox
             width: parent.width
             height: Math.max(labels.implicitHeight, control.height) + Style.space(12)
             radius: Style.cornerRadius

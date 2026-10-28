@@ -41,7 +41,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
-                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml",
+                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -284,6 +284,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     hints_scenario(host, output, failures)
     list_tuning_scenario(host, failures)
     hover_scroll_scenario(host, failures)
+    paging_scenario(host, output, failures)
     search_covers_scenario(host, failures)
     history_scenario(host, output, socket_path, failures)
     scrolling_scenario(host, output, socket_path, failures)
@@ -3827,6 +3828,178 @@ def hover_scroll_scenario(host, failures):
               f"then {key} scrolls to row {after['cursor']} ({s['listY']} -> {after['listY']})", failures)
 
 
+def page_sweep(host, what, get, failures):
+    """PgDn to the end, then PgUp to the top, each press checked against
+    Paging.js's rule: the cursor to the last (first) row in full view, else a
+    page on, and in full view after. get(state) is (cursor, rows in full
+    view, scroll, count, scrolled to the top)."""
+    scrolled = False
+    for key, direction in (("PageDown", 1), ("PageUp", -1)):
+        end = get(host.state())[3] - 1 if direction > 0 else 0
+        for _ in range(get(host.state())[3] + 1):
+            cursor, shown, scroll, count, _ = get(host.state())
+            if cursor == end: break
+            if not shown:
+                check(False, f"{what}: rows in full view, to page through", failures)
+                return
+            edge = shown["last"] if direction > 0 else shown["first"]
+            want = edge if (edge - cursor) * direction > 0 else cursor + direction * max(1, shown["last"] - shown["first"])
+            want = max(0, min(count - 1, want))
+            host.call("press", key)
+            host.settle(.35)
+            after = get(host.state())
+            if after[0] != want or not after[1] or not after[1]["first"] <= want <= after[1]["last"]:
+                check(False, f"{what}: {key} from {cursor} (in view {shown}) goes to {want}, in full view: "
+                      f"got {after[0]} (in view {after[1]})", failures)
+                return
+            scrolled = scrolled or after[2] != scroll
+        check(get(host.state())[0] == end, f"{what}: {key} again and again goes to row {end}", failures)
+    check(scrolled, f"{what}: the list follows a page at a time", failures)
+    check(get(host.state())[4], f"{what}: back at the top ({get(host.state())[2]})", failures)
+
+
+def paging_scenario(host, output, failures):
+    """Marc, 10-28: "can we make 'e' work in the setting panel, and also can
+    we make pgup and pgdn work in settings and in any panel list?" PgDn takes
+    the cursor to the last row in full view, then a page on, the list
+    following; PgUp the same way back. In both panels' lists, the expanded
+    panel's columns, the settings and the playlist picker; the info card and
+    the keys page scroll a page. e expands and compacts the settings, the
+    info card and the keys page as it does the rest."""
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.call("expand", "false")
+    to_source(host, "sxm")
+    wait_for(lambda: host.state()["sxmMode"] and len(host.state()["rows"]) > 20, "sxm's channels")
+    reopen(host)
+    host.hover(4, 4)
+    the_list = lambda s: (s["cursor"], s["paging"]["list"], s["paging"]["listY"], len(s["rows"]), s["paging"]["listTop"])
+    host.call("press", "PageDown")
+    host.settle(.35)
+    check(host.state()["cursor"] >= 0, "PgDn with no cursor puts one on the list", failures)
+    page_sweep(host, "the compact panel's list", the_list, failures)
+
+    # The card: PgDn goes back down to the list. (It has links only while
+    # something with an artist or a song plays; in the full run, at this
+    # point, a channel may have none.)
+    if host.state()["cardLinks"]:
+        host.call("press", "Up")
+        host.settle(.2)
+        check(host.state()["cardFocus"] != "", "↑ from the top goes up into the card", failures)
+        host.call("press", "PageUp")
+        host.settle(.2)
+        check(host.state()["cardFocus"] != "", "in the now playing card, PgUp stays there", failures)
+        host.call("press", "PageDown")
+        host.settle(.3)
+        check(host.state()["cardFocus"] == "" and host.state()["cursor"] == 0, "PgDn goes back down to the list", failures)
+
+    # The keys page: a page, a line, and e.
+    host.call("press", "?")
+    wait_for(lambda: host.state()["keysOpen"], "the keys page")
+    host.settle(.2)
+    host.call("press", "PageDown")
+    host.settle(.2)
+    paged = host.state()["paging"]["keysY"]
+    host.call("press", "Down")
+    host.settle(.2)
+    lined = host.state()["paging"]["keysY"]
+    check(paged > 100 and lined > paged, f"the keys page: PgDn scrolls a page ({paged}), ↓ a line more ({lined})", failures)
+    host.call("press", "PageUp")
+    host.call("press", "PageUp")
+    host.settle(.2)
+    check(host.state()["paging"]["keysY"] == 0, "PgUp goes back up the keys page", failures)
+    host.call("press", "e")
+    wait_for(lambda: host.state()["expanded"], "e on the keys page expands")
+    check(host.state()["keysOpen"], "e on the keys page expands it, still open", failures)
+    host.call("press", "e")
+    wait_for(lambda: not host.state()["expanded"], "and compacts")
+    host.call("press", "?")
+    wait_for(lambda: not host.state()["keysOpen"], "the keys page closed")
+
+    # The info card: e, and PgDn doesn't close it.
+    host.call("press", "i")
+    wait_for(lambda: host.state()["info"] is not None, "the info card")
+    host.call("press", "PageDown")
+    host.settle(.2)
+    check(host.state()["info"] is not None and host.state()["paging"]["infoY"] >= 0, "PgDn in the info card scrolls it, open", failures)
+    host.call("press", "e")
+    wait_for(lambda: host.state()["expanded"], "e on the info card expands")
+    check(host.state()["info"] is not None, "e in the info card expands it, still open", failures)
+    host.grab(output / "expanded-info-e.png")
+    host.call("press", "e")
+    wait_for(lambda: not host.state()["expanded"], "and compacts")
+    host.call("press", "Escape")
+    wait_for(lambda: host.state()["info"] is None, "the info card closed")
+
+    # The settings: a page at a time, and e.
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "the settings")
+    host.settle(.3)
+    the_settings = lambda s: (s["settingsCursor"], s["paging"]["settings"], s["paging"]["settingsY"], len(s["settingsRows"]),
+                              s["paging"]["settingsY"] <= 1)
+    page_sweep(host, "the settings", the_settings, failures)
+    host.call("press", "Down")
+    host.call("press", "Down")
+    host.settle(.2)
+    before = host.state()
+    host.call("press", "e")
+    wait_for(lambda: host.state()["expanded"], "e in the settings expands")
+    after = host.state()
+    check(after["settingsOpen"] and after["settingsTab"] == before["settingsTab"] and after["settingsCursor"] == before["settingsCursor"],
+          f"e in the settings expands them, on the same tab and row ({before['settingsCursor']} -> {after['settingsCursor']})", failures)
+    host.grab(output / "expanded-settings-e.png")
+    host.call("press", "PageDown")
+    host.settle(.3)
+    s = host.state()
+    shown = s["paging"]["settings"]
+    check(shown is not None and s["settingsCursor"] in (shown["last"], len(s["settingsRows"]) - 1),
+          f"PgDn in the expanded settings: to the last row in view ({s['settingsCursor']}, {shown})", failures)
+    host.call("press", "e")
+    wait_for(lambda: not host.state()["expanded"], "e in the settings compacts")
+    check(host.state()["settingsOpen"], "and compacts them, still open", failures)
+    host.call("press", ",")
+    wait_for(lambda: not host.state()["settingsOpen"], "the settings closed")
+
+    # The expanded panel: its list, then the results' column.
+    host.call("press", "e")
+    wait_for(lambda: host.state()["expanded"], "expanded")
+    reopen(host)
+    host.hover(4, 4)
+    host.call("press", "Down")
+    host.settle(.3)
+    page_sweep(host, "the expanded panel's list", the_list, failures)
+    host.call("press", "/")
+    host.call("type", "deep")
+    wait_for(lambda: host.state()["columns"] and len(host.state()["rows"]) > 12 and not host.state()["searching"], "results for deep")
+    host.call("press", "Down")
+    host.settle(.4)
+    page_sweep(host, "the results' column", the_list, failures)
+    host.call("press", "Escape")
+    host.call("expand", "false")
+
+    # The playlist picker, on a local song.
+    to_source(host, "local")
+    host.call("press", "/")
+    host.call("type", "glass")
+    wait_for(lambda: any(r.startswith("song:") for r in host.state()["rows"]) and not host.state()["searching"], "songs for glass")
+    host.call("press", "Down")
+    rows = host.state()["rows"]
+    for _ in range(next(i for i, r in enumerate(rows) if r.startswith("song:"))): host.call("press", "Down")
+    host.call("press", "A")
+    wait_for(lambda: host.state()["pickerOpen"], "the playlist picker")
+    choices = len(host.state()["pickerChoices"])
+    host.call("press", "PageDown")
+    host.settle(.3)
+    at = host.state()["pickerIndex"]
+    host.call("press", "PageUp")
+    host.settle(.3)
+    check(choices > 1 and at > 0 and host.state()["pickerIndex"] == 0,
+          f"the playlist picker: PgDn down its {choices} choices (to {at}), PgUp back to the first", failures)
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["pickerOpen"], "the picker closed")
+    host.call("close")
+
+
 def scrolling_scenario(host, output, socket_path, failures):
     """Marc, 10-26: "an option to scroll long song names in the bar ... We
     should scroll them in the panels automatically, no option." On the bar a
@@ -5373,6 +5546,7 @@ def main():
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "scrolling": scrolling_scenario(host, output, socket_path, failures)
                             elif name == "hover-scroll": hover_scroll_scenario(host, failures)
+                            elif name == "paging": paging_scenario(host, output, failures)
                             elif name == "search-covers": search_covers_scenario(host, failures)
                             elif name == "history": history_scenario(host, output, socket_path, failures)
                             elif name == "time-machine": time_machine_scenario(host, output, socket_path, failures)

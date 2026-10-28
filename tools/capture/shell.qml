@@ -180,7 +180,8 @@ ShellRoot {
 
   readonly property var keyNames: ({
     Return: Qt.Key_Return, Escape: Qt.Key_Escape, Backspace: Qt.Key_Backspace, Space: Qt.Key_Space,
-    Up: Qt.Key_Up, Down: Qt.Key_Down, Left: Qt.Key_Left, Right: Qt.Key_Right, Tab: Qt.Key_Tab
+    Up: Qt.Key_Up, Down: Qt.Key_Down, Left: Qt.Key_Left, Right: Qt.Key_Right, Tab: Qt.Key_Tab,
+    PageUp: Qt.Key_PageUp, PageDown: Qt.Key_PageDown
   })
 
   component Api: PluginBarApi {
@@ -360,6 +361,17 @@ ShellRoot {
         settingsRows: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key }) : [],
         settingsAllRows: p.settingsOpen ? host.settingsView().allRows.map(function(r) { return r.key }) : [],
         settingsTab: p.settingsOpen ? host.settingsView().tab : "",
+        // PgUp and PgDn: the rows in full view and the scroll, of the list
+        // the keys move in and of the settings; the keys page's and the
+        // info card's scroll.
+        paging: { list: p.pageList ? p.pageList.shownRows() : null, listY: p.pageList ? Math.round(p.pageList.scrolled) : -1,
+          listTop: p.pageList ? p.pageList.atTop : false,
+          settings: p.settingsOpen ? host.settingsView().shownRows() : null,
+          settingsY: p.settingsOpen ? Math.round(host.settingsView().scrolled) : -1,
+          keysY: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "keysHelp")
+            ? Math.round(host.findNamed(popup().contentItem[0].parent.parent, "keysHelp").scrolled) : -1,
+          infoY: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "infoCard")
+            ? Math.round(host.findNamed(popup().contentItem[0].parent.parent, "infoCard").scrolled) : -1 },
         // The tabs as shown, a marked one with its •.
         settingsTabs: p.settingsOpen ? host.settingsTabs() : [],
         // Each row's key, type and button, on every tab: "spotify:action:Set up…".
