@@ -411,6 +411,7 @@ change saves at once.
 | `history` | on | Keep History (`H`): what you've played here, from every source |
 | `historyDays` | 7 | How many days History keeps (1 to 90) |
 | `timeMachine` | off | Time Machine's button at the top, and its Top 100 |
+| `topSongs` | At the top | Where an artist's top songs go on Apple Music's and Spotify's artist pages: `At the top` or `At the bottom` (Play top songs stays at the top) |
 | `closeOnLeave` | on | Close the panel when the pointer leaves it |
 | `maxLabelWidth` | 300 | How wide the song gets on the bar, in pixels |
 | `scrollBarSong` | off | A song wider than that scrolls on the bar now and then, instead of ending in … (in the panel a long song always scrolls) |
