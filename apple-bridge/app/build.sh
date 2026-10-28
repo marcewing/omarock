@@ -65,13 +65,28 @@ unregister_agent() {
   is-at-least 0.5.1 $version && "$app/Contents/MacOS/OmarockBridge" --unregister || true
 }
 
+# launchd's state for a job ("running", "not running"), empty if it has no such job.
+job_state() { launchctl print gui/$UID/$1 2>/dev/null | sed -n $'s/^\tstate = //p'; }
+
+# Starts the launch agent's job and waits for launchd to run it, asking once more if not.
+start_agent() {
+  local try i
+  for try in 1 2; do
+    launchctl kickstart gui/$UID/$1 || true
+    for i in {1..30}; do [[ $(job_state $1) == running ]] && return 0; sleep 0.1; done
+  done
+  print "  ${red}✗${reset} launchd didn't start it: try launchctl kickstart gui/\$UID/$1"
+}
+
 # Stops the running bridge (and so its Icecast); true if the launch agent ran it.
 stop_bridge() {
   local label=$1
   if launchctl print gui/$UID/$label >/dev/null 2>&1; then
-    # Stop it cleanly, so KeepAlive (restarts after a crash only) leaves it stopped.
+    # Stop it cleanly, so KeepAlive (restarts after a crash only) leaves it stopped. Then
+    # wait for launchd, not only the process: until launchd has seen it exit, a kickstart
+    # does nothing, and the new build never starts.
     launchctl kill TERM gui/$UID/$label || true
-    for i in {1..50}; do pgrep -x OmarockBridge >/dev/null || break; sleep 0.1; done
+    for i in {1..100}; do [[ $(job_state $label) == running ]] || break; sleep 0.1; done
     return 0
   fi
   # A copy opened by hand, from the installed app only (never another bridge).
@@ -191,7 +206,7 @@ if [[ $mode == --run || $mode == --run-now ]]; then
   }
   if stop_bridge $label; then
     swap_in
-    launchctl kickstart gui/$UID/$label
+    start_agent $label
   else
     swap_in
     # Opened through LaunchServices: it registers its launch agent and hands over to it.
