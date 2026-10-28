@@ -375,7 +375,7 @@ step_build() {
   label=$(xc_value OMAROCK_BUNDLE_ID)
   team=$(xc_value DEVELOPMENT_TEAM)
   if [[ ! -d $app ]]; then
-    explain "This builds the bridge (a few minutes), signs it as $label, installs it in ~/Applications and starts it. It starts at login from then on, in the background, with no Dock icon."
+    explain "This builds the bridge (a minute or so), signs it as $label, installs it in ~/Applications and starts it. It starts at login from then on, in the background, with no Dock icon."
     confirm "Build and install it?" || stopped
     why=new
   elif [[ $(installed_id) != "$label" || $(installed_team) != "$team" ]]; then

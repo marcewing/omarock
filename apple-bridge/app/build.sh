@@ -18,6 +18,33 @@ bundle_id() { sed -n 's/^OMAROCK_BUNDLE_ID *= *//p' Local.xcconfig 2>/dev/null |
 # The bundle ID of the app installed in ~/Applications, if any.
 installed_id() { /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null || true; }
 
+if [[ -t 1 ]]; then green=$'\e[32m' red=$'\e[31m' reset=$'\e[0m'; else green= red= reset=; fi
+# Minutes and seconds since $1 (a $SECONDS).
+clock() { local s=$(( SECONDS - $1 )); printf '%d:%02d' $(( s / 60 )) $(( s % 60 )); }
+# Runs a long command with its output in a log: on a terminal, a spinner and a clock
+# until it ends. Ctrl-C stops the command too. Returns its status.
+timed() {
+  local title=$1 log=$2 start=$SECONDS pid st=0 i=0
+  local -a frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  shift 2
+  "$@" >$log 2>&1 &
+  pid=$!
+  trap "pkill -TERM -P $pid 2>/dev/null; kill $pid 2>/dev/null; print; exit 130" INT TERM
+  if [[ -t 1 ]]; then
+    while kill -0 $pid 2>/dev/null; do
+      (( i = i % 10 + 1 ))
+      printf '\r  %s %s %s ' $frames[i] $title $(clock $start)
+      sleep 0.1
+    done
+    printf '\r\e[K'
+  else
+    print "  $title"
+  fi
+  wait $pid || st=$?
+  trap - INT TERM
+  return $st
+}
+
 # Listeners on the bridge's Icecast mount, from its admin stats (0 if Icecast isn't up).
 listeners() {
   local conf=$support/icecast.xml user pass
@@ -101,11 +128,24 @@ fi
 label=$(bundle_id)
 
 # 3. Build and sign
-xcodegen generate --quiet
-xcodebuild -project OmarockBridge.xcodeproj -scheme OmarockBridge -configuration Release \
-  -destination "platform=macOS,arch=$(uname -m)" -derivedDataPath build -quiet build
+compile() {
+  xcodegen generate --quiet &&
+    xcodebuild -project OmarockBridge.xcodeproj -scheme OmarockBridge -configuration Release \
+      -destination "platform=macOS,arch=$(uname -m)" -derivedDataPath build build
+}
+mkdir -p build
+log=$PWD/build/build.log
+start=$SECONDS
+if ! timed "Building the bridge…" $log compile; then
+  print "  ${red}✗${reset} the build failed after $(clock $start). From its log, ${log/#$HOME/~}:"
+  errors=$(grep -E '(^|: )(fatal )?error: ' $log | awk '!seen[$0]++' | head -20 || true)
+  print -r -- "${errors:-$(tail -20 $log)}" | sed 's/^/    /'
+  exit 1
+fi
 built=$PWD/build/Build/Products/Release/OmarockBridge.app
-codesign -dv "$built" 2>&1 | grep -E '^(Identifier|TeamIdentifier)='
+signed=$(codesign -dv "$built" 2>&1 || true)
+print "  ${green}✓${reset} built in $(clock $start), signed as $(sed -n 's/^Identifier=//p' <<<$signed)" \
+  "(team $(sed -n 's/^TeamIdentifier=//p' <<<$signed))"
 
 # 4. Token, Icecast's passwords and config, and the addresses
 info=$("$built/Contents/MacOS/OmarockBridge" --setup)
@@ -113,7 +153,7 @@ field() { sed -n "s/^ *\"$1\" *: *\"\(.*\)\".*/\1/p" <<<"$info"; }
 
 if [[ $mode == --run ]]; then
   while (( ${$(listeners):-0} > 0 )); do
-    print "The stream has a listener (mpd); waiting for it to leave (or use --run-now)."
+    print "  The stream has a listener (mpd); waiting for it to leave (or use --run-now)."
     sleep 30
   done
 fi
@@ -123,7 +163,7 @@ if [[ $mode == --run || $mode == --run-now ]]; then
   previous=$(installed_id)
   if [[ -n $previous && $previous != $label ]]; then
     # One bridge per Mac: the one installed under another bundle ID goes.
-    print "Replacing $app ($previous) with $label."
+    print "  Replacing ${app/#$HOME/~} ($previous) with $label."
     stop_bridge $previous || true
     launchctl bootout gui/$UID/$previous 2>/dev/null || true
   fi
@@ -147,9 +187,9 @@ if [[ $mode == --run || $mode == --run-now ]]; then
   fi
   # The commit it was built from, so ../install rebuilds only when the bridge changes.
   mkdir -p "$support" && git rev-parse HEAD >"$support/INSTALLED"
-  print "Installed $app."
+  [[ -n ${OMAROCK_FROM_INSTALL:-} ]] || print "  ${green}✓${reset} installed ${app/#$HOME/~} and started it"
 else
-  print "Built $built (install it with --run)."
+  print "  Install it with --run."
 fi
 
 # apple-bridge/install shows the next steps itself.

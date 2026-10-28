@@ -111,8 +111,9 @@ brew install xcodegen ffmpeg icecast
 apple-bridge/app/build.sh --run
 ```
 
-It checks the requirements, asks once for your Team ID and bundle ID, builds, installs
-and starts the app, and prints what the Linux side needs.
+It checks the requirements, asks once for your Team ID and bundle ID, builds (Xcode's
+output goes to `apple-bridge/app/build/build.log`), installs and starts the app, and
+prints what the Linux side needs.
 
 Check it from the Mac or Linux (`/v1/health` needs no token):
 
@@ -200,6 +201,8 @@ the Linux side: `apple.json`, the token file, the bridge's `/v1/health` and libF
 
 ## Troubleshooting
 
+- **The build fails:** `build.sh` shows the errors from its log; the whole build is in
+  `apple-bridge/app/build/build.log`.
 - **`authorized: false`:** allow the bridge in System Settings → Privacy & Security →
   Media & Apple Music, or ask again with
   `curl -X POST -H "Authorization: Bearer $(cat ~/.config/omarock/bridge-token)" http://…:8710/v1/authorize`
