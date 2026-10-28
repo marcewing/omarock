@@ -20,7 +20,9 @@ Linux: omarock ◀──── bridge API :8710 (JSON, bearer token) ───�
   on loopback, never on your LAN or the internet. Every API request needs the token,
   except `/v1/health` (the bridge's version and state) and cover art (each image's
   address carries a key made from the token). The stream needs none: anyone on your
-  tailnet can listen to what the bridge plays.
+  tailnet can listen to what the bridge plays. ffmpeg's command line carries Icecast's
+  source password, so other users on the Mac can see it with `ps`; it only lets them
+  send a stream to the Mac's own Icecast.
 - **It runs in the background:** no Dock icon, started at login, restarted if it
   crashes. With nobody listening to the stream for 30 s, it pauses.
 
@@ -214,7 +216,11 @@ the Linux side: `apple.json`, the token file, the bridge's `/v1/health` and libF
   It belongs to the app's code signature, so building with another identity or bundle
   id asks again.
 - **Nothing answers on :8710:** `bridge.log` says "waiting for a Tailscale address" until
-  Tailscale is up. Check `launchctl print gui/$UID/<your bundle ID>`.
+  Tailscale is up. Check `launchctl print gui/$UID/<your bundle ID>`. Its `login:` lines
+  say what it did about its launch agent: since 0.5.1, if macOS lists the agent but
+  launchd hasn't got it (left by an uninstall of 0.5.0 or older), the bridge registers it
+  again, or runs without it. With 0.5.0 or older, switch OmarockBridge off and on in
+  System Settings → General → Login Items & Extensions (App Background Activity).
 - **mpd far behind live:** see [patches/README.md](../patches/README.md).
 - **On Linux,** run `tools/omarock-doctor`.
 - **Another Icecast on port 8000:** the bridge uses whatever answers on 127.0.0.1:8000,
@@ -227,8 +233,9 @@ the Linux side: `apple.json`, the token file, the bridge's `/v1/health` and libF
 ./install --uninstall
 ```
 
-Each part is its own step, and asks first. It stops the bridge and its Icecast, removes
-the launch agent and `~/Applications/OmarockBridge.app`, and offers to make macOS forget
+Each part is its own step, and asks first. It takes the bridge out of macOS's login
+items (`OmarockBridge --unregister`), stops it and its Icecast, removes
+`~/Applications/OmarockBridge.app`, and offers to make macOS forget
 the app's permissions. It also offers to delete the support folder (the token, the
 passwords, `config.json`, the logs). The default is to keep that, so a reinstall works
 with your Omarchy machine as it is. It only removes an app whose bundle ID matches this
@@ -240,7 +247,7 @@ By hand:
 
 ```sh
 tccutil reset All com.example.omarock.bridge   # your bundle ID: forgets its permissions
-apple-bridge/app/build.sh --uninstall          # stops it and removes the app
+apple-bridge/app/build.sh --uninstall          # unregisters and stops it, removes the app
 rm -rf ~/Library/Application\ Support/omarock-bridge
 ```
 
