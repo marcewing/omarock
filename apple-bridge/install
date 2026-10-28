@@ -26,6 +26,7 @@ here=$repo/apple-bridge/app
 support=${OMAROCK_BRIDGE_SUPPORT:-$HOME/Library/Application Support/omarock-bridge}
 app=${OMAROCK_BRIDGE_APP:-$HOME/Applications/OmarockBridge.app}
 answers=${OMAROCK_INSTALL_ANSWERS:-}
+autoload -Uz is-at-least
 changed=false   # this run installed or changed something
 export OMAROCK_FROM_INSTALL=1   # build.sh leaves the next steps to this
 
@@ -567,10 +568,14 @@ uninstall() {
       confirm "Make macOS forget them too (tccutil reset)?" && forget=true
       local pid
       pid=$(launchctl print "gui/$UID/$id" 2>/dev/null | awk '$1 == "pid" {print $3}')
-      if launchctl print "gui/$UID/$id" >/dev/null 2>&1; then
-        run launchctl bootout "gui/$UID/$id"
-        [[ -n $pid ]] && wait_until "Waiting for the bridge to stop…" 10 gone $pid
+      # Through SMAppService first: a bootout alone leaves its record saying enabled, and
+      # a later install's bridge then hands over to a job launchd doesn't have. (Apps
+      # before 0.5.1 don't know --unregister.)
+      if is-at-least 0.5.1 "$(installed_version)"; then
+        run "$app/Contents/MacOS/OmarockBridge" --unregister || note "it didn't unregister; removing its launch agent with launchctl"
       fi
+      launchctl print "gui/$UID/$id" >/dev/null 2>&1 && run launchctl bootout "gui/$UID/$id"
+      [[ -n $pid ]] && wait_until "Waiting for the bridge to stop…" 10 gone $pid
       # A copy opened by hand, from this app only.
       if pgrep -qf "^$app/Contents/MacOS/OmarockBridge"; then
         run pkill -TERM -f "^$app/Contents/MacOS/OmarockBridge"

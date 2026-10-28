@@ -3,6 +3,15 @@
 
 import AppKit
 
+// Whatever ends the bridge (exit, NSApp.terminate), its last log lines go to the file first.
+atexit { Log.flush() }
+
+// `OmarockBridge --unregister`: remove the launch agent through SMAppService and exit, for
+// the uninstalls (a `launchctl bootout` alone leaves SMAppService's record enabled).
+if CommandLine.arguments.dropFirst().first == "--unregister" {
+    exit(LoginAgent.unregister() ? 0 : 1)
+}
+
 // `OmarockBridge --setup`: make the token, Icecast's passwords and config, print what the
 // Linux side needs as JSON, and exit. Touches nothing that asks for permission (build.sh
 // runs it).

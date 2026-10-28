@@ -55,6 +55,16 @@ listeners() {
     | sed -n 's:.*<Listeners>\([0-9]*\)</Listeners>.*:\1:p' | head -1
 }
 
+# Forgets the installed app's launch agent through SMAppService, which stops it too: a
+# bootout alone leaves SMAppService's record enabled, and the next install's bridge then
+# hands over to a job launchd doesn't have. Apps before 0.5.1 don't know --unregister.
+unregister_agent() {
+  local version
+  version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null) || return 0
+  autoload -Uz is-at-least
+  is-at-least 0.5.1 $version && "$app/Contents/MacOS/OmarockBridge" --unregister || true
+}
+
 # Stops the running bridge (and so its Icecast); true if the launch agent ran it.
 stop_bridge() {
   local label=$1
@@ -75,6 +85,7 @@ if [[ $mode == --uninstall ]]; then
     print "$app is $(installed_id), not $label (this checkout's Local.xcconfig); leaving it alone."
     exit 1
   fi
+  unregister_agent
   stop_bridge $label || true
   launchctl bootout gui/$UID/$label 2>/dev/null || true
   rm -rf "$app"
@@ -164,6 +175,7 @@ if [[ $mode == --run || $mode == --run-now ]]; then
   if [[ -n $previous && $previous != $label ]]; then
     # One bridge per Mac: the one installed under another bundle ID goes.
     print "  Replacing ${app/#$HOME/~} ($previous) with $label."
+    unregister_agent
     stop_bridge $previous || true
     launchctl bootout gui/$UID/$previous 2>/dev/null || true
   fi

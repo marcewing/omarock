@@ -159,6 +159,10 @@ enum Log {
     static func info(_ message: String) { write("info", message) }
     static func error(_ message: String) { write("error", message) }
 
+    /// Waits for the lines written so far to reach the file. main.swift calls it at exit,
+    /// which would otherwise drop the last ones (a handover's, say).
+    static func flush() { queue.sync {} }
+
     private static func write(_ level: String, _ message: String) {
         let line = Data("\(formatter.string(from: Date())) \(level) \(message)\n".utf8)
         queue.async {
