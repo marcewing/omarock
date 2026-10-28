@@ -176,7 +176,16 @@ function searchRows(results, genres, service) {
     items.forEach(function(item, i) { rows.push(make(item, i === 0 ? section : "")) })
   }
   add(library.playlists || [], "YOUR PLAYLISTS", playlistRow)
-  add(library.artists || [], "YOUR ARTISTS", artistRow)
+  // One you have that the catalog has too says so: it isn't in the catalog's
+  // list, and opens to both.
+  var catalogArtists = {}
+  ;(catalog.artists || []).forEach(function(artist) { catalogArtists[foldKey(artist.name)] = artist })
+  add(library.artists || [], "YOUR ARTISTS", function(artist, section) {
+    var row = artistRow(artist, section)
+    var there = catalogArtists[foldKey(artist.name)]
+    if (there) row.subtitle = join([row.subtitle || (there.genres || [])[0], "also on " + service])
+    return row
+  })
   add(library.albums || [], "YOUR ALBUMS", function(a, s) { return albumRow(a, s) })
   add(library.songs || [], "YOUR SONGS", songRow)
   add(genres || [], "GENRES", genreRow)

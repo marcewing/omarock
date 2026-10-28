@@ -78,6 +78,22 @@ test("searchRows lists an artist you have once, as yours", () => {
   assert.deepEqual(rows.map(r => r.section + ":" + r.apple.id), ["YOUR ARTISTS:l.9", "APPLE MUSIC · ARTISTS:8"])
 })
 
+// Marc, searching Foo Fighters: "they do not show up in the apple artists
+// (only nirvana oddly)". Yours says it's Apple Music's too.
+test("searchRows: an artist you have says Apple Music has them too", () => {
+  const rows = Apple.searchRows({
+    library: { artists: [{ kind: "artist", id: "l.1", source: "library", name: "Foo Fighters" },
+      { kind: "artist", id: "l.2", source: "library", name: "Mine Alone" }] },
+    catalog: { artists: [{ kind: "artist", id: "1", source: "catalog", name: "Foo Fighters", genres: ["Rock"] },
+      { kind: "artist", id: "2", source: "catalog", name: "Nirvana", genres: ["Alternative"] }] }
+  })
+  assert.deepEqual(rows.map(r => r.title + ": " + r.subtitle),
+    ["Foo Fighters: Rock · also on Apple Music", "Mine Alone: ", "Nirvana: Alternative"])
+  const spotify = Apple.searchRows({ library: { artists: [{ id: "a", name: "Foo Fighters", genres: ["Rock"] }] },
+    catalog: { artists: [{ id: "a", name: "Foo Fighters", genres: ["Rock"] }] } }, [], "Spotify")
+  assert.equal(spotify[0].subtitle, "Rock · also on Spotify")
+})
+
 test("findArtist matches a name on the other side, case and accents aside", () => {
   const results = { library: { artists: [{ id: "l.1", name: "Husker Du" }] },
     catalog: { artists: [{ id: "2", name: "Hüsker Dü Tribute" }, { id: "1", name: "Hüsker Dü" }] } }
