@@ -65,6 +65,11 @@ Fields Apple doesn't give are omitted, not null. `source` is `"catalog"` or
 { "kind": "playlist", "id": "p.…", "source": "library", "name": "PunkRock", "curator": "You",
   "description": "…", "trackCount": 42, "lastModified": "2026-10-19T15:02:11Z",
   "canEdit": true, "artwork": { … } }
+
+// Genre (library only): a genre as the library's songs name it. The id is the
+// name; years counts its songs by year ("0": songs with no year).
+{ "kind": "genre", "id": "Alternative & Punk", "source": "library", "name": "Alternative & Punk",
+  "songs": 1203, "years": { "0": 4, "1979": 12, "1984": 140 } }
 ```
 
 `catalogId` is set on library items that are also in the catalog, so omarock
@@ -96,7 +101,7 @@ All paths start with `/v1`.
 | `POST /queue/jump` | `{ "index": 4 }`: play that queue entry. |
 | `POST /queue/remove` | `{ "index": 4 }`. |
 | `POST /shuffle`, `/repeat` | `{ "on": true }`; `{ "mode": "off" \| "one" \| "all" }`. |
-| `GET /search?q=husker&scope=all&limit=8` | `{ "library": { "songs": […], "albums": […], "artists": […], "playlists": […] }, "catalog": { …same… } }`. `scope` is `all`, `library` or `catalog`. Case- and accent-insensitive as far as Apple allows. If the catalog half fails, the library half still comes back, with `"catalogError": "…"`. |
+| `GET /search?q=husker&scope=all&limit=8` | `{ "library": { "songs": […], "albums": […], "artists": […], "playlists": […], "genres": […] }, "catalog": { …same, without genres… } }`. `scope` is `all`, `library` or `catalog`. Case- and accent-insensitive as far as Apple allows. If the catalog half fails, the library half still comes back, with `"catalogError": "…"`. The library's `genres` are those whose name contains the query (see **Your library's genres**). |
 | `GET /albums/{source}/{id}` | `{ "album": Album, "tracks": [Song] }`, in disc and track order. A catalog album's tracks carry `inLibrary`, as status songs do (see **Status**); library albums' leave it out. |
 | `GET /artists/{source}/{id}` | `{ "artist": Artist, "albums": [Album], "topSongs": [Song] }`. Albums by year; for the catalog, also `"appearsOn": [Album]` where Apple gives it. Every library `artistId` the bridge hands out opens, also an artist only on songs of a playlist added to the library (MusicKit doesn't know those): then the albums and songs are the ones those songs are on. A library artist's albums have the title, year and `trackCount` their own route gives; ones with no songs on this Mac are left out. |
 | `GET /playlists/{source}/{id}` | `{ "playlist": Playlist, "tracks": [Song] }`. |
@@ -106,6 +111,7 @@ All paths start with `/v1`.
 | `GET /library/recent?limit=25` | Recently added albums and playlists. |
 | `GET /genres` | The catalog's top-level genres: `[{ "id": "20", "name": "Alternative" }]`. |
 | `GET /genres/{id}?limit=25` | `{ "genre": …, "albums": [Album], "songs": [Song] }` (Apple's charts for the genre). |
+| `GET /genres/library/{id}` | One of the library's genres (`id` percent-encoded): `{ "genre": Genre, "albums": [Album], "songs": [{ "id", "year", "duration" }] }`. See **Your library's genres**. 404 for a genre no library song has. |
 | `GET /artwork/{source}/{kind}/{id}?w=&h=&k=` | `image/jpeg` for artwork only MusicKit can open (see Objects). Authorized by `k`, not the bearer token. |
 | `POST /library/playlists` | `{ "name": "…", "items": [ {kind, id, source} ] }` → the new Playlist. (MusicKit can't create or edit playlists on macOS, so the bridge uses Apple Music's REST API through MusicDataRequest.) |
 | `POST /library/playlists/{id}/tracks` | `{ "items": [ … ] }`: append, the items expanded to songs. Returns the Playlist. Apple's API can't remove tracks or delete playlists; those come later through AppleScript on the Mac. |
@@ -191,6 +197,35 @@ bridge), omarock searches the library by title and matches on artist itself.
 
 `POST /library/remove` (omarock-spotify only): the same body; takes items out of the
 library. Apple Music's API can't remove, so the bridge has no such route.
+
+### Your library's genres
+
+The catalog's genres are Apple's top-level ones only (`GET /genres`), and a
+catalog genre opens Apple's charts. The library's genres are the ones its
+songs carry ("Alternative & Punk" on an iTunes rip, "Punk" on a song added
+from Apple Music), from the iTunes Library index, with Apple's raw genre ids
+given their names. omarock browses them as it does mpd's: a genre opens to
+its artists, then their albums.
+
+- **In search,** `library.genres` lists the genres whose name contains the
+  query, folded as the rest of search is (case and accents aside), at most
+  `limit`, the most songs first. A genre's `songs` counts its songs; `years`
+  counts them by year, so omarock's Time Machine can count those from its
+  year or before (and leave out a genre with none) without asking again.
+- **`GET /genres/library/{id}`:**
+  - `albums`: every library album with a song in the genre, by artist, then
+    year. Each is an Album as the library routes give it, and opens through
+    `/albums/library/{id}`. `artist` is the album artist (else its songs'
+    artist), with an `artistId` that opens through `/artists/library/{id}`.
+    `trackCount` counts the album's songs **in this genre**. `isCompilation`
+    is true for a compilation (ITLib's flag).
+  - `songs`: every song in the genre, short: `id` (a library song id, as
+    `POST /play` takes with `"kind": "song", "source": "library"`), `year`
+    (omitted when unknown) and `duration`. omarock picks from these for
+    Shuffle, Time Machine's year applied.
+- An album that wouldn't open, or a song that wouldn't play, is left out.
+- omarock-spotify has no genres: its search has no `genres`, and it has no
+  such route.
 
 ### Items
 
