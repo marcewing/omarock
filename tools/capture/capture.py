@@ -980,9 +980,11 @@ def real_apple_catalog_scenario(host, output, socket_path, failures):
 
 def real_apple_search_scenario(host, output, socket_path, failures):
     """Read-only, real bridge: what a search finds (OMAROCK_REAL_QUERY), and
-    what its first artist opens to, printed for a look."""
+    what its first artist (or OMAROCK_REAL_OPEN's kind: genre, album) opens
+    to, printed for a look."""
     bridge, stream = real_apple()
     query = os.environ.get("OMAROCK_REAL_QUERY", "husker")
+    kind = os.environ.get("OMAROCK_REAL_OPEN", "artist")
     proxy = ReadOnlyProxy(bridge)
     try:
         host.call("settings", json.dumps({"appleBridge": proxy.url, "appleStream": stream,
@@ -1013,18 +1015,18 @@ def real_apple_search_scenario(host, output, socket_path, failures):
         for section, row, subtitle in zip(s["sections"], s["rows"], s["subtitles"]):
             print(f"  {section:28} {row} | {subtitle}", file=sys.stderr)
         host.grab(output / "real-apple-search.png")
-        artists = [i for i, r in enumerate(s["rows"]) if r.startswith("artist:")]
-        if artists:
+        found = [i for i, r in enumerate(s["rows"]) if r.startswith(kind + ":")]
+        if found:
             host.call("press", "Down")
-            for _ in range(artists[0]): host.call("press", "Down")
+            for _ in range(found[0]): host.call("press", "Down")
             host.call("press", "Right")
-            wait_for(lambda: host.state()["browse"].startswith("artist:") and not host.state()["browseLoading"], "artist", timeout=40)
+            wait_for(lambda: host.state()["browse"].startswith(kind + ":") and not host.state()["browseLoading"], kind, timeout=40)
             host.settle(2)
             s = host.state()
-            print("artist:", s["browse"], s["browseInfo"].get("subtitle", ""), file=sys.stderr)
+            print(kind + ":", s["browse"], s["browseInfo"].get("subtitle", ""), file=sys.stderr)
             for section, row, subtitle in zip(s["sections"], s["rows"], s["subtitles"]):
                 print(f"  {section:28} {row} | {subtitle}", file=sys.stderr)
-            host.grab(output / "real-apple-search-artist.png")
+            host.grab(output / f"real-apple-search-{kind}.png")
         check(not proxy.posts, "nothing was sent to the Mac but GETs: " + ", ".join(proxy.posts), failures)
     finally:
         host.call("close")
