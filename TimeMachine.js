@@ -51,7 +51,21 @@ function only(items, year) {
   return (items || []).filter(function(item) { return inYear(item, year) })
 }
 
-// A search's results (apple-bridge/API.md) with what's after the year left out.
+// How many of a library genre's songs are from the year or before, from
+// its count by year (songs with no year left out, as elsewhere).
+function genreSongs(genre, year) {
+  if (!year) return genre.songs || 0
+  var n = 0
+  Object.keys(genre.years || {}).forEach(function(y) {
+    var value = parseInt(y, 10)
+    if (value > 0 && value <= year) n += genre.years[y]
+  })
+  return n
+}
+
+// A search's results (apple-bridge/API.md) with what's after the year left
+// out: the library's genres count only their songs from the year or before,
+// and go when they have none.
 function filterResults(results, year) {
   if (!year || !results) return results
   var out = Object.assign({}, results)
@@ -59,6 +73,10 @@ function filterResults(results, year) {
     if (!results[side]) return
     out[side] = Object.assign({}, results[side], { songs: only(results[side].songs, year),
       albums: only(results[side].albums, year) })
+    if (results[side].genres)
+      out[side].genres = results[side].genres.map(function(genre) {
+        return Object.assign({}, genre, { songs: genreSongs(genre, year) })
+      }).filter(function(genre) { return genre.songs > 0 })
   })
   return out
 }
@@ -74,6 +92,16 @@ function filterArtist(data, year) {
 function filterGenre(data, year) {
   if (!year || !data) return data
   return Object.assign({}, data, { albums: only(data.albums, year), songs: only(data.songs, year) })
+}
+
+// One of the library's genres (GET /genres/library/{id}): its albums and
+// songs from the year or before. Its songs are short ({ id, year }), so
+// they go by their year here.
+function filterLibraryGenre(data, year) {
+  if (!year || !data) return data
+  return Object.assign({}, data, { albums: only(data.albums, year), songs: (data.songs || []).filter(function(song) {
+    return song.year > 0 && song.year <= year
+  }) })
 }
 
 // ---------- The chart, from Wikipedia's wikitext ----------
@@ -334,9 +362,11 @@ if (typeof module !== "undefined") {
     years: years,
     yearOf: yearOf,
     inYear: inYear,
+    genreSongs: genreSongs,
     filterResults: filterResults,
     filterArtist: filterArtist,
     filterGenre: filterGenre,
+    filterLibraryGenre: filterLibraryGenre,
     plainText: plainText,
     parseChart: parseChart,
     titleKey: titleKey,

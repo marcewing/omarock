@@ -232,3 +232,43 @@ test("a playlist whose songs aren't listed still plays, with the reason", () => 
   // Without a note, an empty playlist is just empty.
   assert.deepEqual(Apple.playlistView({ kind: "playlist", id: "p", source: "library", name: "New" }, []).rows, [])
 })
+
+test("your library's genres come right after your playlists, and open to their artists", () => {
+  const genre = { kind: "genre", id: "Alternative & Punk", source: "library", name: "Alternative & Punk", songs: 1203 }
+  const rows = Apple.searchRows({ library: { playlists: [{ kind: "playlist", id: "p.1", source: "library", name: "PunkRock" }],
+    songs: [song("i.1", "Diane", { source: "library" })], genres: [genre] } },
+    [{ id: "1006", name: "Punk" }])
+  assert.deepEqual(rows.map((r) => r.section), ["YOUR PLAYLISTS", "YOUR GENRES", "YOUR SONGS", "GENRES"])
+  assert.equal(rows[1].subtitle, "1,203 songs")
+  assert.deepEqual(rows[1].apple, { kind: "genre", id: "Alternative & Punk", source: "library" })
+  assert.equal(rows[1].noQueue, true)
+  assert.equal(rows[3].subtitle, "Apple Music charts")
+})
+
+test("a library genre: Shuffle, its artists in the bridge's order, then its compilations", () => {
+  const album = (id, title, artist, artistId, extra) => Object.assign({ kind: "album", id, source: "library", title, artist,
+    artistId, year: 1984, trackCount: 2, artwork: art }, extra || {})
+  const data = {
+    albums: [album("a1", "Workbook", "Bob Mould", "ar1"), album("a2", "Zen Arcade", "Hüsker Dü", "ar2"),
+      album("a3", "New Day Rising", "Husker Du", undefined), album("a4", "Left of the Dial", "Various Artists", undefined),
+      album("a5", "Hits", "Sugar", "ar3", { isCompilation: true }), album("a6", "Odd", "Nobody", undefined)],
+    songs: [{ id: "s1", year: 1989, duration: 140 }, { id: "s2", year: 1984, duration: 120 }]
+  }
+  const view = Apple.libraryGenreView({ id: "Alternative & Punk", name: "Alternative & Punk" }, data, 0)
+  assert.deepEqual(view.rows.map((r) => r.kind + ":" + r.title),
+    ["shuffleall:Shuffle all songs", "artist:Bob Mould", "artist:Hüsker Dü", "compilations:Compilations"])
+  assert.deepEqual(view.rows[0].items, [{ kind: "song", id: "s1", source: "library" }, { kind: "song", id: "s2", source: "library" }])
+  assert.equal(view.rows[0].subtitle, "2 songs · 4 min")
+  // The same artist spelt without accents is one; an artist with no id is a compilation.
+  assert.equal(view.rows[2].subtitle, "2 albums")
+  assert.deepEqual(view.rows[2].apple, { kind: "artist", id: "ar2", source: "library" })
+  assert.equal(view.rows[3].subtitle, "3 albums")
+  assert.equal(view.info.subtitle, "Genre · your library · 2 artists · 6 albums")
+  const comps = Apple.libraryCompilationsView({ id: "Alternative & Punk", name: "Alternative & Punk" }, data, 0)
+  assert.deepEqual(comps.rows.map((r) => r.title), ["Left of the Dial", "Hits", "Odd"])
+  assert.equal(comps.info.subtitle, "Alternative & Punk · 3 albums")
+  // Nothing left: Time Machine says why.
+  const empty = Apple.libraryGenreView({ name: "Grunge" }, { albums: [], songs: [] }, 1989)
+  assert.deepEqual(empty.rows, [])
+  assert.equal(empty.info.emptyText, "None of your Grunge songs are from 1989 or before (Time Machine).")
+})

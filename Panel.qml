@@ -199,7 +199,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.11.12"
+  readonly property string version: "0.12.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -2271,6 +2271,14 @@ Panel {
           view.info.emptyText = "None of its songs are from " + year + " or before (Time Machine)."
         return view
       }))
+    } else if (ref.kind === "genre" && ref.source === "library") {
+      bridge.libraryGenre(ref.id, shown(function(data) {
+        return Apple.libraryGenreView(data.genre || { id: ref.id, name: entry.title }, TimeMachine.filterLibraryGenre(data, year), year)
+      }))
+    } else if (ref.kind === "compilations") {
+      bridge.libraryGenre(ref.id, shown(function(data) {
+        return Apple.libraryCompilationsView(data.genre || { id: ref.id, name: ref.id }, TimeMachine.filterLibraryGenre(data, year), year)
+      }))
     } else if (ref.kind === "genre") {
       bridge.genre(ref.id, shown(function(data) {
         return Apple.genreView(data.genre || { name: entry.title }, TimeMachine.filterGenre(data, year))
@@ -2809,6 +2817,10 @@ Panel {
       root.say((row.name || row.title) + " isn't available to play")
       return
     }
+    if (row.kind === "shuffleall" && row.items) {
+      root.shuffleLibraryGenre(entry, row, mode)
+      return
+    }
     var name = row.name || row.title
     var items = [row.apple]
     var start = 0
@@ -2836,6 +2848,33 @@ Panel {
     } else {
       root.say("Added " + name + " to " + (root.lookupService !== "" ? bridge.service + "'s queue" : "the queue"))
     }
+  }
+
+  // Shuffle on one of your library's genres: its songs (up to Time
+  // Machine's year), shuffled, at most appleShuffleSongs of them, as the
+  // Mac's queue takes a while to fill.
+  readonly property int appleShuffleSongs: 100
+  function shuffleLibraryGenre(entry, row, mode) {
+    var bridge = root.browseBridge
+    var items = TimeMachine.shuffled(row.items, Math.random).slice(0, root.appleShuffleSongs)
+    var what = (items.length < row.items.length ? items.length + " of your " : "your ") + entry.title + " songs"
+    if (mode !== "play") {
+      bridge.playItems(items, "add", 0, function(data, error) { if (error !== "") root.say(error) })
+      root.say("Added " + what + " to the queue, shuffled")
+      return
+    }
+    root.say("Starting " + what + ", shuffled…")
+    bridge.playItems(items, "play", 0, function(data, error) {
+      if (error !== "") {
+        root.say(error)
+        return
+      }
+      if (root.browseTop === entry) {
+        root.clearSearch()
+        root.leaveSearch()
+      }
+      root.say("Playing " + what + ", shuffled")
+    })
   }
 
   // The level the open one was opened from: an artist, a genre, Playlists,

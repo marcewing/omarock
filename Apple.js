@@ -47,8 +47,9 @@ function formatTotal(seconds) {
   return Math.floor(minutes / 60) + " h " + (minutes % 60) + " min"
 }
 
+// "1,203 songs", as local music's counts read.
 function countText(n, word) {
-  return n + " " + word + (n === 1 ? "" : "s")
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " " + word + (n === 1 ? "" : "s")
 }
 
 function totalSeconds(songs) {
@@ -114,7 +115,12 @@ function playlistRow(playlist, section) {
     subtitle: join(parts), apple: ref(playlist), artwork: playlist.artwork, playlistName: playlist.name }
 }
 
+// A genre: one of Apple's top genres opens its charts; one of your
+// library's (API.md, "Your library's genres") opens to its artists.
 function genreRow(genre, section) {
+  if (genre.source === "library")
+    return { kind: "genre", section: section || "", lead: "󰓹", title: genre.name, name: genre.name,
+      subtitle: countText(genre.songs || 0, "song"), apple: ref(genre), noQueue: true }
   return { kind: "genre", section: section || "", lead: "󰓹", title: genre.name, name: genre.name,
     subtitle: "Apple Music charts", apple: { kind: "genre", id: genre.id, source: "catalog" }, noQueue: true }
 }
@@ -176,6 +182,7 @@ function searchRows(results, genres, service) {
     items.forEach(function(item, i) { rows.push(make(item, i === 0 ? section : "")) })
   }
   add(library.playlists || [], "YOUR PLAYLISTS", playlistRow)
+  add(library.genres || [], "YOUR GENRES", genreRow)
   add(library.artists || [], "YOUR ARTISTS", artistRow)
   add(library.albums || [], "YOUR ALBUMS", function(a, s) { return albumRow(a, s) })
   add(library.songs || [], "YOUR SONGS", songRow)
@@ -423,6 +430,71 @@ function genreView(genre, data) {
     emptyText: "Apple Music has no charts for this genre." } }
 }
 
+// A library genre's albums as its artists, each { name, id, albums }, in
+// the bridge's order (by artist, then year), and its compilations: albums
+// marked so, by "Various Artists", or by an artist with no id to open.
+function libraryGenreArtists(albums) {
+  var artists = []
+  var byName = {}
+  var compilations = []
+  albums.forEach(function(album) {
+    var name = album.artist || ""
+    if (album.isCompilation === true || name === "" || /^(various|various artists|va)$/i.test(name.trim())) {
+      compilations.push(album)
+      return
+    }
+    var key = foldKey(name)
+    var entry = byName[key]
+    if (!entry) {
+      entry = byName[key] = { name: name, id: "", albums: [] }
+      artists.push(entry)
+    }
+    if (entry.id === "" && album.artistId) entry.id = album.artistId
+    entry.albums.push(album)
+  })
+  return { artists: artists.filter(function(entry) {
+    if (entry.id === "") compilations = compilations.concat(entry.albums)
+    return entry.id !== ""
+  }), compilations: compilations }
+}
+
+// One of your library's genres (GET /genres/library/{id}), as a local
+// genre is: Shuffle its songs, its artists (each with the cover of their
+// first album), then one row for its compilations. year: Time Machine's,
+// whose filter (TimeMachine.filterLibraryGenre) data has been through.
+function libraryGenreView(genre, data, year) {
+  var albums = data.albums || []
+  var songs = data.songs || []
+  var split = libraryGenreArtists(albums)
+  var rows = []
+  if (songs.length > 0)
+    rows.push({ kind: "shuffleall", lead: "󰒟", title: "Shuffle all songs",
+      subtitle: countText(songs.length, "song") + " · " + formatTotal(totalSeconds(songs)),
+      items: songs.map(function(song) { return { kind: "song", id: song.id, source: "library" } }) })
+  split.artists.forEach(function(entry, i) {
+    rows.push({ kind: "artist", section: i === 0 ? "ARTISTS" : "", lead: "󰠃", title: entry.name, name: entry.name,
+      subtitle: countText(entry.albums.length, "album"), apple: { kind: "artist", id: entry.id, source: "library" },
+      artwork: entry.albums[0].artwork })
+  })
+  if (split.compilations.length > 0)
+    rows.push({ kind: "compilations", section: split.artists.length === 0 ? "ARTISTS" : "", lead: "󰀥",
+      title: "Compilations", name: "Compilations", subtitle: countText(split.compilations.length, "album"),
+      apple: { kind: "compilations", id: genre.id, source: "library" }, artwork: split.compilations[0].artwork,
+      noQueue: true })
+  return { rows: rows, info: { title: genre.name,
+    subtitle: join(["Genre · your library", countText(split.artists.length, "artist"), countText(albums.length, "album")]),
+    emptyText: year > 0 ? "None of your " + genre.name + " songs are from " + year + " or before (Time Machine)."
+      : "No songs in your library have this genre." } }
+}
+
+// A library genre's compilations, as album rows.
+function libraryCompilationsView(genre, data, year) {
+  var albums = libraryGenreArtists(data.albums || []).compilations
+  return { rows: albums.map(function(album) { return albumRow(album, "") }), info: { title: "Compilations",
+    subtitle: join([genre.name, countText(albums.length, "album")]),
+    emptyText: year > 0 ? "None of them are from " + year + " or before (Time Machine)." : "No compilations in this genre." } }
+}
+
 // The bridge's queue as queue rows; index is the position in the whole queue.
 function queueRows(status) {
   var offset = status.queueOffset || 0
@@ -485,6 +557,9 @@ if (typeof module !== "undefined") {
     playlistView: playlistView,
     playlistsView: playlistsView,
     genreView: genreView,
+    libraryGenreArtists: libraryGenreArtists,
+    libraryGenreView: libraryGenreView,
+    libraryCompilationsView: libraryCompilationsView,
     queueRows: queueRows,
     songAsMpd: songAsMpd,
     statusAsMpd: statusAsMpd,

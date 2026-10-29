@@ -291,6 +291,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
     elsewhere_scenario(host, socket_path, failures)
+    apple_genres_scenario(host, output, socket_path, failures)
     time_machine_scenario(host, output, socket_path, failures)
 
     # mpd goes away: the panel says so instead of failing silently.
@@ -3613,6 +3614,127 @@ def elsewhere_scenario(host, socket_path, failures):
     BRIDGE["config"].unlink()
 
 
+def apple_genres_scenario(host, output, socket_path, failures):
+    """Marc, 10-29, in Apple Music with Time Machine on 1989: "I enter punk in
+    the box, but I'm not seeing any genres listed". Apple's catalog has only
+    its top genres, as charts; the library's genres (bridge 0.6) are listed
+    under YOUR GENRES and open as local genres do: Shuffle, the artists, then
+    the compilations. Time Machine counts and lists only what's from its year
+    or before, and an older bridge lists none."""
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    host.call("open")
+    to_source(host, "apple")
+    wait_for(lambda: host.state()["appleReady"], "Apple Music")
+
+    def search(query):
+        host.call("type", query)
+        wait_for(lambda: host.state()["query"] == query and not host.state()["searching"], "search " + query)
+        host.settle(.3)
+        return host.state()
+
+    def genres(s):
+        return [(r, sub, sec) for r, sub, sec in zip(s["rows"], s["subtitles"], s["sections"]) if r.startswith("genre:")]
+
+    s = search("punk")
+    check(genres(s)[:2] == [("genre:Alternative & Punk", "10 songs", "YOUR GENRES"), ("genre:Punk", "3 songs", "")]
+          and ("genre:Punk", "Apple Music charts", "GENRES") in genres(s),
+          "'punk' lists your library's genres, then Apple's: " + str(genres(s)), failures)
+    check(s["rows"].index("genre:Alternative & Punk") == 1 and s["rows"][0] == "playlist:PunkRock",
+          "your genres come right after your playlists: " + ", ".join(s["rows"][:3]), failures)
+    host.call("activate", 1, "open")
+    wait_for(lambda: browsed(host, "genre:Alternative & Punk"), "the library genre")
+    host.settle(.5)
+    s = host.state()
+    check(s["rows"] == ["shuffleall:Shuffle all songs", "artist:Bob Mould", "artist:Hüsker Dü", "artist:Sugar",
+                        "compilations:Compilations"],
+          "it opens to Shuffle, its artists, then its compilations: " + ", ".join(s["rows"]), failures)
+    check(s["subtitles"][0] == "10 songs · 32 min" and s["subtitles"][1] == "1 album"
+          and s["browseInfo"].get("subtitle") == "Genre · your library · 3 artists · 4 albums",
+          "with counts: " + s["subtitles"][0] + " | " + str(s["browseInfo"].get("subtitle")), failures)
+    check(s["levelButtons"]["current"][:1] == ["Shuffle"], "Shuffle is the heading's button: " + str(s["levelButtons"]["current"]), failures)
+    host.grab(output / "compact-apple-library-genre.png")
+
+    # Compilations, then an artist, open; ← comes back.
+    host.call("activate", 4, "open")
+    wait_for(lambda: browsed(host, "compilations:Compilations"), "the compilations")
+    s = host.state()
+    check(s["rows"] == ["album:Left of the Dial"] and s["subtitles"][0].startswith("Various Artists · 1987"),
+          "Compilations lists the genre's compilations: " + str(s["rows"]) + " " + str(s["subtitles"]), failures)
+    host.call("back")
+    wait_for(lambda: browsed(host, "genre:Alternative & Punk"), "back to the genre")
+    host.call("activate", 3, "open")
+    wait_for(lambda: browsed(host, "artist:Sugar"), "Sugar")
+    check("album:Copper Blue" in host.state()["rows"], "an artist opens to their page: " + str(host.state()["rows"]), failures)
+    host.call("back")
+    wait_for(lambda: browsed(host, "genre:Alternative & Punk"), "back to the genre")
+
+    # Shuffle: the genre's songs, shuffled, to the Mac.
+    plays = len(bridge_requests("/v1/play"))
+    host.call("activate", 0, "play")
+    wait_for(lambda: len(bridge_requests("/v1/play")) > plays, "Shuffle plays")
+    body = bridge_requests("/v1/play")[-1][2]
+    ids = [i["id"] for i in body["items"]]
+    check(body["mode"] == "play" and sorted(ids) == sorted(["l-c-so-8", "l-c-so-9", "l-c-so-1", "l-c-so-2", "l-c-so-3", "l-c-so-4",
+                                                            "l-so-1", "l-so-2", "l-so-3", "l-so-4"])
+          and all(i["kind"] == "song" and i["source"] == "library" for i in body["items"]),
+          "Shuffle sends the genre's 10 library songs: " + str(ids), failures)
+    try:
+        wait_for(lambda: host.state()["notice"] == "Playing your Alternative & Punk songs, shuffled", "it says so", timeout=5)
+    except RuntimeError:
+        pass
+    check(host.state()["notice"] == "Playing your Alternative & Punk songs, shuffled", "and says so: " + host.state()["notice"], failures)
+
+    # Time Machine on 1989: Sugar's 1992 album goes, and the counts follow.
+    host.call("setSetting", "timeMachine", "true", "true")
+    wait_for(lambda: host.state()["timeMachine"]["chip"] == "OFF", "the chip")
+    host.call("press", "t")
+    wait_for(lambda: host.state()["timeMachine"]["picker"]["open"], "the year picker")
+    host.settle(.3)
+    host.call("typeKeys", "1989")
+    wait_for(lambda: host.state()["timeMachine"]["picker"]["valid"], "1989 typed")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["timeMachine"]["year"] == 1989, "1989 picked")
+    s = search("punk")
+    check(genres(s)[:2] == [("genre:Alternative & Punk", "8 songs", "YOUR GENRES"), ("genre:Punk", "3 songs", "")],
+          "with 1989, only songs from then or before count: " + str(genres(s)), failures)
+    s = search("rock")
+    check(genres(s)[:1] == [("genre:Rock", "2 songs", "YOUR GENRES")], "'rock' finds yours: " + str(genres(s)), failures)
+    s = search("punk")
+    host.call("activate", s["rows"].index("genre:Alternative & Punk"), "open")
+    wait_for(lambda: browsed(host, "genre:Alternative & Punk"), "the genre in 1989")
+    host.settle(.3)
+    s = host.state()
+    check(s["rows"] == ["shuffleall:Shuffle all songs", "artist:Bob Mould", "artist:Hüsker Dü", "compilations:Compilations"]
+          and s["subtitles"][0].startswith("8 songs"),
+          "and the genre lists what's from 1989 or before: " + ", ".join(s["rows"]) + " | " + s["subtitles"][0], failures)
+    plays = len(bridge_requests("/v1/play"))
+    host.call("activate", 0, "play")
+    wait_for(lambda: len(bridge_requests("/v1/play")) > plays, "Shuffle in 1989")
+    ids = [i["id"] for i in bridge_requests("/v1/play")[-1][2]["items"]]
+    check(len(ids) == 8 and "l-so-1" not in ids and "l-so-2" not in ids, "Shuffle plays only those 8: " + str(ids), failures)
+    host.grab(output / "compact-apple-library-genre-1989.png")
+    host.call("press", "t")
+    wait_for(lambda: host.state()["timeMachine"]["picker"]["open"], "the year picker")
+    host.settle(.3)
+    host.call("typeKeys", "off")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["timeMachine"]["year"] == 0, "Time Machine off")
+    host.call("setSetting", "timeMachine", "false", "true")
+
+    # An older bridge: no library genres, Apple's still there.
+    fake_bridge_info(False, "genres")
+    s = search("punk")
+    check(genres(s) == [("genre:Punk", "Apple Music charts", "GENRES")],
+          "an older bridge lists only Apple's genres: " + str(genres(s)), failures)
+    fake_bridge_info(True, "genres")
+    host.call("back")
+    to_source(host, "local")
+    host.call("close")
+    BRIDGE["config"].unlink()
+
+
 def list_tuning_scenario(host, failures):
     """Tuning a station or channel from the list used to jump the list back
     to the start; it should stay where it is, with the new one selected. For
@@ -5639,6 +5761,7 @@ def main():
                             elif name == "setup": setup_scenario(host, output, failures)
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
+                            elif name == "apple-genres": apple_genres_scenario(host, output, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "scrolling": scrolling_scenario(host, output, socket_path, failures)
                             elif name == "hover-scroll": hover_scroll_scenario(host, failures)

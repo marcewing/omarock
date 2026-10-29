@@ -429,6 +429,8 @@ Item {
   function artist(source, id, callback) { root.get("/v1/artists/" + source + "/" + encodeURIComponent(id), callback) }
   function playlist(source, id, callback) { root.get("/v1/playlists/" + source + "/" + encodeURIComponent(id), callback) }
   function genre(id, callback) { root.get("/v1/genres/" + encodeURIComponent(id) + "?limit=25", callback) }
+  // One of the library's genres (API.md, "Your library's genres"); the id is its name.
+  function libraryGenre(id, callback) { root.get("/v1/genres/library/" + encodeURIComponent(id), callback) }
 
   // The info card (i): the bridge's /v1/info for a song or album (API.md,
   // "Info"). An older bridge has no such route; then a library search by

@@ -26,7 +26,7 @@ import tempfile
 import threading
 import time
 import unicodedata
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_mpd import png  # noqa: E402
@@ -92,8 +92,47 @@ def make_catalog():
     return songs, albums
 
 
+def make_library_genres(songs, catalog_albums):
+    """The library's genres (API.md, "Your library's genres"): albums, by
+    artist then year, each with its genre. Workbook, New Day Rising and Hi
+    Infidelity are copies of catalog albums; Copper Blue (1992) and a
+    compilation are on this Mac only."""
+    only = {}
+
+    def mine(sid, title, artist, album, album_id, artist_id, year, seconds, number):
+        only[sid] = {"kind": "song", "id": sid, "source": "library", "title": title, "artist": artist, "album": album,
+                     "albumId": album_id, "artistId": artist_id, "genres": [], "year": year, "duration": float(seconds),
+                     "trackNumber": number, "discNumber": 1, "artwork": art("4a4a8a"), "playable": True}
+        return only[sid]
+
+    def copy(cid, aid, artist_id, genre):
+        album = dict(public(catalog_albums[cid]), id=aid, source="library", catalogId=cid, artistId=artist_id)
+        tracks = [dict(songs[s], id="l-" + s, source="library", genres=[genre]) for s in catalog_albums[cid]["tracks"]]
+        return dict(album, genres=[genre], _genre=genre, _songs=tracks)
+
+    sugar = [mine("l-so-1", "The Act We Act", "Sugar", "Copper Blue", "l-al-6", "l-ar-3", 1992, 230, 1),
+             mine("l-so-2", "A Good Idea", "Sugar", "Copper Blue", "l-al-6", "l-ar-3", 1992, 225, 2)]
+    dial = [mine("l-so-3", "Kiss Me on the Bus", "The Replacements", "Left of the Dial", "l-al-7", "", 1987, 168, 1),
+            mine("l-so-4", "Pretty in Pink", "The Psychedelic Furs", "Left of the Dial", "l-al-7", "", 1987, 239, 2)]
+    albums = [
+        copy("c-al-3", "l-al-3", "l-ar-2", "Alternative & Punk"),
+        copy("c-al-1", "l-al-1", "l-ar-1", "Alternative & Punk"),
+        copy("c-al-2", "l-al-2", "l-ar-1", "Punk"),
+        {"kind": "album", "id": "l-al-6", "source": "library", "title": "Copper Blue", "artist": "Sugar",
+         "artistId": "l-ar-3", "genres": ["Alternative & Punk"], "year": 1992, "trackCount": 2, "isCompilation": False,
+         "artwork": art("4a4a8a"), "_genre": "Alternative & Punk", "_songs": sugar},
+        copy("c-al-5", "l-al-5", "l-ar-4", "Rock"),
+        {"kind": "album", "id": "l-al-7", "source": "library", "title": "Left of the Dial", "artist": "Various Artists",
+         "genres": ["Alternative & Punk"], "year": 1987, "trackCount": 2, "isCompilation": True,
+         "artwork": art("8a4a4a"), "_genre": "Alternative & Punk", "_songs": dial},
+    ]
+    artists = {"l-ar-2": "Bob Mould", "l-ar-3": "Sugar", "l-ar-4": "REO Speedwagon"}
+    return albums, only, artists
+
+
 # Built in main, once the port (in the artwork URLs) is known.
 SONGS, CATALOG_ALBUMS = {}, {}
+GENRE_ALBUMS, LIBRARY_ONLY, GENRE_ARTISTS = [], {}, {}
 GENRES = [{"id": "20", "name": "Alternative"}, {"id": "21", "name": "Rock"}, {"id": "14", "name": "Pop"},
           {"id": "1006", "name": "Punk"}]
 
@@ -107,7 +146,7 @@ class Refused(Exception):
 
 
 def public(album):
-    return {k: v for k, v in album.items() if k != "tracks"}
+    return {k: v for k, v in album.items() if k != "tracks" and not k.startswith("_")}
 
 
 class Bridge:
@@ -155,6 +194,9 @@ class Bridge:
         # takes it away); what it added, and what Spotify's remove took out.
         self.library_route = True
         self.saved, self.unsaved = set(), set()
+        # The library's genres in search and GET /v1/genres/library/…, which
+        # older bridges lack (POST /v1/fake/genres {on} switches them).
+        self.genres_route = not self.spotify
         # omarock-spotify 0.3 without omarock's sound output: Soloist's own
         # volume, in the status and set by POST /v1/volume (POST
         # /v1/fake/volume {on} switches it; off, as with the bus).
@@ -267,7 +309,8 @@ class Bridge:
             if self.spotify: out["state"] = "paused"
         if self.queue and self.state != "stopped":
             song = self.queue[self.index]
-            out["song"] = dict(song, inLibrary=self.owns("song", song["catalogId"]))
+            # A song only in the library (Copper Blue's) has no catalog copy to own.
+            out["song"] = dict(song, inLibrary=self.owns("song", song["catalogId"])) if "catalogId" in song else song
         if self.bare and "song" in out:
             out["song"] = {k: v for k, v in out["song"].items() if k not in ("albumId", "artistId", "inLibrary")}
         if self.orphan and "song" in out:
@@ -295,7 +338,10 @@ class Bridge:
 
     def album(self, source, aid):
         if source == "library":
-            album = next(a for a in self.library_albums if a["id"] == aid)
+            album = next((a for a in self.library_albums if a["id"] == aid), None)
+            if album is None:
+                album = next(a for a in GENRE_ALBUMS if a["id"] == aid)
+                return public(album), album["_songs"]
             return album, [dict(SONGS[s], id="l-" + s, source="library") for s in CATALOG_ALBUMS[album["catalogId"]]["tracks"]]
         return public(CATALOG_ALBUMS[aid]), [SONGS[s] for s in CATALOG_ALBUMS[aid]["tracks"]]
 
@@ -304,7 +350,8 @@ class Bridge:
         songs = []
         for item in items:
             kind, iid, source = item["kind"], item.get("id", ""), item.get("source", "catalog")
-            if kind == "song": songs.append(SONGS[iid[2:] if iid.startswith("l-") else iid])
+            if kind == "song" and iid in LIBRARY_ONLY: songs.append(LIBRARY_ONLY[iid])
+            elif kind == "song": songs.append(SONGS[iid[2:] if iid.startswith("l-") else iid])
             elif kind == "album": songs += self.album(source, iid)[1]
             elif kind == "playlist": songs += self.playlist(source, iid)[1]
             elif kind == "artist": songs += [s for s in SONGS.values() if s["artistId"] == iid][:5]
@@ -335,6 +382,26 @@ class Bridge:
         if mine or source == "library": out["library"] = library
         return out
 
+    def library_genres(self):
+        genres = {}
+        for album in GENRE_ALBUMS:
+            g = genres.setdefault(album["_genre"], {"kind": "genre", "id": album["_genre"], "source": "library",
+                                                    "name": album["_genre"], "songs": 0, "years": {}})
+            for song in album["_songs"]:
+                g["songs"] += 1
+                year = str(song.get("year", 0))
+                g["years"][year] = g["years"].get(year, 0) + 1
+        return list(genres.values())
+
+    def library_genre(self, name):
+        """GET /v1/genres/library/{name}: its albums, and its songs, short."""
+        genre = next((g for g in self.library_genres() if g["id"] == name), None)
+        if genre is None: raise KeyError(f"No library genre {name}.")
+        albums = [a for a in GENRE_ALBUMS if a["_genre"] == name]
+        songs = [{k: v for k, v in (("id", s["id"]), ("year", s.get("year")), ("duration", s["duration"])) if v}
+                 for a in albums for s in a["_songs"]]
+        return {"genre": genre, "albums": [dict(public(a), trackCount=len(a["_songs"])) for a in albums], "songs": songs}
+
     def search(self, q, scope, limit):
         words = fold(q).split()
         # Every word somewhere in the names, as Apple's search finds "title artist".
@@ -350,6 +417,10 @@ class Bridge:
                    "albums": [public(a) for a in CATALOG_ALBUMS.values() if hit(a["title"], a["artist"])][:limit],
                    "artists": [a for a in ARTISTS if hit(a["name"])][:limit],
                    "playlists": [self.playlist("catalog", p)[0] for p, v in self.catalog_playlists.items() if hit(v["name"])][:limit]}
+        if self.genres_route:
+            wanted = fold(q.strip())
+            library["genres"] = sorted((g for g in self.library_genres() if wanted and wanted in fold(g["name"])),
+                                       key=lambda g: -g["songs"])[:limit]
         out = {}
         if scope in ("all", "library"): out["library"] = library
         if scope in ("all", "catalog"): out["catalog"] = catalog
@@ -447,6 +518,9 @@ class Handler(BaseHTTPRequestHandler):
                         b.changed()
                 if path == "fake/info":
                     b.info_route = bool(body["on"])
+                    return {"ok": True}
+                if path == "fake/genres":
+                    b.genres_route = bool(body["on"])
                     return {"ok": True}
                 if path == "fake/volume":
                     b.volume = 40 if body["on"] else None
@@ -576,6 +650,12 @@ class Handler(BaseHTTPRequestHandler):
                         tracks = [dict(t, inLibrary=whole or b.owns("song", t["id"])) for t in tracks]
                         if b.spotify: album = dict(album, inLibrary=b.owns("album", parts[2]))
                     return {"album": album, "tracks": tracks}
+                if parts[0] == "artists" and parts[1] == "library" and parts[2] in GENRE_ARTISTS:
+                    # An artist met in a library genre: their albums there.
+                    artist = {"kind": "artist", "id": parts[2], "source": "library", "name": GENRE_ARTISTS[parts[2]]}
+                    albums = [public(a) for a in GENRE_ALBUMS if a.get("artistId") == parts[2]]
+                    top = [s for a in GENRE_ALBUMS if a.get("artistId") == parts[2] for s in a["_songs"]][:5]
+                    return {"artist": artist, "albums": albums, "topSongs": top, "appearsOn": []}
                 if parts[0] == "artists" and parts[1] == "library":
                     artist = next((a for a in b.library_artists if a["id"] == parts[2]), None)
                     if artist is None: raise KeyError(f"No library artist with id {parts[2]}.")
@@ -592,6 +672,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "library/playlists":
                     return sorted((b.playlist("library", p)[0] for p in b.playlists), key=lambda p: p["name"].lower())
                 if path == "genres": return [] if b.spotify else GENRES
+                if parts[:2] == ["genres", "library"]:
+                    if not b.genres_route: raise NoEndpoint()
+                    return b.library_genre(unquote(parts[2]))
                 if parts[0] == "genres":
                     if b.spotify: raise KeyError("Spotify has no genre charts")
                     genre = next(g for g in GENRES if g["id"] == parts[1])
@@ -604,7 +687,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global PORT, SONGS, CATALOG_ALBUMS
+    global PORT, SONGS, CATALOG_ALBUMS, GENRE_ALBUMS, LIBRARY_ONLY, GENRE_ARTISTS
     port_file, token, log = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
     mpd_socket = sys.argv[sys.argv.index("--spotify") + 1] if "--spotify" in sys.argv else None
     # FAKE_BRIDGE_PORT: a fixed port (the installer's test expects the real one, 8710).
@@ -612,6 +695,7 @@ def main():
     server.daemon_threads = True
     PORT = server.server_address[1]
     SONGS, CATALOG_ALBUMS = make_catalog()
+    GENRE_ALBUMS, LIBRARY_ONLY, GENRE_ARTISTS = make_library_genres(SONGS, CATALOG_ALBUMS)
     server.token = token
     server.bridge = Bridge(log.open("a"), mpd_socket)
     if mpd_socket:

@@ -174,3 +174,20 @@ test("a song kept for the cache keeps what its row and Play need, not the rest",
   assert.deepEqual(kept, { kind: "song", id: "a", source: "catalog", title: "A", artist: "X", year: 1990, duration: 3,
     artwork: { url: "u", width: 100, height: 100 } })
 })
+
+test("your library's genres count only their songs from the year or before", () => {
+  const genre = { kind: "genre", id: "Alternative & Punk", source: "library", name: "Alternative & Punk", songs: 20,
+    years: { "0": 4, "1984": 10, "1989": 2, "1992": 4 } }
+  const later = { kind: "genre", id: "Grunge", source: "library", name: "Grunge", songs: 3, years: { "1992": 3 } }
+  assert.equal(TimeMachine.genreSongs(genre, 1989), 12)
+  assert.equal(TimeMachine.genreSongs(genre, 0), 20)
+  const kept = TimeMachine.filterResults({ library: { songs: [], albums: [], genres: [genre, later] } }, 1989)
+  assert.deepEqual(kept.library.genres.map((g) => g.name + " " + g.songs), ["Alternative & Punk 12"])
+  assert.equal(genre.songs, 20)
+  const data = { albums: [{ kind: "album", year: 1984 }, { kind: "album", year: 1992 }],
+    songs: [{ id: "a", year: 1984 }, { id: "b", year: 1992 }, { id: "c" }] }
+  const shown = TimeMachine.filterLibraryGenre(data, 1989)
+  assert.deepEqual(shown.albums.map((a) => a.year), [1984])
+  assert.deepEqual(shown.songs.map((s) => s.id), ["a"])
+  assert.equal(TimeMachine.filterLibraryGenre(data, 0), data)
+})
