@@ -216,7 +216,8 @@ its artists, then their albums.
   - `albums`: every library album with a song in the genre, by artist, then
     year. Each is an Album as the library routes give it, and opens through
     `/albums/library/{id}`. `artist` is the album artist (else its songs'
-    artist), with an `artistId` that opens through `/artists/library/{id}`.
+    artist), with an `artistId` that opens through `/artists/library/{id}`
+    (left out when no song names that artist, as for "Various Artists").
     `trackCount` counts the album's songs **in this genre**. `isCompilation`
     is true for a compilation (ITLib's flag).
   - `songs`: every song in the genre, short: `id` (a library song id, as

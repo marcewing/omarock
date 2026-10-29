@@ -121,6 +121,9 @@ final class API {
         if method == "GET", route.count == 4, route[0] == "info" {
             return respond(.json(200, try await library.info(kind: route[2], id: MusicItemID(route[3]), source: try source(route[1]))))
         }
+        if method == "GET", route.count == 3, route[0] == "genres", route[1] == "library" {
+            return respond(.json(200, try library.libraryGenreDetail(route[2])))
+        }
         if method == "GET", route.count == 2, route[0] == "genres" {
             return respond(.json(200, try await library.genreDetail(MusicItemID(route[1]), limit: limit(request, 25, max: 50))))
         }
@@ -142,9 +145,13 @@ final class API {
         case ("POST", ["play"]):
             let items = try (body["items"] as? [Any] ?? []).map(ItemRef.init)
             guard !items.isEmpty else { throw APIError.badRequest("items is empty.") }
+            let started = Date()
             let songs = try await library.expand(items) { player.queueSongs }
+            let expanded = Date()
             let mode = body["mode"] as? String ?? "play"
             try await player.play(songs, start: body["start"] as? Int ?? 0, mode: mode)
+            Log.info("play (\(mode)): \(items.count) item(s), \(songs.compactMap { $0 }.count) songs; found in "
+                + "\(String(format: "%.1f", expanded.timeIntervalSince(started))) s, queued in \(String(format: "%.1f", Date().timeIntervalSince(expanded))) s")
             if mode == "play" { player.setOwner(client) }
         case ("POST", ["pause"]): await player.pauseSettled()
         case ("POST", ["resume"]):
@@ -193,6 +200,13 @@ final class API {
             }
             let a = try await one.response().items, b = try await many.response().items
             return respond(.json(200, ["equalTo": describe(a), "memberOf": describe(b)]))
+        case ("POST", ["debug", "expand"]):
+            // Diagnostics: how long POST /play's items take to become songs, without playing them.
+            let items = try (body["items"] as? [Any] ?? []).map(ItemRef.init)
+            let started = Date()
+            let songs = try await library.expand(items) { player.queueSongs }
+            return respond(.json(200, ["items": items.count, "songs": songs.count, "playable": songs.compactMap { $0 }.count,
+                                       "seconds": Date().timeIntervalSince(started)]))
         case ("GET", ["debug", "cloudplaylist"]):
             // Diagnostics: the iCloud id the bridge would edit for a library playlist id.
             let id = try await library.cloudPlaylistID(MusicItemID(request.query["id"] ?? ""))

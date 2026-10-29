@@ -102,6 +102,11 @@ enum Normalize {
 
     // MARK: From the ITLib index
 
+    static func genre(entry: LibraryIndex.GenreEntry) -> [String: Any] {
+        ["kind": "genre", "id": entry.name, "source": "library", "name": entry.name, "songs": entry.songIDs.count,
+         "years": Dictionary(uniqueKeysWithValues: entry.years.map { (String($0.key), $0.value) })]
+    }
+
     static func album(entry: LibraryIndex.AlbumEntry) -> [String: Any] {
         var o: [String: Any] = ["kind": "album", "id": entry.id, "source": "library", "title": entry.title,
                                 "isCompilation": entry.isCompilation, "trackCount": entry.trackCount]

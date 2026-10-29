@@ -116,6 +116,7 @@ final class MusicService {
                 "albums": r.albums.map(Normalize.album(entry:)),
                 "artists": r.artists.map(Normalize.artist(entry:)),
                 "playlists": r.playlists.map(Normalize.playlist(listing:)),
+                "genres": r.genres.map(Normalize.genre(entry:)),
             ]
         }
         if scope == "all" || scope == "catalog" {
@@ -347,6 +348,27 @@ final class MusicService {
                 "songs": results.songs?.first?.data.map { Normalize.song($0, source: .catalog) } ?? []]
     }
 
+    /// One of the library's genres, from the index (apple-bridge/API.md, "Your library's genres").
+    func libraryGenreDetail(_ name: String) throws -> [String: Any] {
+        let index = try index()
+        guard let genre = index.genre(name) else { throw APIError.notFound("No library song has the genre \(name).") }
+        let albums = genre.albums.compactMap { album -> [String: Any]? in
+            guard let entry = index.album(album.id) else { return nil }
+            var o = Normalize.album(entry: entry)
+            o["trackCount"] = album.songs
+            o["artist"] = album.artist
+            o["artistId"] = album.artistID
+            return o
+        }
+        let songs = genre.songIDs.filter { !index.isUnplayable($0) }.compactMap { id -> [String: Any]? in
+            guard let item = index.item(id) else { return nil }
+            var o: [String: Any] = ["id": id, "duration": Double(item.totalTime) / 1000]
+            if item.year > 0 { o["year"] = item.year }
+            return o
+        }
+        return ["genre": Normalize.genre(entry: genre), "albums": albums, "songs": songs]
+    }
+
     private struct ChartResults: Decodable {
         struct Chart<T: Decodable>: Decodable { let data: [T] }
         struct Results: Decodable {
@@ -373,7 +395,19 @@ final class MusicService {
     /// counts the same rows omarock shows.
     func expand(_ items: [ItemRef], queue: () -> [Song]) async throws -> [Song?] {
         var songs: [Song?] = []
+        // Library songs next to each other are fetched together, a request per 200 songs.
+        var run: [String] = []
+        func fetchRun() async throws {
+            guard !run.isEmpty else { return }
+            songs += try await librarySongs(ids: run)
+            run = []
+        }
         for item in items {
+            if item.kind == "song", item.source == .library, items.count > 1, let id = item.id {
+                run.append(id.rawValue)
+                continue
+            }
+            try await fetchRun()
             switch (item.kind, item.id) {
             case ("queue", _):
                 songs += queue().map { $0 }
@@ -419,6 +453,7 @@ final class MusicService {
                 throw APIError.badRequest("Unknown item kind \"\(item.kind)\".")
             }
         }
+        try await fetchRun()
         return songs
     }
 

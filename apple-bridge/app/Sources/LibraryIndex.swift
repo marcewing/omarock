@@ -48,6 +48,25 @@ final class LibraryIndex {
         let trackIDs: [String]
     }
 
+    /// A genre as the library's songs name it (apple-bridge/API.md, "Your library's genres").
+    struct GenreEntry {
+        struct Album {
+            let id: String
+            /// Its songs in this genre.
+            let songs: Int
+            let artist: String?
+            let artistID: String?
+        }
+
+        let name: String
+        /// Its songs on the library's albums that can play, album by album.
+        let songIDs: [String]
+        /// Songs by year, 0 for none.
+        let years: [Int: Int]
+        /// By artist (unknown last), then year, then title.
+        let albums: [Album]
+    }
+
     private struct Snapshot {
         var albums: [AlbumEntry] = []
         var albumsByID: [String: AlbumEntry] = [:]
@@ -209,6 +228,76 @@ final class LibraryIndex {
             .filter { $0.artist.map { Self.key($0.persistentID) } == id }
             .sorted { $0.playCount > $1.playCount }
     }
+    // MARK: Genres
+
+    private var genreCache: (generation: Int, genres: [GenreEntry])?
+
+    /// The genres of the songs on the library's albums, by name, with Apple's MZGenre keys
+    /// given their names. Spellings that differ only in case or accents are one genre, named
+    /// as most of its songs spell it. Worked out again only when the library changes.
+    var genres: [GenreEntry] {
+        let generation = self.generation
+        if let cache = read({ _ in genreCache }), cache.generation == generation { return cache.genres }
+
+        struct Group {
+            var spellings: [String: Int] = [:]
+            var songIDs: [String] = []
+            var years: [Int: Int] = [:]
+            var albums: [(album: AlbumEntry, items: [ITLibMediaItem])] = []
+        }
+        let (items, artists) = read { ($0.items, $0.artists) }
+        var artistIDs: [String: String] = [:]
+        for artist in artists where artistIDs[Self.fold(artist.name)] == nil { artistIDs[Self.fold(artist.name)] = artist.id }
+
+        var groups: [String: Group] = [:]
+        for album in albums {
+            var inGenre: [String: [ITLibMediaItem]] = [:]
+            for id in album.trackIDs {
+                guard let item = items[id], !item.isUserDisabled else { continue }
+                let name = Normalize.genreName(item.genre.trimmingCharacters(in: .whitespaces))
+                guard !name.isEmpty else { continue }
+                let key = Self.fold(name)
+                groups[key, default: Group()].spellings[name, default: 0] += 1
+                groups[key]!.songIDs.append(id)
+                groups[key]!.years[max(0, item.year), default: 0] += 1
+                inGenre[key, default: []].append(item)
+            }
+            for (key, songs) in inGenre { groups[key]!.albums.append((album, songs)) }
+        }
+
+        let genres = groups.values.map { group -> GenreEntry in
+            let albums = group.albums.map { entry, songs -> (key: (String, Int, String), album: GenreEntry.Album) in
+                // The album artist, else the one artist of its songs in this genre.
+                let names = Set(songs.compactMap { $0.artist?.name }.filter { !$0.isEmpty })
+                let artist = songs[0].album.albumArtist.flatMap { $0.isEmpty ? nil : $0 }
+                    ?? (names.count == 1 ? names.first : entry.artist)
+                let folded = Self.fold(artist ?? "")
+                let id = songs.first { Self.fold($0.artist?.name ?? "") == folded }?.artist.map { Self.key($0.persistentID) }
+                    ?? (folded.isEmpty ? nil : artistIDs[folded])
+                return ((folded, entry.year ?? 0, Self.fold(entry.title)),
+                        .init(id: entry.id, songs: songs.count, artist: artist, artistID: id))
+            }
+            return GenreEntry(
+                name: group.spellings.max { ($0.value, $1.key) < ($1.value, $0.key) }!.key,
+                songIDs: group.songIDs, years: group.years,
+                albums: albums.sorted { a, b in
+                    if a.key.0.isEmpty != b.key.0.isEmpty { return b.key.0.isEmpty }
+                    return a.key < b.key
+                }.map(\.album))
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+
+        os_unfair_lock_lock(&lock)
+        genreCache = (generation, genres)
+        os_unfair_lock_unlock(&lock)
+        return genres
+    }
+
+    /// A genre by its name, folded as search folds it.
+    func genre(_ name: String) -> GenreEntry? {
+        let key = Self.fold(name)
+        return genres.first { Self.fold($0.name) == key }
+    }
+
     func playlist(_ id: String) -> PlaylistEntry? { listing(id)?.entry }
     func item(_ id: String) -> ITLibMediaItem? { read { $0.items[id] } }
 
@@ -488,6 +577,7 @@ final class LibraryIndex {
         var albums: [AlbumEntry] = []
         var artists: [ArtistEntry] = []
         var playlists: [PlaylistListing] = []
+        var genres: [GenreEntry] = []
     }
 
     /// Case- and accent-insensitive search of the library, at most `limit` of each type:
@@ -506,6 +596,9 @@ final class LibraryIndex {
         result.artists = Self.best(artists, limit * 4) { Self.rank(needle, $0.name) }
             .filter { names.insert(Self.fold($0.name)).inserted }.prefix(limit).map { $0 }
         result.playlists = Self.best(playlistListings, limit) { Self.rank(needle, $0.name) }
+        // Genres whose name has the query anywhere, the most songs first.
+        result.genres = genres.filter { Self.fold($0.name).contains(needle) }
+            .sorted { $0.songIDs.count > $1.songIDs.count }.prefix(limit).map { $0 }
         let songs = read { snapshot in
             snapshot.items.values.filter { memberAlbums.contains(Self.key($0.album.persistentID)) }
         }
