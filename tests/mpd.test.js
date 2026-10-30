@@ -152,6 +152,23 @@ test("parseStatus reads numbers and flags", () => {
   assert.equal(s.elapsed, 69.12)
   assert.equal(s.queueLength, 13)
   assert.equal(Mpd.parseStatus([]).state, "stop")
+  assert.equal(Mpd.parseStatus(["state: play", "audio: 44100:16:2"]).audio, "44100:16:2")
+  assert.equal(Mpd.parseStatus(["state: play"]).audio, "")
+})
+
+test("streamRetryable: a lost connection, not a refusal", () => {
+  assert.ok(Mpd.streamRetryable('Failed to decode "http://x/s"; Failed to connect to x port 80 after 0 ms: Could not connect to server'))
+  assert.ok(Mpd.streamRetryable("Recv failure: Connection reset by peer: Failure when receiving data from the peer"))
+  assert.ok(Mpd.streamRetryable('Failed to decode "http://127.0.0.1:8720/stream/ch-8"; avformat_open_input() failed: Invalid data found when processing input'))
+  assert.ok(Mpd.streamRetryable("got HTTP status 502"))
+  assert.ok(!Mpd.streamRetryable('Failed to decode "http://x/s"; got HTTP status 403'))
+  assert.ok(!Mpd.streamRetryable("got HTTP status 404"))
+  assert.ok(!Mpd.streamRetryable("ACK [50@0] {playid} No such song"))
+  assert.ok(!Mpd.streamRetryable(""))
+})
+
+test("streamRetryDelay: 2, 5, then every 10 s", () => {
+  assert.deepEqual([0, 1, 2, 3, 9].map(Mpd.streamRetryDelay), [2, 5, 10, 10, 10])
 })
 
 test("searchPattern ignores case and accents in both directions", () => {

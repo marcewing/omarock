@@ -23,7 +23,9 @@
 // "Your area" replaced (still read while radioArea is empty); `timeZone`,
 // the time zone that says which country an area is likelier in (else the
 // machine's: the harness sets it); `historyAfter`, a test's: a play counts
-// for History after that many seconds; and the addresses the test
+// for History after that many seconds; `streamRetryFor` (300), how long
+// a live stream that lost its connection is played again before omarock
+// gives up; and the addresses the test
 // harness points at its fakes, `spotifyService`, `sxmService`, `radioBrowser`,
 // `chartSource` (Wikipedia, for Time Machine's charts) and `appleTokenFile`.
 // Panel.qml gives each its default.

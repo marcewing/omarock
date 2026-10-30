@@ -51,6 +51,15 @@
   every mode follows from it, so the modes never disagree mid-update.
 - **One API, two services.** omarock-spotify speaks the Apple Music bridge's API
   (apple-bridge/API.md), so AppleClient and Apple.js serve both.
+- **Out of reach.** While the Apple Music bridge or omarock-spotify can't be
+  reached, AppleClient asks for `/v1/health` every 3 s (Spotify's every 30 s
+  unless it's the source), and starts the status long poll only once health
+  answers: a long poll sent while the network is down answers only after its
+  25 s wait, so the panel would say "Not connected" that long after the
+  service was back. Spotify stays the source meanwhile ("Not connected"), as
+  Soloist plays on without omarock-spotify; leaving it then sends the release
+  once the service answers. `--only reconnect` covers all three, with
+  `fake_mpd`'s `fake_stream_drop` and the fakes' `POST /v1/fake/offline`.
 - **Opt-in sources.** A source's switch (`spotify`, `appleMusic`, `siriusXM`,
   `radio`) gives it a button and lets omarock talk to its service; switched off,
   omarock doesn't contact it.
@@ -199,6 +208,16 @@ opened; `--only fresh-start` checks that.
   - Stream entries are found fresh in mpd (`playlistsearch "(file starts_with …)"`)
     when the source changes.
   - `playid` to a stream holds every mpd client until it connects.
+  - Repeat-one reconnects a stream only while its server answers. A refused
+    or reset connection (the network down, omarock-sxm restarting) stops mpd
+    for good once its buffer (about 45 s) runs out. A network that drops
+    packets keeps the connection, and mpd plays on about 10 s after it's back.
+    So a live stream that had played for 5 s and stops on any error but a
+    refusal (HTTP 4xx) is played again after 2, 5, then every 10 s, for
+    `streamRetryFor` (5 minutes), the card saying "Reconnecting…"
+    (`Panel.retryStream`; one panel plays it, Keeper.js). Seen in the test
+    VM: a real station, the internet refused for 90 s, played again 22 s
+    after it was back with 30 s steps.
   - mpd 0.24.15 has deadlocked when sent more commands while a stream started on
     its PipeWire output. omarock sends plain `playid` and nothing else then.
 - `setvol` can take seconds while mpd plays a stream, so the volume knob holds

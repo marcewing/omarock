@@ -199,9 +199,11 @@ class Fake:
         self.volume = 72
         self.setvol_delay = 0.0
         # Streams: how long one takes to connect (fake_stream_delay), the
-        # ones that refuse (fake_stream_refuse), and mpd's error.
+        # ones that refuse (fake_stream_refuse), how many plays of one fail to
+        # connect (fake_stream_drop), and mpd's error.
         self.stream_delay = 0.0
         self.refused = []
+        self.drops = 0
         self.error = ""
         self.random = False
         self.repeat = True
@@ -262,6 +264,10 @@ class Fake:
             if any(r in file for r in self.refused):
                 self.state = "stop"
                 self.error = f'Failed to decode "{file}"; got HTTP status 403'
+            elif self.drops > 0:
+                self.drops -= 1
+                self.state = "stop"
+                self.error = f'Failed to decode "{file}"; Failed to connect to 127.0.0.1 port 9 after 0 ms: Could not connect to server'
         self.changed("player")
 
     def window(self, items, args):
@@ -504,6 +510,16 @@ class Fake:
         if name == "fake_stream_refuse":
             # Test control, not mpd: streams whose URL contains this refuse (HTTP 403).
             self.refused.append(rest[0])
+            return []
+        if name == "fake_stream_drop":
+            # Test control, not mpd: a stream playing now loses its connection
+            # (mpd stops, with the error), and the next N plays of a stream
+            # can't connect.
+            self.drops = int(rest[0])
+            if self.state == "play" and self.queue and "://" in self.queue[self.current][1]["file"]:
+                self.elapsed, self.state = self.position(), "stop"
+                self.error = "Recv failure: Connection reset by peer: Failure when receiving data from the peer"
+                self.changed("player")
             return []
         if name == "fake_setvol_delay":
             # Test control, not mpd: make setvol take this many seconds.

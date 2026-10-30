@@ -145,6 +145,10 @@ class Refused(Exception):
     """Something the service can't do (a 409), like Spotify removing from its queue."""
 
 
+class Dropped(Exception):
+    """Out of reach (POST /v1/fake/offline): the connection closes unanswered."""
+
+
 def public(album):
     return {k: v for k, v in album.items() if k != "tracks" and not k.startswith("_")}
 
@@ -204,6 +208,12 @@ class Bridge:
         # omarock-spotify's Web API sign-in: POST /v1/logout forgets it, POST
         # /v1/fake/signin {on} sets it (no browser here).
         self.signed_in = True
+        # Out of reach: POST /v1/fake/offline {closed, hang} (seconds). For
+        # `closed`, every request (a long poll waiting too) closes unanswered,
+        # as a refused or reset connection does; then for `hang`, a request
+        # waits until it's over and is answered then, as one sent into a
+        # network that drops packets is once the network is back.
+        self.closed_until = self.offline_until = 0.0
         # The library: a copy of Zen Arcade, and two playlists of songs.
         zen = dict(public(CATALOG_ALBUMS["c-al-1"]), id="l-al-1", source="library", catalogId="c-al-1")
         self.library_albums = [zen]
@@ -458,6 +468,12 @@ class Handler(BaseHTTPRequestHandler):
             with tempfile.NamedTemporaryFile(suffix=".png") as f:
                 png(Path(f.name), top, tuple(c // 3 for c in top), min(size, 512))
                 return self.reply(200, Path(f.name).read_bytes(), "image/png")
+        if parts[1:2] != ["fake"]:
+            while time.monotonic() < bridge.offline_until:
+                if time.monotonic() < bridge.closed_until:
+                    self.close_connection = True
+                    return
+                time.sleep(0.1)
         with bridge.lock:
             bridge.log.write(json.dumps({"method": method, "path": url.path, "query": query, "body": body}) + "\n")
             bridge.log.flush()
@@ -480,6 +496,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(404, {"error": "No such endpoint."})
         except Refused as e:
             return self.reply(409, {"error": str(e)})
+        except Dropped:
+            self.close_connection = True
         except KeyError as e:
             return self.reply(404, {"error": f"No such item {e}"})
         except (ValueError, IndexError) as e:
@@ -494,6 +512,7 @@ class Handler(BaseHTTPRequestHandler):
                 deadline = time.monotonic() + 25
                 while since is not None and int(since) == b.seq and time.monotonic() < deadline:
                     b.lock.wait(deadline - time.monotonic())
+                    if time.monotonic() < b.closed_until: raise Dropped()
                 return b.status(client)
         # A Mac slow to load what it's asked to play, as it is with a hundred
         # songs (POST /v1/fake/slow {on}): the reply waits, the rest doesn't.
@@ -558,6 +577,12 @@ class Handler(BaseHTTPRequestHandler):
                         added += 1
                     b.changed()
                     return {"ok": True} if b.spotify else {"ok": True, "added": added}
+                if path == "fake/offline":
+                    now = time.monotonic()
+                    b.closed_until = now + float(body.get("closed", 0))
+                    b.offline_until = b.closed_until + float(body.get("hang", 0))
+                    b.lock.notify_all()
+                    return {"ok": True}
                 if path == "fake/slowsearch":
                     b.slowsearch = float(body.get("seconds", 0.5)) if body["on"] else 0
                     return {"ok": True}

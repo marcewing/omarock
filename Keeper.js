@@ -3,8 +3,9 @@
 // one per screen. A few jobs are done by one of them only: Time Machine's
 // keeping of the queue (Panel.keepQueueInYear), where two would each take
 // the same songs out, and Apple Music's queue by index, so the second would
-// take out the wrong ones; and History's adding of plays, where two would
-// add each play twice.
+// take out the wrong ones; History's adding of plays, where two would
+// add each play twice; and playing a lost stream again (Panel.retryStream),
+// where two would send mpd each try twice.
 
 var owners = {}
 

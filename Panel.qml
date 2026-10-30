@@ -100,7 +100,9 @@ Panel {
   // source from when it starts playing (here, or from a phone), or omarock
   // switches to it, until mpd plays or omarock switches away.
   readonly property string spotifyService: root.setting("spotifyService", "") || "http://127.0.0.1:8730"
-  readonly property bool spotifyMode: spotify.reachable && spotify.current
+  // It stays the source while omarock-spotify is out of reach (Soloist
+  // plays on without it): "Spotify · Not connected", looking every 3 s.
+  readonly property bool spotifyMode: root.spotifyEnabled && spotify.current
   // Apple Music and Spotify share the bridge's API, rows and views.
   readonly property bool bridgeMode: appleMode || spotifyMode
   readonly property var bridge: spotifyMode ? spotify : apple
@@ -199,7 +201,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.13.0"
+  readonly property string version: "0.13.1"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -461,6 +463,7 @@ Panel {
     if (!client.ready) return "Not connected"
     if (root.bridgeMode && !root.bridge.ready) return "Not connected"
     if (root.sxmMode && !sxm.available) return "SiriusXM isn't running"
+    if (root.reconnecting) return "Reconnecting…"
     var s = root.player.status
     return s.state === "play" ? "Playing" : s.state === "pause" ? "Paused" : "Stopped"
   }
@@ -632,6 +635,7 @@ Panel {
   // resumes the local song where it was.
   function setSource(name) {
     if (name === root.source) return
+    root.stopStreamRetry()
     // Leaving Spotify, for anything: it pauses and stops being the source.
     var fromSpotify = root.spotifyMode
     if (fromSpotify) spotify.release()
@@ -713,6 +717,7 @@ Panel {
   // a second or two to connect), then "Tuned to …", or why not.
   property string tunedName: ""
   function playLive(url, drop, name) {
+    root.stopStreamRetry()
     if (url !== client.streamTuning) root.say("Tuning " + name + "…")
     root.tunedName = name
     client.playStream(url, drop, function(error) {
@@ -858,9 +863,25 @@ Panel {
     root.lastMpdState = state
     // SiriusXM and the radio are live: a pause becomes a stop.
     if (root.live && state === "pause" && was !== "pause") client.send("stop")
-    // A stream that failed (a station refusing, say): say why, once.
+    if (root.live && state === "play" && was !== "play") root.livePlayingSince = Date.now()
     var error = client.status.error || ""
-    if (root.source !== "local" && !root.spotifyMode && error !== "" && error !== root.lastStreamError && client.streamTuning === "")
+    var file = String(client.currentSong.file || "")
+    if (root.streamRetry) {
+      // Reconnecting: done once the stream plays again (it has a format only
+      // once connected), or once mpd is on something else.
+      if (!root.live || file !== root.streamRetry.file) root.stopStreamRetry()
+      else if (state === "play" && client.status.audio !== "") {
+        root.say("Back on " + root.streamRetry.name)
+        root.stopStreamRetry()
+      }
+    } else if (root.live && state === "stop" && was === "play" && Mpd.streamRetryable(error) && client.streamTuning === ""
+               && Date.now() - root.livePlayingSince >= 5000) {
+      root.startStreamRetry(file, error)
+    }
+    // A stream that failed (a station refusing, say): say why, once. Not
+    // while reconnecting, which says so itself.
+    if (root.source !== "local" && !root.spotifyMode && !root.streamRetry && error !== "" && error !== root.lastStreamError
+        && client.streamTuning === "")
       root.say(root.streamError(error, root.live ? root.tunedName : ""))
     root.lastStreamError = error
     // On the Apple Music stream even under Spotify, which stops mpd: the Mac
@@ -892,6 +913,61 @@ Panel {
     if (/^ACK /.test(error)) return "Couldn't tune " + (name || "it") + ": " + error.replace(/^ACK \[[^\]]*\] \{[^}]*\} /, "")
     var reason = error.replace(/^Failed to decode "[^"]*"; ?/, "") || "no reason given"
     return name ? name + " didn't play: " + reason : what + " stopped: " + reason
+  }
+
+  // A live stream that had been playing and stopped on an error it may get
+  // over (the network dropped, omarock-sxm restarted, SiriusXM gone for a
+  // while): mpd tries once and gives up, so omarock plays it again after 2,
+  // 5, then every 10 s, for streamRetryFor seconds (5 minutes). A
+  // station that won't play at all, or refuses (HTTP 4xx), says why as
+  // before. Tuning, a source switch or anything else mpd moves to ends it.
+  property var streamRetry: null // { file, name, since, tries, error }
+  property real livePlayingSince: 0
+  readonly property bool reconnecting: root.streamRetry !== null
+  readonly property real streamRetryFor: Math.max(0, Number(root.setting("streamRetryFor", 300)) || 0)
+
+  function startStreamRetry(file, error) {
+    var name = root.tunedName || (root.sxmMode ? "the channel" : "the station")
+    root.streamRetry = { file: file, name: name, since: Date.now(), tries: 0, error: error }
+    root.say("Lost " + name + ". Reconnecting…")
+    streamRetryTimer.interval = Mpd.streamRetryDelay(0) * 1000
+    streamRetryTimer.restart()
+  }
+
+  function stopStreamRetry() {
+    root.streamRetry = null
+    streamRetryTimer.stop()
+  }
+
+  function retryStream() {
+    var retry = root.streamRetry
+    if (!retry) return
+    if (!root.live || String(client.currentSong.file || "") !== retry.file) {
+      root.stopStreamRetry()
+      return
+    }
+    // Stopped: try again, or give up (after streamRetryFor, or once it
+    // refuses). Playing but not connected yet (a slow network): give the
+    // last try time.
+    if (client.status.state !== "play") {
+      var error = client.status.error || ""
+      if (Date.now() - retry.since >= root.streamRetryFor * 1000 || (error !== "" && !Mpd.streamRetryable(error))) {
+        var reason = (error || retry.error).replace(/^Failed to decode "[^"]*"; ?/, "")
+        root.say("Couldn't reconnect to " + retry.name + (reason !== "" ? ": " + reason : ""))
+        root.stopStreamRetry()
+        return
+      }
+      retry.tries++
+      // Each bar's panel follows the retry; one of them plays (Keeper.js).
+      if (Keeper.claim(root.keeperId, "reconnect")) client.send("play")
+    }
+    streamRetryTimer.interval = Mpd.streamRetryDelay(retry.tries) * 1000
+    streamRetryTimer.restart()
+  }
+
+  Timer {
+    id: streamRetryTimer
+    onTriggered: root.retryStream()
   }
 
   // The pointer left the card: close 3 s later, unless it comes back.
@@ -3753,7 +3829,8 @@ Panel {
     unreachableText: "Can't reach omarock-spotify (systemctl --user status omarock-spotify)"
     unauthorizedText: "Spotify isn't signed in: run omarock-sp login"
     active: root.spotifyEnabled
-    retryMs: root.spotifyMode ? 3000 : 30000
+    // Every 3 s while it's the source, or a release waits to go.
+    retryMs: root.spotifyMode || spotify.releasePending ? 3000 : 30000
     idleStopSeconds: 0
     onLastErrorChanged: if (root.spotifyMode && spotify.lastError !== "") root.say(spotify.lastError)
     onBridgeStatusChanged: if (root.spotifyMode) root.recheckQueue()

@@ -221,6 +221,12 @@ Item {
   }
 
   function applyStatus(data) {
+    if (root.releasePending && data.current === true) {
+      data = Object.assign({}, data, { current: false })
+      Qt.callLater(root.sendRelease)
+    } else if (root.releasePending && !root.releasing) {
+      root.releasePending = false  // it isn't the source any more anyway (mpd played)
+    }
     root.bridgeStatus = data
     root.elapsedBase = data.position || 0
     root.elapsedAt = Date.now()
@@ -276,7 +282,8 @@ Item {
         root.authorized = true
         // A long poll that timed out brings the same status: keep the lists as
         // they are and only re-time the position.
-        if (data.seq === root.bridgeStatus.seq && data.state === root.bridgeStatus.state) {
+        if (data.seq === root.bridgeStatus.seq && data.state === root.bridgeStatus.state
+            && data.current === root.bridgeStatus.current) {
           root.elapsedBase = data.position || 0
           root.elapsedAt = Date.now()
         } else {
@@ -290,11 +297,27 @@ Item {
     }, 35000)
   }
 
+  // Health first, then the long poll once the bridge answers. While it can't
+  // be reached, a long poll would hang for its 35 s; once it could, it would
+  // wait up to 25 s for a change before the panel knew the bridge was back.
+  function reconnect() {
+    if (!root.active) return
+    root.checkHealth(function() {
+      if (!root.active) return
+      if (!root.reachable) {
+        retryPoll.restart()
+        return
+      }
+      if (root.releasePending) root.sendRelease()
+      root.poll()
+    })
+  }
+
   onActiveChanged: {
-    if (root.active) root.checkHealth(function() { root.poll() })
+    if (root.active) root.reconnect()
     else root.pollSequence++
   }
-  Component.onCompleted: if (root.active) root.checkHealth(function() { root.poll() })
+  Component.onCompleted: root.reconnect()
 
   // Playback. Play also starts mpd on the stream when it isn't playing, and
   // takes the music over from another machine.
@@ -315,8 +338,35 @@ Item {
   }
   // Spotify: become omarock's source (mpd stops, and Spotify carries on with
   // what it had), or stop being it (Spotify pauses).
-  function activate(callback) { root.post("/v1/activate", {}, callback) }
-  function release(callback) { root.post("/v1/release", {}, callback) }
+  function activate(callback) {
+    root.releasePending = false
+    root.post("/v1/activate", {}, callback)
+  }
+  // Leaving Spotify, whose service may be out of reach (the panel stays on
+  // Spotify while it is): then the mode ends here, at once if it's known to
+  // be out of reach, else once the release fails, and the release goes again
+  // when the service next answers.
+  property bool releasePending: false
+  property bool releasing: false
+  function release(callback) {
+    root.releasePending = true
+    if (!root.reachable) root.dropCurrent()
+    root.sendRelease(callback)
+  }
+  function sendRelease(callback) {
+    // Qt.callLater'd: the client may be half torn down by then.
+    if (!root || typeof root.post !== "function" || root.releasing) return
+    root.releasing = true
+    root.post("/v1/release", {}, function(data, error) {
+      root.releasing = false
+      if (error === "") root.releasePending = false
+      else root.dropCurrent()
+      if (callback) callback(data, error)
+    })
+  }
+  function dropCurrent() {
+    if (root.bridgeStatus.current === true) root.bridgeStatus = Object.assign({}, root.bridgeStatus, { current: false })
+  }
   // Once the bridge has made a change asked for here (a song picked, next,
   // previous, a seek, play): mpd plays the stream if it isn't already. With
   // rejoinAfterChange, it also reconnects to the live stream, as below.
@@ -476,7 +526,7 @@ Item {
   Timer {
     id: retryPoll
     interval: root.retryMs
-    onTriggered: if (root.active) root.checkHealth(function() { root.poll() })
+    onTriggered: root.reconnect()
   }
 
   Timer {

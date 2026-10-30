@@ -264,8 +264,25 @@ function parseStatus(lines) {
     consume: raw.consume === "1",
     queueLength: num("playlistlength", 0),
     updating: raw.updating_db !== undefined,
-    error: raw.error || ""
+    error: raw.error || "",
+    // The format being played: a stream has none until it has connected.
+    audio: raw.audio || ""
   }
+}
+
+// Whether a live stream that stopped on this error is worth playing again:
+// a dropped or refused connection, a server gone for a while. Not a station
+// that refuses (HTTP 4xx), and not a command mpd rejected.
+function streamRetryable(error) {
+  return error !== "" && !/HTTP status 4\d\d/.test(error) && !/^ACK /.test(error)
+}
+
+// Seconds before the next try, after `tries` of them: 2, 5, then 10. A try
+// while the network is down fails at once, so trying often costs nothing,
+// and the music is back within 10 s of the network.
+function streamRetryDelay(tries) {
+  var delays = [2, 5, 10]
+  return delays[Math.min(Math.max(0, tries), delays.length - 1)]
 }
 
 // Accent folding for search. mpd's regex works on bytes, so a character class
@@ -716,6 +733,8 @@ if (typeof module !== "undefined") {
     parseRows: parseRows,
     parseCounts: parseCounts,
     parseStatus: parseStatus,
+    streamRetryable: streamRetryable,
+    streamRetryDelay: streamRetryDelay,
     fold: fold,
     searchPattern: searchPattern,
     matchRank: matchRank,

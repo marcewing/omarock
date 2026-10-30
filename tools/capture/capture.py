@@ -291,6 +291,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
     elsewhere_scenario(host, socket_path, failures)
+    reconnect_scenario(host, socket_path, failures)
     apple_genres_scenario(host, output, socket_path, failures)
     time_machine_scenario(host, output, socket_path, failures)
 
@@ -3616,6 +3617,111 @@ def elsewhere_scenario(host, socket_path, failures):
     BRIDGE["config"].unlink()
 
 
+def reconnect_scenario(host, socket_path, failures):
+    """Things going wrong while it plays (the VM's failure tests, 10-30): a
+    live stream that loses its connection is played again until it's back
+    (mpd tries once and gives up), for streamRetryFor; the bridge, back after
+    being out of reach, shows again within seconds, not after the long poll's
+    25 s; and Spotify stays the source while omarock-spotify can't be
+    reached (Soloist plays on), its release sent again once it can."""
+    def offline(base, closed, hang=0):
+        request = urllib.request.Request(base + "/v1/fake/offline", data=json.dumps({"closed": closed, "hang": hang}).encode(),
+                                         method="POST", headers={"Authorization": "Bearer fake-bridge-token",
+                                                                 "Content-Type": "application/json", "X-Omarock": "1"})
+        urllib.request.urlopen(request, timeout=5).read()
+        return time.monotonic() + closed + hang
+    plays = lambda: command_count(socket_path, "play")
+    lost = lambda: host.state()["notice"].startswith("Lost ")
+
+    # SiriusXM's stream drops, and the first try to reconnect fails too.
+    host.call("open")
+    host.call("setSource", "sxm")
+    wait_for(lambda: host.state()["sxmMode"] and host.state()["bar"]["playing"], "SiriusXM playing")
+    host.settle(5.5)
+    before = plays()
+    mpd_client(socket_path, "fake_stream_drop 1")
+    wait_for(lost, "the drop noticed")
+    s = host.state()
+    name = s["notice"][len("Lost "):-len(". Reconnecting…")]
+    check(s["stateText"] == "SiriusXM · Reconnecting…" and s["notice"] == "Lost " + name + ". Reconnecting…",
+          "a dropped stream: " + s["stateText"] + " | " + s["notice"], failures)
+    wait_for(lambda: host.state()["notice"] == "Back on " + name, "back on the channel", timeout=12)
+    s = host.state()
+    check(plays() == before + 2 and mpd_state(socket_path)["state"] == "play" and s["stateText"] == "SiriusXM · Playing",
+          f"played again after 2 s (still out) and 5 s more: back on {name} ({plays() - before} plays)", failures)
+
+    # Out for longer than streamRetryFor (4 s here): it gives up, saying why.
+    host.call("settings", json.dumps({"streamRetryFor": 4}))
+    host.settle(5.5)
+    before = plays()
+    mpd_client(socket_path, "fake_stream_drop 99")
+    wait_for(lost, "the drop noticed")
+    wait_for(lambda: host.state()["notice"].startswith("Couldn't reconnect"), "giving up", timeout=12)
+    s = host.state()
+    check(s["notice"] == f"Couldn't reconnect to {name}: Failed to connect to 127.0.0.1 port 9 after 0 ms: Could not connect to server"
+          and s["stateText"] == "SiriusXM · Stopped", "after streamRetryFor it stops: " + s["notice"], failures)
+    host.settle(3)
+    check(plays() == before + 1, f"and tries no more ({plays() - before} plays)", failures)
+
+    # Switching away while it reconnects ends it.
+    host.call("settings", "{}")
+    mpd_client(socket_path, "fake_stream_drop 0")
+    host.call("press", "Space")
+    wait_for(lambda: mpd_state(socket_path)["state"] == "play", "the channel again")
+    host.settle(5.5)
+    mpd_client(socket_path, "fake_stream_drop 99")
+    wait_for(lost, "the drop noticed")
+    host.call("setSource", "local")
+    wait_for(lambda: host.state()["source"] == "local", "local")
+    host.settle(7)
+    s = host.state()
+    check(s["source"] == "local" and not any("://" in line for line in mpd_query(socket_path, "currentsong") if line.startswith("file: ")) and not s["stateText"].endswith("Reconnecting…"),
+          "switching to local ends the reconnecting: " + s["stateText"], failures)
+    mpd_client(socket_path, "fake_stream_drop 0")
+
+    # Apple Music's bridge out of reach: closed connections for 4 s, then
+    # requests that hang for 10 s and are answered once it's over.
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    host.call("open")
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    to_source(host, "apple")
+    wait_for(lambda: host.state()["appleReady"] and host.state()["bar"]["playing"], "Apple Music playing")
+    host.settle(1)
+    back = offline(url, 4, 10)
+    wait_for(lambda: host.state()["stateText"] == "Apple Music · Not connected", "the bridge out of reach", timeout=8)
+    wait_for(lambda: host.state()["appleReady"], "the bridge back", timeout=40)
+    after = time.monotonic() - back
+    check(after < 6, f"the bridge shows again {after:.1f} s after it's back (the long poll alone: up to 25 s)", failures)
+    to_source(host, "local")
+    BRIDGE["config"].unlink()
+
+    # Spotify: omarock-spotify out of reach for 6 s. Soloist would play on.
+    host.call("setSource", "spotify")
+    wait_for(lambda: host.state()["spotifyMode"] and host.state()["bar"]["playing"], "Spotify playing")
+    back = offline(BRIDGE["spotify"], 6)
+    wait_for(lambda: host.state()["stateText"].endswith("Not connected") or host.state()["source"] != "spotify",
+             "omarock-spotify out of reach", timeout=8)
+    s = host.state()
+    check(s["source"] == "spotify" and s["stateText"] == "Spotify · Not connected",
+          "Spotify stays the source while omarock-spotify is out of reach: " + s["source"] + " | " + s["stateText"], failures)
+    wait_for(lambda: host.state()["spotifyMode"] and not host.state()["stateText"].endswith("Not connected"), "back", timeout=20)
+    after = time.monotonic() - back
+    check(after < 5 and host.state()["source"] == "spotify", f"and shows again {after:.1f} s after it's back", failures)
+    # Leaving it while it's out of reach: local at once, the release once it's back.
+    host.settle(1)
+    offline(BRIDGE["spotify"], 6)
+    wait_for(lambda: host.state()["stateText"] == "Spotify · Not connected", "omarock-spotify out of reach", timeout=8)
+    releases = len(spotify_requests("/v1/release"))
+    host.call("setSource", "local")
+    wait_for(lambda: host.state()["source"] == "local", "local at once", timeout=3)
+    wait_for(lambda: len(spotify_requests("/v1/release")) > releases, "the release, once it's back", timeout=15)
+    host.settle(1.5)
+    check(host.state()["source"] == "local" and mpd_state(socket_path)["state"] == "play",
+          "leaving Spotify while it's out of reach: local plays, and the release goes once it's back", failures)
+    host.call("close")
+
+
 def apple_genres_scenario(host, output, socket_path, failures):
     """Marc, 10-29, in Apple Music with Time Machine on 1989: "I enter punk in
     the box, but I'm not seeing any genres listed". Apple's catalog has only
@@ -3839,6 +3945,14 @@ def history_scenario(host, output, socket_path, failures):
         mpd_client(socket_path, "playid " + added)
         wait_for(lambda: host.state()["nowPlaying"].startswith(title), title + " playing")
 
+    def heard_again(title):
+        # A song played again goes on top of History once it counts (1 s):
+        # open History after that, or a row picked by its place can move.
+        try:
+            wait_for(lambda: sum(e["title"] == title for e in entries()) >= 2, title + " in the history again", timeout=5)
+        except RuntimeError:
+            pass
+
     def open_history():
         host.call("key", "H")
         wait_for(lambda: host.state()["browse"] == "history:History" and not host.state()["browseLoading"], "History open")
@@ -3890,6 +4004,7 @@ def history_scenario(host, output, socket_path, failures):
     wait_for(lambda: host.state()["source"] == "local" and host.state()["nowPlaying"].startswith("Glasswork"),
              "Glasswork playing again, on local music")
     check(True, "a song of yours plays again from mpd, on local music", failures)
+    heard_again("Glasswork")
 
     # Spotify's song plays there, by its id; the station's is looked up.
     # By name, not place: what was heard again since (a second is enough
@@ -3901,6 +4016,7 @@ def history_scenario(host, output, socket_path, failures):
     body = spotify_requests("/v1/play")[-1][2] or {}
     check(song["id"] in json.dumps(body), "a Spotify song plays on Spotify by its id: " + json.dumps(body), failures)
     wait_for(lambda: host.state()["source"] == "spotify", "Spotify the source")
+    heard_again(song["title"])
     s = open_history()
     host.call("activate", s["rows"].index("historylookup:Gimme Shelter"), "open")
     wait_for(lambda: host.state()["query"] == "Gimme Shelter The Rolling Stones", "the station's song looked up")
@@ -5764,6 +5880,7 @@ def main():
                             elif name == "setup": setup_scenario(host, output, failures)
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
+                            elif name == "reconnect": reconnect_scenario(host, socket_path, failures)
                             elif name == "apple-genres": apple_genres_scenario(host, output, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "scrolling": scrolling_scenario(host, output, socket_path, failures)
