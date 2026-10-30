@@ -13,7 +13,7 @@ import qs.Ui
 // in crmne.hyprmoncfg.
 BarWidget {
   id: root
-  moduleName: "mre.omarock"
+  moduleName: "marcewing.omarock"
 
   function injectPanel() {
     var target = panelLoader.item

@@ -19,12 +19,14 @@ private_file() {  # FILE WHAT [WHERE IT COMES FROM]: present and mode 600?
 # X-Omarock: omarock's own services answer only requests that carry it.
 health() { curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
 
-plugin=$HOME/.config/omarchy/plugins/mre.omarock
+id=marcewing.omarock
+old_id=mre.omarock   # its id before 0.13.0
+plugin=$HOME/.config/omarchy/plugins/$id
 shelljson=$HOME/.config/omarchy/shell.json
 setting() {  # KEY DEFAULT: omarock's setting: its own file's, else (before 0.6) its entry in shell.json
-  python3 -I - "$HOME/.config/omarock/settings.json" "$shelljson" "$1" "$2" <<'EOF'
+  python3 -I - "$HOME/.config/omarock/settings.json" "$shelljson" "$id" "$1" "$2" <<'EOF'
 import json, sys
-mine, path, key, default = sys.argv[1:]
+mine, path, plugin, key, default = sys.argv[1:]
 try:
     v = json.load(open(mine)).get(key)
     if v is not None:
@@ -36,7 +38,7 @@ try:
     d = json.load(open(path))
     for items in (d.get("bar", {}).get("layout", {}) or {}).values():
         for it in items:
-            if isinstance(it, dict) and it.get("id") == "mre.omarock" and key in it:
+            if isinstance(it, dict) and it.get("id") == plugin and key in it:
                 v = it[key]
                 print(str(v).lower() if isinstance(v, bool) else v)
                 sys.exit(0)
@@ -73,7 +75,10 @@ if [[ -f $plugin/manifest.json ]]; then
 else
   bad "omarock isn't installed: omarchy plugin add https://github.com/marcewing/omarock --enable"
 fi
-if grep -q '"mre.omarock"' "$shelljson" 2>/dev/null; then ok "on the bar"; else note "not on the bar: omarchy plugin enable mre.omarock"; fi
+if grep -q "\"$id\"" "$shelljson" 2>/dev/null; then ok "on the bar"; else note "not on the bar: omarchy plugin enable $id"; fi
+if [[ -d $HOME/.config/omarchy/plugins/$old_id ]] || grep -q "\"$old_id\"" "$shelljson" 2>/dev/null; then
+  bad "omarock is still there under its old id, $old_id: ./install moves it to $id"
+fi
 loaded=$(journalctl --user -b --no-pager 2>/dev/null | grep -o "omarock [0-9.]* loaded" | tail -1)
 [[ -n $loaded ]] && ok "the shell says: $loaded" || note "the shell hasn't logged omarock loading this boot"
 printf '  sources: radio %s, spotify %s, appleMusic %s, siriusXM %s\n' \

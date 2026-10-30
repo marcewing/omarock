@@ -36,7 +36,7 @@ your clone does it all in the terminal.
 Run it again (the settings' **Fix…** does) to finish a setup that stopped.
 
 By hand, run the tools from your omarock clone: the plugin's folder,
-`~/.config/omarchy/plugins/mre.omarock`, or a clone of your own.
+`~/.config/omarchy/plugins/marcewing.omarock`, or a clone of your own.
 
 1. **omarock's sound output** is optional ([audio/README.md](../audio/README.md)).
 2. **The developer app.** In the dashboard, create an app. Give it the redirect

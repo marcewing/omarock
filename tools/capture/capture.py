@@ -3625,8 +3625,9 @@ def apple_genres_scenario(host, output, socket_path, failures):
     or before, and an older bridge lists none."""
     url = f"http://127.0.0.1:{BRIDGE['port']}"
     BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
-    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    # Opening reads it again: the watch can miss a file rewritten as it was.
     host.call("open")
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
     to_source(host, "apple")
     wait_for(lambda: host.state()["appleReady"], "Apple Music")
 

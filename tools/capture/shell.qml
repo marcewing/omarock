@@ -21,7 +21,7 @@ ShellRoot {
   function findPanel(item) {
     var data = item.data
     for (var i = 0; i < data.length; i++) {
-      if (data[i] && data[i].item && data[i].item.moduleName === "mre.omarock") return data[i].item
+      if (data[i] && data[i].item && data[i].item.moduleName === "marcewing.omarock") return data[i].item
     }
     return null
   }
@@ -196,8 +196,8 @@ ShellRoot {
   })
 
   component Api: PluginBarApi {
-    pluginId: "mre.omarock"
-    moduleName: "mre.omarock"
+    pluginId: "marcewing.omarock"
+    moduleName: "marcewing.omarock"
     foreground: Commons.Color.bar.text
     barForeground: Commons.Color.bar.text
     background: Commons.Color.bar.background

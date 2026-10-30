@@ -89,7 +89,7 @@ below.
 - **"Waiting for mpd…"** means the socket: back to step 1.
 - **A key to open it** (ask first: it's Hyprland config): check the key is free
   (`omarchy menu keybindings --print`), then add `o.bind("SUPER + CTRL + M",
-  "omarock", "omarchy-shell shell toggle mre.omarock")` to
+  "omarock", "omarchy-shell shell toggle marcewing.omarock")` to
   `~/.config/hypr/bindings.lua`, backed up first. Hyprland reloads it on save;
   `hyprctl configerrors` should stay empty.
 

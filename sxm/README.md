@@ -32,7 +32,7 @@ and switches SiriusXM on. `./install siriusxm` from your clone does the same,
 asking for the login itself. By hand:
 
 1. Install the service, from your omarock clone (the plugin's folder,
-   `~/.config/omarchy/plugins/mre.omarock`, or a clone of your own):
+   `~/.config/omarchy/plugins/marcewing.omarock`, or a clone of your own):
    ```bash
    tools/install-sxm --start
    ```

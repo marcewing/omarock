@@ -24,8 +24,8 @@ import "History.js" as History
 // its own.
 Panel {
   id: root
-  moduleName: "mre.omarock"
-  ipcTarget: "mre.omarock"
+  moduleName: "marcewing.omarock"
+  ipcTarget: "marcewing.omarock"
 
   property var anchorItem: null
   property var hostWidget: null
@@ -199,7 +199,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.12.0"
+  readonly property string version: "0.13.0"
 
   property bool expanded: false
   property bool keysOpen: false
