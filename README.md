@@ -90,9 +90,9 @@ and **Remove…**, which removes the source and configuration, accounts and keys
 omarock plays into one output you pick, with one volume, and never anywhere
 else. Most don't need it; it matters if some output must never carry music.
 
-If you keep your plugin up to date with `omarchy plugin update mre.omarock`, when the plugin
-detects a newer version of a service than the one running, its settings offer
-**Update…**, and its tab is marked •.
+If you keep your plugin up to date with `omarchy plugin update marcewing.omarock`,
+when the plugin detects a newer version of a service than the one running, its
+settings offer **Update…**, and its tab is marked •.
 
 
 ## Get Rocking
@@ -173,14 +173,14 @@ Then `systemctl --user daemon-reload && systemctl --user enable --now mpd-mpris`
 omarchy plugin add https://github.com/marcewing/omarock --enable
 ```
 
-`--enable` puts it on the left of the bar (`omarchy plugin enable mre.omarock
+`--enable` puts it on the left of the bar (`omarchy plugin enable marcewing.omarock
 --section center`, or `right`, for elsewhere). Click it, and press `?` for the keys.
 
 A key to open it is a line in `~/.config/hypr/bindings.lua` (Omarchy's shell
 opens the omarock on the screen you're using):
 
 ```lua
-o.bind("SUPER + CTRL + M", "omarock", "omarchy-shell shell toggle mre.omarock")
+o.bind("SUPER + CTRL + M", "omarock", "omarchy-shell shell toggle marcewing.omarock")
 ```
 
 ### 3. More sources (optional)
@@ -197,7 +197,7 @@ by hand:
 ### Updating, and removing
 
 ```bash
-omarchy plugin update mre.omarock
+omarchy plugin update marcewing.omarock
 omarchy restart shell        # the shell's own reload keeps running the old code
 ```
 
@@ -211,7 +211,7 @@ so on) does the same.
 `./install --uninstall` takes all of omarock off: its key, the plugin, each service, the
 patches and the sound output (mpd gets its old output back). Each shows what it
 removes and asks first, and leaves mpd, your music and playlists alone.
-`omarchy plugin remove mre.omarock` alone removes only the plugin; the services
+`omarchy plugin remove marcewing.omarock` alone removes only the plugin; the services
 stay until you remove them too.
 
 ## Using omarock
@@ -326,7 +326,7 @@ stay until you remove them too.
     beside the panel. Right now there follows the panel as you move, and Esc
     or `q` closes the window. Hyprland floats it, and you can resize it (on
     Omarchy, Super and a right-drag); it opens again at the size you left it.
-- **From a key binding:** `qs ipc -p /usr/share/omarchy/shell call mre.omarock toggle`
+- **From a key binding:** `qs ipc -p /usr/share/omarchy/shell call marcewing.omarock toggle`
   opens the panel.
 
 ### The other sources
