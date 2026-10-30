@@ -53,7 +53,6 @@ set -uo pipefail
 repo=$(cd "$(dirname "$0")" && pwd)
 plugin_id=$(jq -r .id "$repo/manifest.json" 2>/dev/null)
 plugin_dir=$HOME/.config/omarchy/plugins/$plugin_id
-old_ids=(mre.omarock)   # omarock's plugin ids before this one (until 0.13.0)
 shelljson=$HOME/.config/omarchy/shell.json
 config=$HOME/.config/omarock
 units=$HOME/.config/systemd/user
@@ -552,114 +551,6 @@ plugin_source() {
   src=$(git -C "$repo" remote get-url origin 2>/dev/null)
   [[ -z $src || $src == /* ]] && src="file://$repo"
   printf '%s' "$src"
-}
-
-# OLD's entries in Omarchy's shell.json name omarock's id instead, in their
-# places and with their settings, into shell.json.new. Prints how many.
-rename_in_shell() {  # OLD
-  python3 -I - "$shelljson" "$1" "$plugin_id" <<'PY'
-import json, sys
-path, old, new = sys.argv[1:]
-d = json.load(open(path))
-n = 0
-def swap(items):
-    global n
-    for i, it in enumerate(items):
-        if it == old:
-            items[i] = new
-            n += 1
-        elif isinstance(it, dict) and it.get("id") == old:
-            it["id"] = new
-            n += 1
-for items in (d.get("bar", {}).get("layout", {}) or {}).values():
-    if isinstance(items, list):
-        swap(items)
-if isinstance(d.get("plugins"), list):
-    swap(d["plugins"])
-if n:
-    with open(path + ".new", "w") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-print(n)
-PY
-}
-
-# omarock's key opens it by id: its marked lines name this one, not OLD.
-# A line of the user's own naming OLD is only pointed out.
-rename_key() {  # OLD
-  [[ -f $bindings ]] && grep -qF "$1" "$bindings" || return 0
-  local n lines shown=${bindings/#"$HOME"/\~}
-  n=$(python3 -I - "$bindings" "$key_begin" "$key_end" "$1" "$plugin_id" <<'PY'
-import sys
-path, begin, end, old, new = sys.argv[1:]
-lines = open(path).read().split("\n")
-n = 0
-if begin in lines and end in lines:
-    for i in range(lines.index(begin) + 1, lines.index(end)):
-        if old in lines[i]:
-            lines[i] = lines[i].replace(old, new)
-            n += 1
-if n:
-    open(path + ".new", "w").write("\n".join(lines))
-print(n)
-PY
-)
-  if ((n > 0)); then
-    backup "$bindings"
-    swap_in "$bindings" && ok "Super+Ctrl+M opens omarock as $plugin_id"
-  fi
-  if grep -qF "$1" "$bindings"; then
-    note "a line of your own in $shown still opens $1; change that to $plugin_id:"
-    mapfile -t lines < <(grep -F "$1" "$bindings" | head -3)
-    block "${lines[@]}"
-  fi
-}
-
-# omarock under an id it had before: added again under this one, given the
-# old one's place on the bar, its settings there and its key, and only then
-# the old one removed, so the bar always has it.
-step_rename() {
-  local old old_dir n t0
-  for old in "${old_ids[@]}"; do
-    old_dir=$HOME/.config/omarchy/plugins/$old
-    [[ -d $old_dir ]] || grep -q "\"$old\"" "$shelljson" 2>/dev/null || continue
-    step "omarock's new plugin id"
-    explain "omarock's plugin id is now $plugin_id; it was $old. This adds omarock again as $plugin_id, gives it $old's place on the bar with its settings there, then removes ${old_dir/#"$HOME"/\~}."
-    confirm "Move omarock to its new id?" || stopped
-    t0=$(date +%s)
-    if [[ ! -e $plugin_dir && -d $old_dir ]]; then
-      if [[ $(jq -r .id "$old_dir/manifest.json" 2>/dev/null) == "$plugin_id" ]]; then
-        # Updated in place already (omarchy plugin update): only the folder's name is old.
-        run mv "$old_dir" "$plugin_dir" || stopped
-        omarchy-shell shell rescanPlugins >/dev/null 2>&1
-      else
-        run omarchy plugin add "$(plugin_source)" --yes || stopped
-        wait_until "Waiting for Omarchy to find it…" 15 plugin_known
-      fi
-    fi
-    if grep -q "\"$old\"" "$shelljson" 2>/dev/null; then
-      n=$(rename_in_shell "$old")
-      if ((n > 0)); then
-        backup "$shelljson"
-        swap_in "$shelljson" && ok "omarock keeps its place on the bar"
-      else
-        bad "couldn't find $old's place in ${shelljson/#"$HOME"/\~}: omarchy plugin enable $plugin_id puts it on the bar"
-      fi
-    fi
-    rename_key "$old"
-    if [[ -d $old_dir ]]; then
-      if [[ -n $(git -C "$old_dir" status --porcelain 2>/dev/null) ]]; then
-        note "${old_dir/#"$HOME"/\~} has changes of its own, so it stays; omarchy plugin remove $old once you've kept them"
-      else
-        run omarchy plugin remove "$old" --yes >/dev/null || bad "${old_dir/#"$HOME"/\~} is still there"
-      fi
-    fi
-    if wait_until "Waiting for the bar to load omarock…" 30 loaded_since "$t0" "$(manifest_version "$plugin_dir/manifest.json")"; then
-      ok "omarock is on the bar as $plugin_id"
-    else
-      note "the bar hasn't said it loaded omarock yet: journalctl --user -b | grep omarock"
-    fi
-  done
 }
 
 step_plugin() {
@@ -1324,7 +1215,6 @@ setup_local() {
   record running
   welcome
   step_mpd
-  step_rename
   step_plugin
   step_key
   step_radio
@@ -1412,13 +1302,6 @@ un_key() {
 }
 
 un_plugin() {
-  local old
-  for old in "${old_ids[@]}"; do  # omarock under an id it had before
-    [[ -d $HOME/.config/omarchy/plugins/$old ]] || continue
-    step "The bar plugin, under its old id"
-    explain "omarock's id was $old until 0.13.0. Omarchy's own remove takes that off the bar too."
-    confirm "Remove $old?" && run omarchy plugin remove "$old" --yes
-  done
   [[ -d $plugin_dir ]] || grep -q "\"$plugin_id\"" "$shelljson" 2>/dev/null || return 0
   step "The bar plugin"
   explain "Omarchy's own remove takes omarock off the bar, with its settings there, and deletes $plugin_dir."
