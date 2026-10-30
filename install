@@ -540,7 +540,9 @@ step_mpd() {
 # ---- 2. The plugin ----
 
 loaded_since() {  # TIME [VERSION]: the shell has logged omarock (that version) loading since TIME
-  journalctl --user --since "@$1" --no-pager 2>/dev/null | grep -q "omarock ${2:-.*} loaded"
+  # grep reads to the end: with -q it would stop at the first match, and
+  # journalctl, still writing, fails the pipe (pipefail).
+  journalctl --user --since "@$1" --no-pager 2>/dev/null | grep "omarock ${2:-.*} loaded" >/dev/null
 }
 plugin_known() { omarchy plugin list --json 2>/dev/null | jq -e --arg id "$plugin_id" 'any(.[]; .id == $id)' >/dev/null; }
 # Where this clone came from, so `omarchy plugin update` follows it; a clone
@@ -652,7 +654,7 @@ step_rename() {
         run omarchy plugin remove "$old" --yes >/dev/null || bad "${old_dir/#"$HOME"/\~} is still there"
       fi
     fi
-    if wait_until "Waiting for the bar to load omarock…" 30 loaded_since "$t0"; then
+    if wait_until "Waiting for the bar to load omarock…" 30 loaded_since "$t0" "$(manifest_version "$plugin_dir/manifest.json")"; then
       ok "omarock is on the bar as $plugin_id"
     else
       note "the bar hasn't said it loaded omarock yet: journalctl --user -b | grep omarock"
