@@ -77,6 +77,10 @@ below.
   simpler than changing mpd.
 - **The media keys** need `mpd-mpris` running, with README.md's `follow-mpd.conf`
   drop-in: without it, mpd-mpris dies the first time mpd restarts and stays down.
+- **A crash:** mpd's own unit has `Restart=no`, so a crashed mpd stays down.
+  `./install` offers a drop-in, `mpd.service.d/restart.conf` (`Restart=on-failure`,
+  `RestartSec=2`). With `restore_paused "yes"` in mpd.conf it comes back paused,
+  not playing from its last saved state, which can be minutes old.
 - **Covers** are image files in each album's folder (`cover.jpg` and the like).
   Embedded art isn't shown.
 

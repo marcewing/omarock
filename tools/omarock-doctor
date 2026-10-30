@@ -58,6 +58,9 @@ else
   bad "mpd isn't installed"
 fi
 if active mpd || active mpd.socket; then ok "mpd is running"; else bad "mpd isn't running: systemctl --user enable --now mpd (or mpd.socket)"; fi
+if [[ $(systemctl --user show mpd -p Restart --value 2>/dev/null) == no ]]; then
+  note "mpd stays down if it crashes: ./install offers a drop-in that brings it back (mpd.service.d/restart.conf)"
+fi
 sock=$(setting socket "")
 [[ -z $sock ]] && sock=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
 if [[ -S $sock ]]; then

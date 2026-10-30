@@ -440,6 +440,9 @@ step_mpd() {
     esac
     lines+=("$(printf '%-19s "%s"' "$key" "$path")")
   done
+  # A new config: mpd starts paused (after a crash, or at login), not playing
+  # from its last saved state, which can be minutes old.
+  [[ -f $conf ]] || lines+=("$(printf '%-19s "%s"' restore_paused yes)")
 
   # The socket. Omarchy's bar (Quickshell) can only open unix sockets, not
   # mpd's TCP port, so mpd listens on one, and on TCP for this machine only
@@ -516,6 +519,17 @@ step_mpd() {
     confirm "Have mpd read your music folder now (mpc update)?" && run mpc --quiet update
   else
     ok "mpd knows $songs songs (after adding music: mpc update)"
+  fi
+
+  # A crash: mpd's own unit leaves it down; a drop-in brings it back.
+  if [[ $(systemctl --user show mpd -p Restart --value 2>/dev/null) == no ]]; then
+    explain "If mpd crashes, it stays down until you start it again. A drop-in ($dropin_dir/restart.conf) brings it back$([[ $(conf_value "$conf" restore_paused) == yes ]] && echo ", paused")."
+    if confirm "Bring mpd back after a crash?"; then
+      install -d "$dropin_dir"
+      printf '# omarock: bring mpd back if it crashes\n[Service]\nRestart=on-failure\nRestartSec=2\n' >"$dropin_dir/restart.conf"
+      ok "wrote $dropin_dir/restart.conf"
+      run systemctl --user daemon-reload
+    fi
   fi
 
   # The media keys: mpd-mpris exits whenever mpd restarts, and its unit
@@ -1562,14 +1576,15 @@ un_mpd() {
   local conf gone dropins=() f
   conf=$(mpd_conf)
   gone=$([[ -f $conf ]] && mpd_socket_undo "$conf" show)
-  for f in "$units/mpd.service.d/runtime-dir.conf" "$units/mpd-mpris.service.d/follow-mpd.conf"; do
+  for f in "$units/mpd.service.d/runtime-dir.conf" "$units/mpd.service.d/restart.conf" \
+           "$units/mpd-mpris.service.d/follow-mpd.conf"; do
     head -1 "$f" 2>/dev/null | grep -q '^# omarock:' && dropins+=("$f")
   done
   [[ -n $gone ]] || ((${#dropins[@]})) || return 0
   step "omarock's changes to mpd"
   explain "omarock also set mpd up for itself. Other mpd clients can use these too, so they stay unless you say otherwise."
   if [[ -n $gone ]]; then explain "In $conf, mpd's unix socket:"; sed 's/^/    /' <<<"$gone"; fi
-  if ((${#dropins[@]})); then explain "Drop-ins (the socket's folder, and mpd-mpris following mpd):"; listing "${dropins[@]}"; fi
+  if ((${#dropins[@]})); then explain "Drop-ins (the socket's folder, mpd coming back after a crash, and mpd-mpris following mpd):"; listing "${dropins[@]}"; fi
   confirm "Take these out too, and restart mpd?" no || { ok "kept them"; return 0; }
   if [[ -n $gone ]]; then
     backup "$conf"
