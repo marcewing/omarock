@@ -259,7 +259,10 @@ skipped, and later detail responses mark them `"playable": false`.
 
 `seq` goes up on every change omarock would show: the song, the state, the
 queue, shuffle, repeat or the owner (below). It does not change for position alone; omarock works
-the position out from `position`, `positionAt` and `state`.
+the position out from `position`, `positionAt` and `state`. The exception, from 0.8.1: about
+1.5 s after `play`, `next`, `previous` and a jump, `seq` goes up once more with nothing else
+changed. Right after those MusicKit's clock runs 0.1-0.35 s ahead of the sound, and that
+status carries the settled position.
 
 Songs in `song` and `queue` carry `albumId` and `artistId`, which open with
 `GET /albums/{source}/{albumId}` and `GET /artists/{source}/{artistId}` (the song's

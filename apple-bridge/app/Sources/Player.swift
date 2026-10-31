@@ -5,7 +5,7 @@ import MusicKit
 
 /// ApplicationMusicPlayer, the status long poll, and the keep-awake assertion.
 /// `seq` goes up on every change omarock would show (song, state, queue, shuffle,
-/// repeat, the owner), never for position alone.
+/// repeat, the owner), and for position only once, as it settles after a skip (resyncSoon).
 @MainActor
 final class Player {
     private let player = ApplicationMusicPlayer.shared
@@ -163,6 +163,7 @@ final class Player {
                 try await moveTo(first)
             }
             try await startSafely()
+            resyncSoon()
         case "next":
             if player.queue.entries.isEmpty { return try await play(expanded, start: 0, mode: "play") }
             let current = currentIndex ?? -1
@@ -242,6 +243,7 @@ final class Player {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         check()
+        resyncSoon()
     }
 
     func previous() async throws {
@@ -253,6 +255,7 @@ final class Player {
             if !isPlaying { try await startSafely() }
         }
         check()
+        resyncSoon()
     }
 
     func seek(to position: Double) {
@@ -266,6 +269,7 @@ final class Player {
         player.queue.currentEntry = entries[index]
         if !isPlaying { try await startSafely() }
         check()
+        resyncSoon()
     }
 
     func remove(at index: Int) throws {
@@ -291,6 +295,22 @@ final class Player {
     }
 
     // MARK: Changes
+
+    /// After play, next, previous and jump, MusicKit's clock runs ahead of the sound for a
+    /// moment (the reply's position was 0.13-0.35 s ahead, measured in 0.8.1), and seq doesn't
+    /// change for position alone. So once the clock has settled, send everyone one more status.
+    private var resyncs = 0
+    private func resyncSoon() {
+        resyncs += 1
+        let mine = resyncs
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.resyncs == mine, self.isPlaying else { return }
+                self.changed = true
+                self.check()
+            }
+        }
+    }
 
     private func check() {
         _ = position()  // keeps lastPosition at most a second old
