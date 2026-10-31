@@ -20,9 +20,7 @@ Linux: omarock ◀──── bridge API :8710 (JSON, bearer token) ───�
   on loopback, never on your LAN or the internet. Every API request needs the token,
   except `/v1/health` (the bridge's version and state) and cover art (each image's
   address carries a key made from the token). The stream needs none: anyone on your
-  tailnet can listen to what the bridge plays. ffmpeg's command line carries Icecast's
-  source password, so other users on the Mac can see it with `ps`; it only lets them
-  send a stream to the Mac's own Icecast.
+  tailnet can listen to what the bridge plays.
 - **It runs in the background:** no Dock icon, started at login, restarted if it
   crashes. With nobody listening to the stream for 30 s, it pauses.
 
@@ -33,7 +31,7 @@ account for MusicKit to work.
 
 - **A Mac** with macOS 14.2 or later (Core Audio process taps). Developed on macOS 27
   on Apple silicon; Intel Macs should work but haven't been tried.
-- **Xcode** from the App Store, and [Homebrew](https://brew.sh) for `xcodegen`, `ffmpeg`
+- **Xcode** from the App Store, and [Homebrew](https://brew.sh) for `xcodegen`
   and `icecast`.
 - **A paid Apple Developer Program membership** ($99 a year). MusicKit needs it, and a
   bundle ID registered with MusicKit switched on (below).
@@ -67,7 +65,7 @@ cd omarock && ./install
 
 On a Mac, `./install` sets up the bridge (`apple-bridge/install`), one step at a time. It
 checks the requirements and offers to install what's missing from Homebrew (`xcodegen`,
-`ffmpeg`, `icecast`, and `gum` for its prompts). It asks for your Team ID and bundle ID
+`icecast`, and `gum` for its prompts). It asks for your Team ID and bundle ID
 and saves them in `apple-bridge/app/Local.xcconfig`, which git ignores. Then it builds and
 signs the app, installs it to `~/Applications/OmarockBridge.app`, starts it, and goes
 through the Mac's permissions with you. It ends with what your Omarchy machine needs.
@@ -109,7 +107,7 @@ macOS opens Music's window at login. Closing the window leaves Music running.
 `./install` uses `apple-bridge/app/build.sh`, which you can run yourself:
 
 ```sh
-brew install xcodegen ffmpeg icecast
+brew install xcodegen icecast
 apple-bridge/app/build.sh --run
 ```
 
@@ -136,7 +134,7 @@ Everything lives in `~/Library/Application Support/omarock-bridge`, not in the r
 | `icecast.xml` | Icecast's config, rewritten at each launch for the current Tailscale address. Delete its first comment line to keep your own edits. |
 | `config.json` | Optional settings (below). |
 | `INSTALLED` | The commit the installed app was built from. |
-| `log/` | `bridge.log`, `ffmpeg.log`, and Icecast's `error.log` and `access.log`. |
+| `log/` | `bridge.log`, `encoder.log` (the stream's encoder), and Icecast's `error.log` and `access.log`. |
 
 `config.json`, every field optional:
 
@@ -144,7 +142,7 @@ Everything lives in `~/Library/Application Support/omarock-bridge`, not in the r
 { "listenHost": "100.64.0.10",   // default: the Mac's Tailscale address
   "port": 8710,                  // the API's port (Icecast's is 8000)
   "streamURL": "http://…:8000/omarock.ogg",  // what /health hands out
-  "ffmpeg": "/opt/homebrew/bin/ffmpeg", "icecast": "/opt/homebrew/bin/icecast",
+  "icecast": "/opt/homebrew/bin/icecast",
   "startAtLogin": true }         // false: no launch agent; run the app by hand
 ```
 
@@ -275,7 +273,7 @@ and the patched builds for its stream.
 
 - `app/`: the bridge app (Swift, XcodeGen). `Sources/API.swift` routes [API.md](API.md);
   `Player.swift` is MusicKit's player and the status long poll; `StreamService.swift` is
-  the tap, the encoder (`FlacEncoder.swift`), ffmpeg and Icecast; `LibraryIndex.swift` reads the library through
+  the tap, the encoder (`FlacEncoder.swift`, which is also Icecast's source) and Icecast; `LibraryIndex.swift` reads the library through
   iTunesLibrary, which is much faster than MusicKit's library requests on macOS.
 - `flac/`: libFLAC 1.5.0's encoder, from [xiph/flac](https://github.com/xiph/flac)
   (BSD, `flac/COPYING.Xiph`), built into the app; `flac/README.md` says what's there.

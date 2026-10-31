@@ -116,7 +116,7 @@ major=$(sw_vers -productVersion | cut -d. -f1); minor=$(sw_vers -productVersion 
 (( major > 14 || (major == 14 && minor >= 2) )) || problems+="macOS 14.2 or later (this is $(sw_vers -productVersion))"
 xcodebuild -version >/dev/null 2>&1 \
   || problems+="Xcode, from the App Store, selected with: sudo xcode-select -s /Applications/Xcode.app"
-for tool in xcodegen ffmpeg icecast; do
+for tool in xcodegen icecast; do
   command -v $tool >/dev/null || problems+="$tool: brew install $tool"
 done
 security find-identity -v -p codesigning 2>/dev/null | grep -q '"Apple Development' \

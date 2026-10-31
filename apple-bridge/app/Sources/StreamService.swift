@@ -2,7 +2,7 @@ import AppKit
 import ProcessTap
 
 /// The sound path: tap → PCMWriter → pipe → `OmarockBridge --encode` (libFLAC, Ogg FLAC;
-/// see FlacEncoder) → ffmpeg (0.2 s pages) → Icecast /omarock.ogg.
+/// see FlacEncoder), which is Icecast's source for /omarock.ogg.
 ///
 /// The pipe outlives the encoder: we keep its read end open too, so when the encoder exits
 /// the writer just blocks (the tap side drops audio) instead of failing with EPIPE, and the
@@ -16,9 +16,8 @@ final class StreamService {
     private let pipeWrite: Int32
     private let writer: PCMWriter
     private let supervisor: TapSupervisor
-    /// ffmpeg, and the FLAC encoder in front of it.
+    /// `OmarockBridge --encode`.
     private var encoder: Process?
-    private var flac: Process?
     private var icecast: Process?
     private var stopping = false
 
@@ -65,7 +64,11 @@ final class StreamService {
         }
         return false
     }
-    var encoderRunning: Bool { (encoder?.isRunning ?? false) && (flac?.isRunning ?? false) }
+    var encoderRunning: Bool { encoder?.isRunning ?? false }
+
+    /// About how long audio takes from the tap to the write to Icecast: on average half a
+    /// FLAC frame, plus the tap's and the PCMWriter's buffers (measured, 0.8.0).
+    var delay: Double { Double(FlacEncoder.blockSize) / 2 / sampleRate + 0.03 }
 
     func start() {
         Log.info("stream: s16le \(Int(sampleRate)) Hz stereo, tapping \(supervisor.target)")
@@ -95,7 +98,6 @@ final class StreamService {
     func stop() {
         stopping = true
         supervisor.stop()
-        flac?.terminate()
         encoder?.terminate()
         icecast?.terminate()
     }
@@ -111,7 +113,7 @@ final class StreamService {
                 killStaleSource(then: next)
             } else {
                 launchIcecast()
-                // Give a fresh Icecast a moment to bind before ffmpeg connects; ffmpeg retries anyway.
+                // Give a fresh Icecast a moment to bind before the encoder connects (it's restarted if it can't).
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: next)
             }
         }
@@ -167,53 +169,19 @@ final class StreamService {
     // MARK: Encoder
 
     private func startEncoder() {
-        guard !stopping else { return }
-        let password: String
-        do {
-            password = try Secrets.sourcePassword()
-        } catch {
-            Log.error("encoder: cannot read \(Paths.sourcePassword.path): \(error)")
-            return
-        }
-        // The encoder and ffmpeg start and stop together: a new ffmpeg needs the stream's headers.
-        if let old = flac, old.isRunning {
-            old.terminate()
-            old.waitUntilExit()
-        }
-        let encoded = Pipe()
-        let flac = Process()
-        flac.executableURL = Bundle.main.executableURL
-        flac.arguments = ["--encode", String(Int(sampleRate))]
-        // Each encoder gets its own copy of the read end; Process may close it after launch.
-        flac.standardInput = FileHandle(fileDescriptor: dup(pipeRead), closeOnDealloc: true)
-        flac.standardOutput = encoded
-        flac.standardError = logFile("ffmpeg.log")
-
+        guard !stopping, encoder?.isRunning != true else { return }
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: config.ffmpeg)
-        process.arguments = [
-            "-hide_banner", "-nostdin", "-loglevel", "warning",
-            "-f", "ogg", "-i", "pipe:0",
-            "-c:a", "copy",
-            "-f", "ogg", "-page_duration", "200000", "-flush_packets", "1",
-            "-content_type", "application/ogg", "-ice_name", "omarock", "-ice_public", "0",
-            "icecast://source:\(password)@127.0.0.1:8000/omarock.ogg",
-        ]
-        process.standardInput = encoded
-        process.standardOutput = logFile("ffmpeg.log")
-        process.standardError = logFile("ffmpeg.log")
-        flac.terminationHandler = { [weak self] p in
-            DispatchQueue.main.async {
-                guard let self, !self.stopping, p.terminationReason == .exit else { return }
-                // ffmpeg then ends at the end of its input, and starts them both again.
-                Log.error("encoder: the FLAC encoder exited with status \(p.terminationStatus)")
-            }
-        }
+        process.executableURL = Bundle.main.executableURL
+        process.arguments = ["--encode", String(Int(sampleRate)), "/omarock.ogg"]
+        // Each encoder gets its own copy of the read end; Process may close it after launch.
+        process.standardInput = FileHandle(fileDescriptor: dup(pipeRead), closeOnDealloc: true)
+        process.standardOutput = logFile("encoder.log")
+        process.standardError = logFile("encoder.log")
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
                 guard let self, !self.stopping else { return }
-                Log.error("encoder: ffmpeg exited with status \(p.terminationStatus); restarting in 1 s")
-                if flac.isRunning { flac.terminate() }
+                // A new connection needs the stream's headers again, so a new encoder.
+                Log.error("encoder: exited (\(p.terminationReason == .exit ? "status" : "signal") \(p.terminationStatus), see encoder.log); restarting in 1 s")
                 // If Icecast is what went away (say, one started by hand before the bridge),
                 // run our own before the encoder reconnects.
                 self.icecastAnswers { up in
@@ -226,18 +194,11 @@ final class StreamService {
             }
         }
         do {
-            try flac.run()
-            self.flac = flac
-        } catch {
-            return Log.error("encoder: cannot start the FLAC encoder: \(error)")
-        }
-        do {
             try process.run()
             encoder = process
-            Log.info("encoder: libFLAC pid \(flac.processIdentifier), ffmpeg pid \(process.processIdentifier)")
+            Log.info("encoder: pid \(process.processIdentifier), \(FlacEncoder.blockSize)-sample frames")
         } catch {
-            flac.terminate()
-            Log.error("encoder: cannot start \(config.ffmpeg): \(error)")
+            Log.error("encoder: cannot start: \(error)")
         }
     }
 

@@ -290,15 +290,15 @@ step_requirements() {
     stopped
   fi
   local need=() t
-  for t in xcodegen ffmpeg icecast; do (( $+commands[$t] )) || need+=($t); done
+  for t in xcodegen icecast; do (( $+commands[$t] )) || need+=($t); done
   if (( $#need )); then
-    explain "From Homebrew: xcodegen makes the Xcode project, ffmpeg sends the stream (lossless FLAC) to Icecast, and Icecast serves it."
+    explain "From Homebrew: xcodegen makes the Xcode project, and Icecast serves the stream (lossless FLAC) to your tailnet."
     confirm "Install ${(j:, :)need} with Homebrew?" || { bad "The bridge needs them."; stopped; }
     run brew install $need || stopped
     rehash
     changed=true
   fi
-  ok "xcodegen, ffmpeg and Icecast are installed"
+  ok "xcodegen and Icecast are installed"
 
   # Tailscale: the bridge serves only on its address (and loopback).
   local addr
@@ -490,7 +490,7 @@ step_health() {
   if health_true capturing; then ok "it captures its own playback"; else bad "it can't capture its playback yet: the stream will be silent"; fi
 
   if ! health_true encoding && ! wait_until "Checking the encoder…" 20 health_true encoding; then
-    bad "The stream's encoder isn't running: see $support/log/ffmpeg.log and bridge.log"
+    bad "The stream's encoder isn't running: see $support/log/encoder.log and bridge.log"
   else
     ok "it streams"
   fi
@@ -615,7 +615,7 @@ uninstall() {
 
   step "What stays"
   local -a stays=(
-    "Homebrew's xcodegen, ffmpeg, icecast and gum: brew uninstall them if nothing else uses them."
+    "Homebrew's xcodegen, icecast and gum, and ffmpeg if an older bridge installed it: brew uninstall them if nothing else uses them."
     "Xcode, and your Apple Development certificate."
     "This clone, with your Team ID and bundle ID in apple-bridge/app/Local.xcconfig, and the build in apple-bridge/app/build: delete the clone to remove them."
     "Your bundle ID on developer.apple.com (Certificates, Identifiers & Profiles, Identifiers): delete it there."

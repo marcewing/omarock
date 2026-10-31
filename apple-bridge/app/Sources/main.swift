@@ -12,10 +12,11 @@ if CommandLine.arguments.dropFirst().first == "--unregister" {
     exit(LoginAgent.unregister() ? 0 : 1)
 }
 
-// `OmarockBridge --encode RATE`: the stream's FLAC encoder, PCM in and Ogg FLAC out
-// (StreamService runs it in front of ffmpeg).
+// `OmarockBridge --encode RATE [MOUNT]`: the stream's FLAC encoder, PCM in and Ogg FLAC out
+// to Icecast's MOUNT (/omarock.ogg; StreamService runs it), or to stdout for `-`.
 if CommandLine.arguments.dropFirst().first == "--encode" {
-    exit(FlacEncoder.run(sampleRate: UInt32(CommandLine.arguments.dropFirst(2).first ?? "") ?? 48000))
+    let args = Array(CommandLine.arguments.dropFirst(2))
+    exit(FlacEncoder.run(sampleRate: UInt32(args.first ?? "") ?? 48000, mount: args.dropFirst().first ?? "/omarock.ogg"))
 }
 
 // `OmarockBridge --setup`: make the token, Icecast's passwords and config, print what the

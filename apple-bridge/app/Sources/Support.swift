@@ -31,13 +31,12 @@ struct Config: Decodable {
     var port: UInt16 = 8710
     /// The stream URL /health hands out; nil: http://{listenHost}:8000/omarock.ogg.
     var streamURL: String?
-    var ffmpeg = Config.homebrew("ffmpeg")
     var icecast = Config.homebrew("icecast")
     /// Run as a launch agent: started at login, restarted after a crash.
     var startAtLogin = true
 
     enum CodingKeys: String, CodingKey {
-        case tapPid, tapBundle, listenHost, port, streamURL, ffmpeg, icecast, startAtLogin
+        case tapPid, tapBundle, listenHost, port, streamURL, icecast, startAtLogin
     }
 
     init() {}
@@ -49,7 +48,6 @@ struct Config: Decodable {
         listenHost = try c.decodeIfPresent(String.self, forKey: .listenHost)
         port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? port
         streamURL = try c.decodeIfPresent(String.self, forKey: .streamURL)
-        ffmpeg = try c.decodeIfPresent(String.self, forKey: .ffmpeg) ?? ffmpeg
         icecast = try c.decodeIfPresent(String.self, forKey: .icecast) ?? icecast
         startAtLogin = try c.decodeIfPresent(Bool.self, forKey: .startAtLogin) ?? startAtLogin
     }
