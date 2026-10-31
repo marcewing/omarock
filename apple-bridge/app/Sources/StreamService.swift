@@ -66,9 +66,15 @@ final class StreamService {
     }
     var encoderRunning: Bool { encoder?.isRunning ?? false }
 
-    /// About how long audio takes from the tap to the write to Icecast: on average half a
-    /// FLAC frame, plus the tap's and the PCMWriter's buffers (measured, 0.8.0).
-    var delay: Double { Double(FlacEncoder.blockSize) / 2 / sampleRate + 0.03 }
+    /// Seconds from a status's position to that audio reaching Icecast. The encoder holds it
+    /// about half a FLAC frame plus 12 ms (the tap's and the PCMWriter's buffers, the write);
+    /// but MusicKit's position is what the output device is playing, which the tap gets that
+    /// device's output latency early. On built-in speakers that's the encoder's ~0.022 s less
+    /// their 0.028 s, and the stream measured 0.006 s ahead of the position (0.8.1).
+    var delay: Double {
+        let latency = (try? CoreAudio.outputLatency(CoreAudio.defaultPlaybackDevice())) ?? 0
+        return Double(FlacEncoder.blockSize) / 2 / sampleRate + 0.012 - latency
+    }
 
     func start() {
         Log.info("stream: s16le \(Int(sampleRate)) Hz stereo, tapping \(supervisor.target)")

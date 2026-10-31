@@ -250,7 +250,7 @@ final class API {
             "encoding": stream.encoderRunning,
             // libFLAC's limit_min_bitrate: silence streams at about 6 KB/s (StreamService).
             "minBitrate": true,
-            // Seconds from the tap to the write to Icecast (FlacEncoder).
+            // Seconds from a status's position to its audio reaching Icecast (StreamService).
             "streamDelay": (stream.delay * 1000).rounded() / 1000,
         ]
         if let storefront = music.storefront { health["storefront"] = storefront }

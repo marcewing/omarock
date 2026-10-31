@@ -66,6 +66,39 @@ public enum CoreAudio {
         try get(system, kAudioHardwarePropertyDefaultSystemOutputDevice, initial: AudioObjectID(kAudioObjectUnknown))
     }
 
+    /// The device apps play through (MusicKit included).
+    public static func defaultPlaybackDevice() throws -> AudioObjectID {
+        try get(system, kAudioHardwarePropertyDefaultOutputDevice, initial: AudioObjectID(kAudioObjectUnknown))
+    }
+
+    /// Seconds from an app's render to the device's output: the device's and its first output
+    /// stream's latency, its safety offset, and one IO buffer. A process tap gets the audio
+    /// that much before it's heard, and players report positions as heard.
+    public static func outputLatency(_ device: AudioObjectID) throws -> Double {
+        func frames(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope) throws -> UInt32 {
+            var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+            var value: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            try check(AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value),
+                      "get property \(fourCC(OSStatus(bitPattern: selector))) of object \(object)")
+            return value
+        }
+        let output = kAudioObjectPropertyScopeOutput
+        var total = try frames(device, kAudioDevicePropertyLatency, output)
+            + frames(device, kAudioDevicePropertySafetyOffset, output)
+            + frames(device, kAudioDevicePropertyBufferFrameSize, kAudioObjectPropertyScopeGlobal)
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: output, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        if AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size >= 4 {
+            var stream = AudioStreamID(0)
+            size = 4
+            if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &stream) == noErr {
+                total += (try? frames(stream, kAudioStreamPropertyLatency, kAudioObjectPropertyScopeGlobal)) ?? 0
+            }
+        }
+        return Double(total) / (try nominalSampleRate(device))
+    }
+
     public static func deviceUID(_ device: AudioObjectID) throws -> String {
         try getString(device, kAudioDevicePropertyDeviceUID)
     }
