@@ -54,6 +54,32 @@ Item {
   readonly property var status: mpd.status
   readonly property bool hasSong: !!song.file
   readonly property bool canSeek: mpd.ready && status.state !== "stop" && status.duration > 0
+  // Apple Music: a change made here, until its sound arrives
+  // (AppleClient.waiting). The time cycles dots, and the bar pulses.
+  readonly property bool waiting: mpd.waiting === true
+  property int waitDots: 1
+  property real waitPulse: 1
+  readonly property string waitText: {
+    var time = Mpd.formatTime(root.mpd.elapsed)
+    var dots = "...".slice(0, root.waitDots)
+    return dots + " ".repeat(Math.max(0, time.length - dots.length))
+  }
+
+  Timer {
+    interval: 350
+    repeat: true
+    running: root.waiting && root.active
+    onTriggered: root.waitDots = root.waitDots % 3 + 1
+    onRunningChanged: root.waitDots = 1
+  }
+
+  SequentialAnimation on waitPulse {
+    running: root.waiting && root.active
+    loops: Animation.Infinite
+    onRunningChanged: if (!running) root.waitPulse = 1
+    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutSine }
+    NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutSine }
+  }
 
   readonly property string titleText: {
     if (!mpd.ready) return "Can't reach " + root.sourceName
@@ -329,10 +355,11 @@ Item {
 
       Text {
         id: elapsedLabel
+        objectName: "playingTime"
         textFormat: Text.PlainText
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        text: Mpd.formatTime(seek.dragging ? seek.liveValue : root.mpd.elapsed)
+        text: seek.dragging ? Mpd.formatTime(seek.liveValue) : root.waiting ? root.waitText : Mpd.formatTime(root.mpd.elapsed)
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -346,6 +373,7 @@ Item {
         anchors.rightMargin: Style.space(10)
         anchors.verticalCenter: parent.verticalCenter
         enabled: root.canSeek
+        opacity: root.waiting ? root.waitPulse : 1
         minimum: 0
         maximum: Math.max(1, root.status.duration)
         value: root.mpd.elapsed

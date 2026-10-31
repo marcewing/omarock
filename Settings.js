@@ -18,7 +18,9 @@
 // `appleBridge` and `appleStream`, which override apple.json (./install
 // apple-music writes that); `appleRejoin` (default on: reconnect mpd to the
 // Apple Music stream after each change, which only a bridge before 0.7.0
-// needs); `timeMachineYear`, the year Time
+// needs); `appleStreamLag` (1.9), how far behind the Apple Music stream mpd
+// is taken to play until omarock has measured it (the harness sets 0: its
+// fake mpd isn't behind); `timeMachineYear`, the year Time
 // Machine's button picked (0 or none: off); `radioState`, the US state
 // "Your area" replaced (still read while radioArea is empty); `timeZone`,
 // the time zone that says which country an area is likelier in (else the

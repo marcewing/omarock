@@ -202,6 +202,9 @@ class Fake:
         # ones that refuse (fake_stream_refuse), how many plays of one fail to
         # connect (fake_stream_drop), and mpd's error.
         self.stream_delay = 0.0
+        # How long mpd buffers a stream before it plays (fake_stream_lag): its
+        # time starts that much after it connects, so it plays that far behind.
+        self.stream_lag = 0.0
         self.refused = []
         self.drops = 0
         self.error = ""
@@ -260,6 +263,7 @@ class Fake:
         self.error = ""
         if "://" in file:
             if not holds: self.started += self.stream_delay
+            self.started += self.stream_lag
             # Like mpd, a station that refuses stops playback, with the reason.
             if any(r in file for r in self.refused):
                 self.state = "stop"
@@ -506,6 +510,10 @@ class Fake:
         if name == "fake_stream_delay":
             # Test control, not mpd: streams take this many seconds to connect.
             self.stream_delay = float(rest[0])
+            return []
+        if name == "fake_stream_lag":
+            # Test control, not mpd: streams play this many seconds behind.
+            self.stream_lag = float(rest[0])
             return []
         if name == "fake_stream_refuse":
             # Test control, not mpd: streams whose URL contains this refuse (HTTP 403).

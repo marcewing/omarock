@@ -444,6 +444,8 @@ A few are in the file only, for when you know you need them:
   newer one it does nothing.
 - `streamRetryFor` (300): how many seconds omarock keeps trying to reconnect a
   radio station or SiriusXM channel that lost its connection, before it gives up.
+- `appleStreamLag` (1.9): how many seconds behind the Apple Music stream mpd is
+  taken to play, until omarock has measured it (4 s after mpd joins the stream).
 
 ## Troubleshooting
 

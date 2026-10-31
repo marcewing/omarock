@@ -194,6 +194,15 @@ And in the file only:
   libFLAC fell behind on it. From 0.7.0 (`"minBitrate": true` in `/v1/health`) it does
   nothing.
 - `appleBridge` and `appleStream`: the addresses, instead of `apple.json`'s.
+- `appleStreamLag` (1.9): how far behind the stream mpd is taken to play, until omarock
+  has measured it.
+
+You hear the Mac a moment late: mpd buffers a second of the stream before it plays, and
+the sound takes a little while to get here. omarock measures how far behind mpd plays
+(4 s after it joins the stream, then every 30 s) and adds what the bridge's `/v1/health`
+says it holds (`streamDelay`), so the card and the bar show the song and time you hear,
+not the Mac's: a song that starts by itself shows when you hear it, and one you pick
+shows at once, its time cycling dots until its sound arrives.
 
 For smooth playback, the setup window's tick (on to start) builds a patched mpd-mpris
 on the Linux side; [patches/README.md](../patches/README.md) says what it fixes. Arch's own

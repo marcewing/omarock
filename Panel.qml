@@ -201,7 +201,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.13.2"
+  readonly property string version: "0.14.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -434,7 +434,7 @@ Panel {
   readonly property bool queueEmpty: player.status.queueLength === 0
 
   readonly property var queueRows: {
-    if (root.bridgeMode) return Apple.queueRows(root.bridge.bridgeStatus)
+    if (root.bridgeMode) return Apple.queueRows(root.bridge.heardStatus)
     if (root.sxmMode) return Sxm.channelRows(sxm.channels, sxm.nowPlaying, sxm.currentId)
     if (root.radioMode) return Radio.listRows(radio.favorites, radio.local, radio.currentUuid, radio.place, radio.station)
     var current = client.status.state !== "stop" ? client.status.songId : ""
@@ -820,7 +820,7 @@ Panel {
       // before 0.7.0 the stream is near-empty until the Mac resumes, so mpd
       // rejoins once it has (AppleClient.catchUp), or else it stays behind.
       client.playStream(root.appleStream, root.streamPrefixes())
-      apple.post("/v1/resume", {}, apple.catchUp)
+      apple.post("/v1/resume", {}, apple.catchUp, true)
       root.clearSearch()
       root.say("Apple Music")
     })
@@ -899,7 +899,7 @@ Panel {
     } else if (state === "stop" && was === "play") {
       if (apple.bridgeStatus.state === "playing" && mine) apple.pause()
     } else if (state === "play" && (apple.bridgeStatus.state === "paused" || !mine)) {
-      apple.post("/v1/resume", {}, apple.catchUp)
+      apple.post("/v1/resume", {}, apple.catchUp, true)
     }
   }
 
@@ -1444,7 +1444,7 @@ Panel {
       bridge.post(steps[k][0], steps[k][1], function(data, error) {
         if (error !== "") root.bridgeKeeping = false
         else run(k + 1)
-      })
+      }, steps[k][0] !== "/v1/queue/remove")
     }
     run(0)
   }
@@ -1714,7 +1714,7 @@ Panel {
   function playingEntry(kind) {
     if (root.live) return null
     if (root.bridgeMode) {
-      var item = root.bridge.bridgeStatus.song
+      var item = root.bridge.song
       if (!item) return null
       if (kind === "genre") {
         var key = Apple.foldKey((item.genres || [])[0])
@@ -1780,10 +1780,10 @@ Panel {
     })
   }
 
-  // The bridge's playing song's album and artist ids: from its status, else
+  // The playing song's (as heard) album and artist ids: from its status, else
   // from /v1/info (AppleClient.songLinks), each with the source it's from.
   function playingIds() {
-    var item = root.bridge.bridgeStatus.song || ({})
+    var item = root.bridge.song || ({})
     var asked = root.bridge.songLinks[Apple.songKey(item)] || ({})
     return { albumId: item.albumId || asked.albumId || "", albumSource: (item.albumId ? item.source : asked.source) || "catalog",
       artistId: item.artistId || asked.artistId || "", artistSource: (item.artistId ? item.source : asked.source) || "catalog" }
@@ -1834,11 +1834,11 @@ Panel {
   // The song playing on Apple Music or Spotify, as an item, and whether it's
   // in your library (its status says, else /v1/info: AppleClient.songLinks).
   readonly property var playingItem: {
-    var song = root.bridgeMode ? root.bridge.bridgeStatus.song : null
+    var song = root.bridgeMode ? root.bridge.song : null
     return song && song.id ? { kind: "song", id: song.id, source: song.source || "catalog", title: song.title || "This song" } : null
   }
   readonly property string playingLibrary: {
-    var song = root.bridgeMode ? root.bridge.bridgeStatus.song : null
+    var song = root.bridgeMode ? root.bridge.song : null
     if (!root.playingItem) return ""
     var asked = root.bridge.songLinks[Apple.songKey(song)] || ({})
     return root.inLibrary(root.bridge.serviceKey, root.playingItem, song.inLibrary !== undefined ? song.inLibrary : asked.inLibrary)
@@ -2001,7 +2001,7 @@ Panel {
       root.say("L adds the Apple Music or Spotify song playing to your library")
       return
     }
-    var asked = root.bridge.songLinks[Apple.songKey(root.bridge.bridgeStatus.song)] || ({})
+    var asked = root.bridge.songLinks[Apple.songKey(root.bridge.song)] || ({})
     root.toggleLibrary(root.bridge, item, root.playingLibrary, item.title, null, asked.catalogId)
   }
 
@@ -3807,6 +3807,9 @@ Panel {
     idleStopSeconds: Math.max(0, Number(root.setting("appleIdleStop", 60)) || 0)
     // On unless switched off; it only matters for a bridge before 0.7.0.
     rejoinAfterChange: root.setting("appleRejoin", true) === true
+    // How far behind the stream mpd plays, until it has measured it (file
+    // only: the harness's fakes aren't behind).
+    assumedLag: Math.max(0, Number(root.setting("appleStreamLag", 1.9)) || 0)
     onLastErrorChanged: if (root.appleMode && apple.lastError !== "") root.say(apple.lastError)
     onBridgeStatusChanged: if (root.appleMode) root.recheckQueue()
   }

@@ -237,6 +237,19 @@ opened; `--only fresh-start` checks that.
     `minBitrate` says the stream is that one.
   - For an older bridge, omarock reconnects mpd to the stream 2 s after each
     change (`appleRejoin`), at the cost of a short stutter.
+- **What's shown is what's heard:** mpd still plays the stream behind the Mac:
+  it buffers 1 s before it plays anything (hard-coded in mpd 0.24, player
+  `buffer_before_play_duration`), then libFLAC's reads and the trip from the
+  Mac add to that. AppleClient measures mpd's part 4 s after mpd joins the
+  stream, then every 30 s (the time since it joined, less mpd's elapsed), and
+  adds health's `streamDelay` (0.4 s when a bridge doesn't say). Heard.js then
+  shows the bridge's statuses that much late: a song that starts by itself
+  shows when it's heard, one picked here shows at once with its time cycling
+  dots until its sound arrives, and after a pause the time runs on until the
+  sound stops. Only while mpd plays the stream here: Spotify plays on this
+  machine, and the stations' titles come inside their streams. `--only heard`
+  (the fake mpd's `fake_stream_lag`, the fake bridge's `/v1/fake/streamdelay`
+  and `/v1/fake/advance`).
 - **The freezes:** mpd-mpris asks mpd for a stream's cover art on every player
   event, and mpd probes the stream for seconds to answer, holding every client.
   `patches/mpd-mpris-stream-art.patch` keeps a stream's art across events.

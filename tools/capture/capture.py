@@ -41,7 +41,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
-                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml",
+                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -290,6 +290,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     scrolling_scenario(host, output, socket_path, failures)
     favourite_follow_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
+    heard_scenario(host, socket_path, failures)
     elsewhere_scenario(host, socket_path, failures)
     reconnect_scenario(host, socket_path, failures)
     apple_genres_scenario(host, output, socket_path, failures)
@@ -3563,6 +3564,112 @@ def apple_idle_scenario(host, socket_path, failures):
     host.call("close")
 
 
+def bridge_post(path, body):
+    """POST to the fake bridge, as another of its clients would."""
+    request = urllib.request.Request(f"http://127.0.0.1:{BRIDGE['port']}{path}", method="POST",
+                                     data=json.dumps(body).encode(),
+                                     headers={"Authorization": "Bearer fake-bridge-token", "Content-Type": "application/json",
+                                              "X-Omarock": "1"})
+    urllib.request.urlopen(request, timeout=5).read()
+
+
+def fake_bridge(switch, body):
+    """POST a test control to the fake bridge (/v1/fake/SWITCH)."""
+    bridge_post("/v1/fake/" + switch, body)
+
+
+def heard_scenario(host, socket_path, failures):
+    """Apple Music as heard. mpd plays the bridge's stream behind the Mac (the
+    fake mpd 2 s here, and the bridge's streamDelay 0.5 s), so the card and the
+    bar show the song and time as heard. The panel measures mpd's lag 4 s after
+    mpd joins the stream. A change made here (next, a seek, play) shows at
+    once, its time "…" until its sound arrives; a song that starts by itself
+    shows when it's heard; after a pause the time runs on until the sound
+    stops."""
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    mpd_client(socket_path, "fake_stream_lag 2")
+    fake_bridge("streamdelay", {"seconds": 0.5})
+    # Zen Arcade from its first song, paused: the switch plays it.
+    bridge_post("/v1/play", {"items": [{"kind": "album", "id": "c-al-1", "source": "catalog"}], "mode": "play", "start": 0})
+    bridge_post("/v1/pause", {})
+    host.call("open")
+    to_source(host, "apple")
+    wait_for(lambda: host.state()["appleReady"] and host.state()["bar"]["playing"], "Apple Music playing")
+    wait_for(lambda: host.state()["heard"]["lag"] >= 0, "mpd's lag measured", timeout=10)
+    s = host.state()
+    check(abs(s["heard"]["lag"] - 2) < 0.3 and abs(s["heard"]["delay"] - 2.5) < 0.3,
+          f"the panel measures mpd's lag ({s['heard']['lag']:.2f} s) and adds the bridge's ({s['heard']['delay']:.2f} s)", failures)
+    host.settle(3)
+
+    def times(n=3, gap=.4):
+        out = []
+        for _ in range(n):
+            out.append(host.state()["heard"]["time"])
+            host.settle(gap)
+        return out
+
+    # Next, here: the new song shows at once, its time waits for the sound.
+    before = host.state()["bridgeSong"]["title"]
+    host.call("press", "n")
+    wait_for(lambda: host.state()["heard"]["live"] != before, "the Mac plays the next song")
+    host.settle(.3)
+    s = host.state()
+    check(s["bridgeSong"]["title"] == s["heard"]["live"] and s["heard"]["waiting"] and s["heard"]["time"].startswith("."),
+          f"next: {s['bridgeSong']['title']} shows at once, the time waiting ({s['heard']['time']!r})", failures)
+    check(len(set(times())) > 1, "the waiting time cycles its dots", failures)
+    wait_for(lambda: not host.state()["heard"]["waiting"], "its sound arrives", timeout=5)
+    s = host.state()
+    check(s["heard"]["time"] in ("0:00", "0:01"), "then the time from the start: " + s["heard"]["time"], failures)
+
+    # A song that starts by itself: shown once it's heard.
+    host.settle(1)
+    before = host.state()["bridgeSong"]["title"]
+    fake_bridge("advance", {})
+    wait_for(lambda: host.state()["heard"]["live"] != before, "the Mac moves on")
+    host.settle(1)
+    s = host.state()
+    check(s["bridgeSong"]["title"] == before and s["bar"]["text"].find(before) >= 0 and not s["heard"]["waiting"],
+          f"a song that starts by itself: {before} still shows while it's heard, on the bar too", failures)
+    wait_for(lambda: host.state()["bridgeSong"]["title"] == host.state()["heard"]["live"], "the new song shows", timeout=4)
+    s = host.state()
+    check(s["bar"]["text"].find(s["heard"]["live"]) >= 0 and s["heard"]["time"] in ("0:00", "0:01"),
+          f"then {s['heard']['live']} shows, from its start ({s['heard']['time']})", failures)
+
+    # A seek: the time waits at its place.
+    host.settle(1)
+    host.call("press", "Shift+Right")
+    host.settle(.3)
+    s = host.state()
+    check(s["heard"]["waiting"] and s["heard"]["time"].startswith("."), "a seek: the time waits", failures)
+    wait_for(lambda: not host.state()["heard"]["waiting"], "the seek is heard", timeout=5)
+    s = host.state()
+    check(s["heard"]["time"] in ("0:11", "0:12", "0:13"), "then the time from where it went: " + s["heard"]["time"], failures)
+
+    # Pause: paused at once; the time runs on until the sound stops.
+    host.settle(1)
+    host.call("press", "Space")
+    wait_for(lambda: not host.state()["bar"]["playing"], "paused")
+    running = times(3, .5)
+    host.settle(2.5)
+    stopped = times(3, .5)
+    check(len(set(running)) > 1 and len(set(stopped)) == 1 and not host.state()["heard"]["waiting"],
+          f"pause: the time runs on ({', '.join(running)}) until the sound stops ({stopped[0]})", failures)
+
+    # Play: the time waits for the sound again.
+    host.call("press", "Space")
+    wait_for(lambda: host.state()["bar"]["playing"], "playing")
+    check(host.state()["heard"]["waiting"], "play: the time waits for the sound", failures)
+    wait_for(lambda: not host.state()["heard"]["waiting"], "the sound arrives", timeout=6)
+
+    # Playing on time (the fakes, as everywhere else): no waiting at all.
+    mpd_client(socket_path, "fake_stream_lag 0")
+    fake_bridge("streamdelay", {"seconds": 0})
+    to_source(host, "local")
+    host.call("close")
+
+
 def elsewhere_scenario(host, socket_path, failures):
     """Apple Music and Spotify play on one machine at a time: the one that
     last pressed Play. Another machine taking over (the fakes' "elsewhere"):
@@ -5893,6 +6000,7 @@ def main():
                             elif name == "settings": settings_scenario(host, output, failures)
                             elif name == "setup": setup_scenario(host, output, failures)
                             elif name == "apple-idle": apple_idle_scenario(host, socket_path, failures)
+                            elif name == "heard": heard_scenario(host, socket_path, failures)
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
                             elif name == "reconnect": reconnect_scenario(host, socket_path, failures)
                             elif name == "apple-genres": apple_genres_scenario(host, output, socket_path, failures)

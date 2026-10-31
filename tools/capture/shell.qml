@@ -31,7 +31,9 @@ ShellRoot {
   // port 9), with every source switched on.
   // A setting given as null is left out, so the widget's default applies.
   function baseSettings(settings) {
+    // The fake mpd plays streams on time, unless a test says otherwise.
     var out = Object.assign({ spotify: true, appleMusic: true, siriusXM: true, radio: true, appleRejoin: false,
+      appleStreamLag: 0,
       sxmService: Quickshell.env("OMAROCK_SXM") || "http://127.0.0.1:9",
       spotifyService: Quickshell.env("OMAROCK_SPOTIFY") || "http://127.0.0.1:9",
       radioBrowser: Quickshell.env("OMAROCK_RADIO") || "http://127.0.0.1:9",
@@ -398,6 +400,12 @@ ShellRoot {
         appleReady: p.player.ready === true && p.appleMode, appleSeq: p.appleMode ? (p.player.bridgeStatus.seq || 0) : -1,
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
         bridgeSong: p.bridgeMode ? p.bridge.song : null, playingIds: p.bridgeMode ? p.playingIds() : null,
+        // Apple Music as heard: how far behind (mpd's lag, measured), whether
+        // a change waits for its sound, and the card's time as shown.
+        heard: p.bridgeMode ? { delay: p.bridge.heardDelay, lag: p.bridge.mpdLag, waiting: p.bridge.waiting === true,
+          live: p.bridge.bridgeStatus.song ? p.bridge.bridgeStatus.song.title : "",
+          time: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "playingTime")
+            ? host.findNamed(popup().contentItem[0].parent.parent, "playingTime").text : "" } : null,
         lookup: p.lookupService, accounts: p.accounts,
         // Time Machine: its year, the chip and Top 100 button as shown, the picker.
         timeMachine: { enabled: p.timeMachineEnabled, year: p.timeYear, chartService: p.chartService, wavy: p.searchWavy,

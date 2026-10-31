@@ -1,13 +1,16 @@
 import QtQuick
 import Quickshell.Io
 import "Apple.js" as Apple
+import "Heard.js" as Heard
 import "Info.js" as Info
 
 // The Apple Music bridge on the Mac (apple-bridge/API.md), over HTTP on the
 // tailnet. Where the player card and the bar read the player, it has
 // MpdClient's shape: ready, lastError, status, currentSong, elapsed and the
 // transport functions. Volume stays mpd's, and so does the sound: mpd plays
-// the bridge's stream, so play also makes sure mpd is playing it.
+// the bridge's stream, so play also makes sure mpd is playing it. mpd plays
+// it a couple of seconds behind the Mac, so what the card and the bar show
+// is the song and time as heard (Heard.js); bridgeStatus is the Mac's, now.
 //
 // Spotify's service (spotify/omarock-spotify.py, on this machine) speaks the
 // same API, so a second one drives it, with streamed false: Soloist plays into
@@ -76,20 +79,21 @@ Item {
   // Your Apple Music playlists, as the picker wants them: { name, modified, ... }.
   property var playlists: []
   property real elapsed: 0
-  property real elapsedBase: 0
-  property real elapsedAt: 0
   property int pollSequence: 0
   // Requests in flight, aborted when they outlive their deadline.
   property var inflight: []
 
   readonly property bool configured: baseUrl !== ""
   readonly property bool ready: reachable && authorized
-  readonly property var song: bridgeStatus.song || null
-  readonly property var currentSong: Apple.songAsMpd(bridgeStatus.song)
+  // The song playing and its place in the queue as heard; the queue and the
+  // options are the Mac's now.
+  readonly property var heardStatus: Heard.overlay(root.bridgeStatus, root.heard.status)
+  readonly property var song: heardStatus.song || null
+  readonly property var currentSong: Apple.songAsMpd(heardStatus.song)
   // Spotify without omarock's sound output: Soloist's own volume is the
   // volume, and its status has it. Otherwise it's mpd's (or the bus's).
   // (Tested here, not through ownVolume, which can lag a new status.)
-  readonly property var status: Apple.statusAsMpd(bridgeStatus,
+  readonly property var status: Apple.statusAsMpd(heardStatus,
     typeof bridgeStatus.volume === "number" ? bridgeStatus.volume : mpd ? mpd.status.volume : -1)
   readonly property bool ownVolume: typeof bridgeStatus.volume === "number"
   readonly property var queue: bridgeStatus.queue || []
@@ -189,10 +193,20 @@ Item {
 
   function get(path, callback, timeoutMs) { root.request("GET", path, null, callback, timeoutMs || 15000) }
 
-  // A transport command; the bridge answers with its new status.
-  function post(path, body, callback) {
+  // A transport command; the bridge answers with its new status. One that
+  // changes what's heard (changes) shows at once (Heard.js).
+  function post(path, body, callback, changes) {
+    if (changes) {
+      root.acting++
+      root.updateHeard()
+    }
     root.request("POST", path, body || {}, function(data, error) {
       if (data && data.seq !== undefined) root.applyStatus(data)
+      if (changes) {
+        root.acting--
+        if (root.acting === 0) root.seekTarget = -1
+        root.updateHeard()
+      }
       if (error !== "") root.lastError = error
       if (callback) callback(data, error)
     }, 15000)
@@ -230,10 +244,91 @@ Item {
       root.releasePending = false  // it isn't the source any more anyway (mpd played)
     }
     root.bridgeStatus = data
-    root.elapsedBase = data.position || 0
-    root.elapsedAt = Date.now()
-    root.elapsed = root.elapsedBase
+    root.addHeard(data)
     root.fillSongLinks()
+  }
+
+  // What's heard, and when (Heard.js). Each status as it came, flagged when
+  // it answers a change made here (acting).
+  property var heardEntries: []
+  property var heard: ({ status: {}, elapsed: 0, waiting: false, next: 0 })
+  property int acting: 0
+  // A seek's position while it's asked for (-1: none).
+  property real seekTarget: -1
+  // A change made here, until its sound arrives: the card's time says "…".
+  readonly property bool waiting: root.heard.waiting
+  function addHeard(data) {
+    root.heardEntries = root.heardEntries.concat([{ at: Date.now(), status: data, user: root.acting > 0 }])
+    root.updateHeard()
+  }
+  function updateHeard() {
+    var now = Date.now()
+    root.heardEntries = Heard.prune(root.heardEntries, now, root.heardDelay)
+    root.heard = Heard.shown(root.heardEntries, now, root.heardDelay, root.acting > 0, root.seekTarget)
+    root.elapsed = root.heard.elapsed
+  }
+
+  // How far behind the Mac the sound is: mpd's lag on the stream, plus how
+  // long the bridge holds the sound before Icecast (its health's
+  // streamDelay; 0.4 s before bridge 0.8.0, the trip over the tailnet
+  // included). 0 while mpd isn't playing the stream here: nothing is heard.
+  readonly property bool hearing: root.streamed && root.active && !!root.mpd && root.mpd.status.state === "play"
+    && root.elsewhere === ""
+  readonly property real streamDelay: typeof root.health.streamDelay === "number" ? root.health.streamDelay : 0.4
+  readonly property real heardDelay: {
+    if (!root.hearing) return 0
+    var delay = (root.mpdLag >= 0 ? root.mpdLag : root.streamLag) + root.streamDelay
+    return delay >= 0.25 ? delay : 0
+  }
+  onHeardDelayChanged: root.updateHeard()
+
+  // mpd's lag: once it has joined the stream (started playing it, or started
+  // it again), its time is 0 until it has buffered enough to play; the time
+  // since then less mpd's time is how far behind it plays. Read 4 s after a
+  // join, then every 30 s (a stall adds to it). Until then, the lag
+  // measured last (streamLag; at first, assumedLag).
+  property real assumedLag: 1.9
+  property real streamLag: root.assumedLag
+  property real mpdLag: -1
+  property real joinedAt: 0
+  property var lastMpd: null
+  Connections {
+    target: root.streamed ? root.mpd : null
+    function onMpdStatusChanged() { root.measureLag() }
+  }
+  function measureLag() {
+    var s = root.mpd.mpdStatus
+    var now = Date.now()
+    var last = root.lastMpd
+    root.lastMpd = s.state === "play" ? { elapsed: s.elapsed, songId: s.songId } : null
+    if (s.state !== "play") {
+      root.joinedAt = 0
+      root.mpdLag = -1
+      lagCheck.stop()
+      return
+    }
+    if (!last || last.songId !== s.songId || s.elapsed + 0.5 < last.elapsed) {
+      // Joined (mpd's status comes before its current song, so this isn't
+      // known to be the stream yet). Its time is 0 while it buffers.
+      root.joinedAt = s.elapsed < 0.5 ? now : 0
+      root.mpdLag = -1
+      lagCheck.interval = 4000
+      lagCheck.restart()
+      return
+    }
+    if (root.active && root.joinedAt > 0 && s.elapsed > 0) {
+      root.mpdLag = Math.max(0, (now - root.joinedAt) / 1000 - s.elapsed)
+      root.streamLag = root.mpdLag
+    }
+  }
+  Timer {
+    id: lagCheck
+    onTriggered: {
+      if (!root.active || !root.mpd || root.mpd.status.state !== "play") return
+      root.mpd.refreshStatus()
+      interval = root.mpdLag >= 0 ? 30000 : 2000
+      restart()
+    }
   }
 
   // The playing song's album and artist ids, and whether it's in your library,
@@ -245,7 +340,7 @@ Item {
   property var songLinks: ({})
 
   function fillSongLinks() {
-    var song = root.song
+    var song = root.bridgeStatus.song
     if (!song || !song.id) return
     if (song.albumId && song.artistId && song.inLibrary !== undefined) return
     var key = Apple.songKey(song)
@@ -286,8 +381,7 @@ Item {
         // they are and only re-time the position.
         if (data.seq === root.bridgeStatus.seq && data.state === root.bridgeStatus.state
             && data.current === root.bridgeStatus.current) {
-          root.elapsedBase = data.position || 0
-          root.elapsedAt = Date.now()
+          root.addHeard(Object.assign({}, root.bridgeStatus, { position: data.position || 0 }))
         } else {
           root.applyStatus(data)
         }
@@ -325,14 +419,14 @@ Item {
   // takes the music over from another machine.
   function playPause() {
     if (root.bridgeStatus.state === "playing" && root.elsewhere === "" && (!root.streamed || root.mpd.status.state === "play"))
-      root.post("/v1/pause")
+      root.post("/v1/pause", {}, null, true)
     else root.resume()
   }
   // Not while it plays on another machine: leaving Apple Music here, say,
   // mustn't stop it there.
-  function pause() { if (root.elsewhere === "") root.post("/v1/pause") }
+  function pause() { if (root.elsewhere === "") root.post("/v1/pause", {}, null, true) }
   // The Mac first, then mpd on the stream (see catchUp).
-  function resume() { root.post("/v1/resume", {}, root.catchUp) }
+  function resume() { root.post("/v1/resume", {}, root.catchUp, true) }
   // Only while mpd's source is this stream: a song played here from a lookup
   // (the radio playing) mustn't start the radio.
   function startStream() {
@@ -419,13 +513,11 @@ Item {
     interval: root.idleStopSeconds * 1000
     onTriggered: if (root.idle) root.mpd.send("stop")
   }
-  function next() { root.post("/v1/next", {}, root.catchUp) }
-  function previous() { root.post("/v1/previous", {}, root.catchUp) }
+  function next() { root.post("/v1/next", {}, root.catchUp, true) }
+  function previous() { root.post("/v1/previous", {}, root.catchUp, true) }
   function seekTo(seconds) {
-    root.elapsedBase = seconds
-    root.elapsedAt = Date.now()
-    root.elapsed = seconds
-    root.post("/v1/seek", { position: seconds }, root.catchUp)
+    root.seekTarget = seconds
+    root.post("/v1/seek", { position: seconds }, root.catchUp, true)
   }
   function seekBy(delta) { root.seekTo(Math.max(0, root.elapsed + delta)) }
   function setRandom(on) { root.post("/v1/shuffle", { on: on }) }
@@ -465,9 +557,9 @@ Item {
     root.post("/v1/play", { items: items, mode: mode, start: start || 0 }, function(data, error) {
       if (mode === "play") root.catchUp(data, error)
       if (callback) callback(data, error)
-    })
+    }, mode === "play")
   }
-  function jump(index) { root.post("/v1/queue/jump", { index: index }, root.catchUp) }
+  function jump(index) { root.post("/v1/queue/jump", { index: index }, root.catchUp, true) }
   function removeAt(index) { root.post("/v1/queue/remove", { index: index }) }
 
   // Browsing.
@@ -532,15 +624,14 @@ Item {
     onTriggered: root.reconnect()
   }
 
+  // The time, while the panel shows it; and while something is still to be
+  // heard (a song changing when its sound does, on the bar too).
   Timer {
-    interval: 500
+    interval: root.heardDelay > 0 ? 250 : 500
     repeat: true
-    running: root.ticking && root.bridgeStatus.state === "playing"
-    onTriggered: {
-      var duration = root.song ? root.song.duration || 0 : 0
-      var at = root.elapsedBase + (Date.now() - root.elapsedAt) / 1000
-      root.elapsed = duration > 0 ? Math.min(duration, at) : at
-    }
+    running: (root.ticking && (root.bridgeStatus.state === "playing" || root.heard.waiting))
+      || (root.heardDelay > 0 && (root.heard.next > 0 || root.heard.waiting))
+    onTriggered: root.updateHeard()
   }
 
   Timer {

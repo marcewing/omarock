@@ -205,6 +205,11 @@ class Bridge:
         # health's minBitrate (POST /v1/fake/minbitrate {on} switches it, for
         # an older bridge).
         self.min_bitrate = True
+        # health's streamDelay: how long the Mac holds the sound before
+        # Icecast. 0 here, so the panel shows the status as it comes; POST
+        # /v1/fake/streamdelay {seconds} sets it, {seconds: null} leaves it
+        # out (as bridge 0.7.0 does).
+        self.stream_delay = 0.0
         # omarock-spotify 0.3 without omarock's sound output: Soloist's own
         # volume, in the status and set by POST /v1/volume (POST
         # /v1/fake/volume {on} switches it; off, as with the bus).
@@ -490,6 +495,8 @@ class Handler(BaseHTTPRequestHandler):
                       "stream": f"http://127.0.0.1:{PORT}/omarock.ogg", "storefront": "us"}
             if bridge.min_bitrate:
                 health["minBitrate"] = True
+            if bridge.stream_delay is not None:
+                health["streamDelay"] = bridge.stream_delay
             return self.reply(200, health)
         if self.server.token and self.headers.get("Authorization") != "Bearer " + self.server.token:
             return self.reply(401, {"error": "Wrong or missing token"})
@@ -550,6 +557,13 @@ class Handler(BaseHTTPRequestHandler):
                     return {"ok": True}
                 if path == "fake/minbitrate":
                     b.min_bitrate = bool(body["on"])
+                    return {"ok": True}
+                if path == "fake/streamdelay":
+                    b.stream_delay = None if body.get("seconds") is None else float(body["seconds"])
+                    return {"ok": True}
+                if path == "fake/advance":
+                    # The song playing ends, and the next one starts by itself.
+                    b.play_at(min(len(b.queue) - 1, b.index + 1))
                     return {"ok": True}
                 if path == "fake/volume":
                     b.volume = 40 if body["on"] else None
