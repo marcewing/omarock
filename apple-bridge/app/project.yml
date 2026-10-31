@@ -9,10 +9,12 @@ options:
 packages:
   OmarockTap:
     path: ../tap
+  OmarockFLAC:
+    path: ../flac
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: 0.6.0
+    MARKETING_VERSION: 0.7.0
     CURRENT_PROJECT_VERSION: 1
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: Apple Development
@@ -42,6 +44,8 @@ targets:
     dependencies:
       - package: OmarockTap
         product: ProcessTap
+      - package: OmarockFLAC
+        product: FLAC
       - sdk: MusicKit.framework
       - sdk: iTunesLibrary.framework
       - sdk: ServiceManagement.framework

@@ -248,6 +248,8 @@ final class API {
             "stream": streamURL,
             "capturing": stream.capturing,
             "encoding": stream.encoderRunning,
+            // libFLAC's limit_min_bitrate: silence streams at about 6 KB/s (StreamService).
+            "minBitrate": true,
         ]
         if let storefront = music.storefront { health["storefront"] = storefront }
         return health

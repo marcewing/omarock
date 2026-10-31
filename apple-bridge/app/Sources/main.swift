@@ -12,6 +12,12 @@ if CommandLine.arguments.dropFirst().first == "--unregister" {
     exit(LoginAgent.unregister() ? 0 : 1)
 }
 
+// `OmarockBridge --encode RATE`: the stream's FLAC encoder, PCM in and Ogg FLAC out
+// (StreamService runs it in front of ffmpeg).
+if CommandLine.arguments.dropFirst().first == "--encode" {
+    exit(FlacEncoder.run(sampleRate: UInt32(CommandLine.arguments.dropFirst(2).first ?? "") ?? 48000))
+}
+
 // `OmarockBridge --setup`: make the token, Icecast's passwords and config, print what the
 // Linux side needs as JSON, and exit. Touches nothing that asks for permission (build.sh
 // runs it).

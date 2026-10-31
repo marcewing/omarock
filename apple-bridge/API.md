@@ -26,7 +26,10 @@ The examples use `100.64.0.10` for the Mac's Tailscale address.
   authorized or there's no subscription, and 502 if Apple's API failed.
 - The stream is separate: Icecast on the Mac at
   `http://100.64.0.10:8000/omarock.ogg`, Ogg FLAC, 16-bit stereo at the
-  Mac's mixing rate (48 kHz). The audio is captured with a Core Audio process
+  Mac's mixing rate (48 kHz). From 0.7.0 (`/v1/health` has `"minBitrate": true`)
+  it's encoded with libFLAC's `limit_min_bitrate`: digital silence still costs about
+  6 KB/s, not a few hundred bytes, so an mpd with a stock libFLAC that joins in a
+  pause doesn't fall tens of seconds behind. Pages are 0.2 s. The audio is captured with a Core Audio process
   tap on the bridge's own playback, muted on the Mac. The Mac can be someone's
   everyday machine, so its default output and other apps' sound are never touched.
 
@@ -92,7 +95,7 @@ All paths start with `/v1`.
 
 | Method and path | What it does |
 | --- | --- |
-| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`). No auth needed, and it reveals nothing private. |
+| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`), and `"minBitrate": true` from 0.7.0 (see the stream, above). No auth needed, and it reveals nothing private. |
 | `POST /authorize` | Asks for MusicKit access (`MusicAuthorization.request()`), which puts a dialog on the Mac's screen; returns health. For someone at the Mac (the bridge also asks at its first launch). |
 | `GET /status?since=SEQ` | Now playing. Returns at once if the state's `seq` differs from `SEQ` (or there is no `since`); otherwise waits up to 25 s for a change, then returns the same state (long poll). |
 | `POST /play` | `{ "items": [ {kind, id, source}, … ], "start": 0, "mode": "play" }`. `mode` is `play` (replace the queue and start at song `start`), `next` (insert after the current song) or `add` (append). Items are expanded to songs, in order (see **Items** below). `start` is the index into the tracks as the detail route lists them (`/albums|/playlists/{source}/{id}`), counted before unplayable songs are skipped; if that song is unplayable, play starts at the next playable one. A single song that can't be played answers 409 with the reason. Returns the new status. |

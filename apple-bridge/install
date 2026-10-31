@@ -292,7 +292,7 @@ step_requirements() {
   local need=() t
   for t in xcodegen ffmpeg icecast; do (( $+commands[$t] )) || need+=($t); done
   if (( $#need )); then
-    explain "From Homebrew: xcodegen makes the Xcode project, ffmpeg encodes the sound (lossless FLAC), and Icecast serves the stream."
+    explain "From Homebrew: xcodegen makes the Xcode project, ffmpeg sends the stream (lossless FLAC) to Icecast, and Icecast serves it."
     confirm "Install ${(j:, :)need} with Homebrew?" || { bad "The bridge needs them."; stopped; }
     run brew install $need || stopped
     rehash
@@ -490,7 +490,7 @@ step_health() {
   if health_true capturing; then ok "it captures its own playback"; else bad "it can't capture its playback yet: the stream will be silent"; fi
 
   if ! health_true encoding && ! wait_until "Checking the encoder…" 20 health_true encoding; then
-    bad "ffmpeg isn't encoding the stream: see $support/log/ffmpeg.log and bridge.log"
+    bad "The stream's encoder isn't running: see $support/log/ffmpeg.log and bridge.log"
   else
     ok "it streams"
   fi

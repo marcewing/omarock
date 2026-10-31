@@ -7,7 +7,7 @@ other stream. omarock talks to the bridge for search, browsing, the queue and th
 transport ([API.md](API.md)).
 
 ```
-Mac:   MusicKit plays ─▶ process tap (muted on the Mac) ─▶ ffmpeg (Ogg FLAC) ─▶ Icecast :8000
+Mac:   MusicKit plays ─▶ process tap (muted on the Mac) ─▶ Ogg FLAC, libFLAC ─▶ Icecast :8000
                                                                                     │ Tailscale
 Linux: omarock ◀──── bridge API :8710 (JSON, bearer token) ────────────────────────┤
        mpd ◀──────── http://<mac>:8000/omarock.ogg ◀────────────────────────────────┘
@@ -271,8 +271,10 @@ and the patched builds for its stream.
 
 - `app/`: the bridge app (Swift, XcodeGen). `Sources/API.swift` routes [API.md](API.md);
   `Player.swift` is MusicKit's player and the status long poll; `StreamService.swift` is
-  the tap, ffmpeg and Icecast; `LibraryIndex.swift` reads the library through
+  the tap, the encoder (`FlacEncoder.swift`), ffmpeg and Icecast; `LibraryIndex.swift` reads the library through
   iTunesLibrary, which is much faster than MusicKit's library requests on macOS.
+- `flac/`: libFLAC 1.5.0's encoder, from [xiph/flac](https://github.com/xiph/flac)
+  (BSD, `flac/COPYING.Xiph`), built into the app; `flac/README.md` says what's there.
 - `tap/`: `ProcessTap`, the Core Audio process tap library the app uses, and
   `omarock-tap`, a test tool that streams any one process's or app's audio
   (`tap/build.sh`).
