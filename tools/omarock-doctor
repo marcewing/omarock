@@ -142,6 +142,7 @@ fi
 
 if [[ $(setting appleMusic false) == true ]] || [[ -e $HOME/.config/omarock/apple.json ]]; then
   head2 "Apple Music"
+  h=""
   bridge=$(setting appleBridge "")
   if [[ -z $bridge && -f $HOME/.config/omarock/apple.json ]]; then
     bridge=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("bridge",""))' "$HOME/.config/omarock/apple.json" 2>/dev/null)
@@ -160,11 +161,19 @@ print("  " + ("\033[32m✓\033[0m the bridge answers, and may use Apple Music" i
       bad "the bridge doesn't answer at $bridge (is the Mac awake, and on the same tailnet?)"
     fi
   fi
+  # From 0.7.0 the bridge's stream keeps a stock libFLAC in step; omarock's
+  # patched one (from before) can go.
   pid=$(systemctl --user show -p MainPID --value mpd 2>/dev/null)
-  if [[ -n $pid && $pid != 0 ]] && grep -q omarock-flac "/proc/$pid/maps" 2>/dev/null; then
-    ok "mpd uses the patched libFLAC$([[ $(setting appleRejoin true) == true ]] && echo '; appleRejoin can be set false in settings.json')"
-  else
-    note "mpd uses the stock libFLAC: keep appleRejoin on (it is $(setting appleRejoin true)), or see patches/README.md for the patch"
+  patched=false
+  [[ -n $pid && $pid != 0 ]] && grep -q omarock-flac "/proc/$pid/maps" 2>/dev/null && patched=true
+  if [[ -n ${h:-} ]] && python3 -I -c 'import json, sys; sys.exit(json.loads(sys.argv[1]).get("minBitrate") is not True)' "$h" 2>/dev/null; then
+    if $patched; then
+      note "mpd still loads omarock's patched libFLAC, which the bridge's stream no longer needs: ./install apple-music offers to remove it"
+    else
+      ok "the bridge's stream keeps mpd in step"
+    fi
+  elif [[ -n ${h:-} ]]; then
+    note "the bridge is older than 0.7.0: update it (git pull, then ./install, in the Mac's omarock clone); until then omarock reconnects mpd after each change"
   fi
 fi
 echo

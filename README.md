@@ -440,8 +440,8 @@ A few are in the file only, for when you know you need them:
   writes that).
 - `timeMachineYear`: the year Time Machine's button picked (0: off).
 - `appleRejoin` (on): reconnect mpd to the Apple Music stream after each change.
-  A stock libFLAC needs it; `./install apple-music` turns it off when mpd has the
-  patched one ([patches/README.md](patches/README.md)).
+  Only a bridge older than 0.7.0 needs it (mpd fell behind its stream); with a
+  newer one it does nothing.
 - `streamRetryFor` (300): how many seconds omarock keeps trying to reconnect a
   radio station or SiriusXM channel that lost its connection, before it gives up.
 

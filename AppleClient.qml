@@ -53,10 +53,12 @@ Item {
   // pressed Play. The others hear nothing, and are told where it plays.
   property string clientName: ""
   // Reconnect mpd to the stream 2 s after each change made here (catchUp).
-  // Only for a stock libFLAC, which falls behind on a quiet stream; with
-  // the patched one (tools/build-libflac) mpd stays about 0.3 s behind by
-  // itself, and the reconnect is a stutter 2 s into every song.
+  // Only for a bridge before 0.7.0: its stream's silence was so small that
+  // a stock libFLAC fell behind on it. From 0.7.0 (health's minBitrate) mpd
+  // keeps up by itself, and the reconnect would be a stutter 2 s into every
+  // song.
   property bool rejoinAfterChange: false
+  readonly property bool rejoins: root.rejoinAfterChange && root.health.minBitrate !== true
 
   property string token: ""
   property bool reachable: false
@@ -368,14 +370,15 @@ Item {
     if (root.bridgeStatus.current === true) root.bridgeStatus = Object.assign({}, root.bridgeStatus, { current: false })
   }
   // Once the bridge has made a change asked for here (a song picked, next,
-  // previous, a seek, play): mpd plays the stream if it isn't already. With
-  // rejoinAfterChange, it also reconnects to the live stream, as below.
+  // previous, a seek, play): mpd plays the stream if it isn't already. For a
+  // bridge before 0.7.0 (rejoins), it also reconnects to the live stream.
   //
-  // Why rejoin was needed, before libFLAC was patched: mpd connected to the
-  // stream while it was quiet (the bridge idle or paused: about 350 bytes a
-  // second) waits until it has enough data, then plays all it buffered, and
-  // stays that far behind the Mac (42 s behind, once: the song heard wasn't
-  // the one shown, and picking another seemed to do nothing).
+  // Why rejoin was needed with those bridges and a stock libFLAC: mpd
+  // connected to the stream while it was quiet (the bridge idle or paused:
+  // about 350 bytes a second) waits until it has enough data, then plays all
+  // it buffered, and stays that far behind the Mac (42 s behind, once: the
+  // song heard wasn't the one shown, and picking another seemed to do
+  // nothing).
   // A network stall does the same. playid of the stream's own entry
   // reconnects at live, with the output left open; mpd stopped just plays.
   // A change reaches the stream 1.5 to 1.8 s after the bridge's reply
@@ -384,7 +387,7 @@ Item {
   // quiet, mpd would be behind again.
   function catchUp(data, error) {
     if (error !== "" || !root.streamed) return
-    if (root.rejoinAfterChange) rejoinTimer.restart()
+    if (root.rejoins) rejoinTimer.restart()
     else root.startStream()
   }
   function rejoin() {
@@ -404,8 +407,8 @@ Item {
   // so the bridge can be updated, and nothing trickles over the tailnet.
   // mpd keeps the stream as its current song, so the mode stays Apple Music.
   // Playing again reconnects, through catchUp (rejoin plays a stopped mpd) or
-  // the panel's followMpd for the media keys. With the patched libFLAC, a
-  // fresh connection is 0.3 s behind live, so holding the stream gains little.
+  // the panel's followMpd for the media keys. A fresh connection is under 2 s
+  // behind live (bridge 0.7.0), so holding the stream gains little.
   readonly property bool idle: root.streamed && root.active && root.ready && root.idleStopSeconds > 0 && !!root.mpd
     && root.mpd.status.state === "play"
     && (root.bridgeStatus.state === "paused" || root.bridgeStatus.state === "stopped")

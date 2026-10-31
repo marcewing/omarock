@@ -31,8 +31,8 @@
 | `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit, the Web API client, MPRIS |
 | `sxm/` | omarock-sxm, the SiriusXM relay |
 | `apple-bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
-| `patches/` | libFLAC and mpd-mpris patches that make Apple Music's stream play well (see apple-bridge/README.md) |
-| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-libflac`, `build-mpd-mpris`; `pin-sxm` writes `sxm/requirements.txt`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`), and the test harness (`capture/`) |
+| `patches/` | The mpd-mpris patch that makes Apple Music's stream play well, and the mpd one (merged upstream) |
+| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-mpd-mpris`; `pin-sxm` writes `sxm/requirements.txt`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`), and the test harness (`capture/`) |
 | `tests/` | node tests for the pure helpers |
 
 ## How it works
@@ -226,13 +226,17 @@ opened; `--only fresh-start` checks that.
   request, to tell a slow service from a queue in omarock.
 
 **Apple Music's stream**
-- **The lag:** libFLAC's Ogg reader fills each read request before returning. On
-  a live stream of near-silence, that can wait tens of seconds, and then mpd plays
-  that far behind.
-  - `patches/libflac-ogg-live.patch` returns what it has instead
-    (`tools/build-libflac` builds it for mpd only).
-  - Without it, omarock reconnects mpd to the stream 2 s after each change
-    (`appleRejoin`), at the cost of a short stutter.
+- **The lag:** libFLAC's Ogg reader fills each 8 KiB read before returning. On a
+  live stream of digital silence (a paused Mac), ffmpeg's FLAC encoder sent about
+  300 bytes a second, so that took tens of seconds, and mpd then played that far
+  behind.
+  - From bridge 0.7.0 libFLAC encodes the stream, with `limit_min_bitrate`
+    (xiph/flac#90's answer): silence still sends about 6 KB/s. A stock libFLAC
+    joining a paused stream stays about 1.7 s behind, against 1.2 s with the reader
+    patched (xiph/flac#939, closed in favour of the encoder option). Health's
+    `minBitrate` says the stream is that one.
+  - For an older bridge, omarock reconnects mpd to the stream 2 s after each
+    change (`appleRejoin`), at the cost of a short stutter.
 - **The freezes:** mpd-mpris asks mpd for a stream's cover art on every player
   event, and mpd probes the stream for seconds to answer, holding every client.
   `patches/mpd-mpris-stream-art.patch` keeps a stream's art across events.

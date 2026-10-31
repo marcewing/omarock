@@ -201,6 +201,10 @@ class Bridge:
         # The library's genres in search and GET /v1/genres/library/…, which
         # older bridges lack (POST /v1/fake/genres {on} switches them).
         self.genres_route = not self.spotify
+        # Bridge 0.7.0's stream, whose silence a stock libFLAC keeps up with:
+        # health's minBitrate (POST /v1/fake/minbitrate {on} switches it, for
+        # an older bridge).
+        self.min_bitrate = True
         # omarock-spotify 0.3 without omarock's sound output: Soloist's own
         # volume, in the status and set by POST /v1/volume (POST
         # /v1/fake/volume {on} switches it; off, as with the bus).
@@ -482,8 +486,11 @@ class Handler(BaseHTTPRequestHandler):
                 web = {"signedIn": True, "signInEndsAt": int(time.time()) + 180 * 86400} if bridge.signed_in else {"signedIn": False}
                 return self.reply(200, {"ok": True, "version": "fake", "authorized": bridge.signed_in, "canPlayCatalog": True,
                                         "current": bridge.current, "stream": "", "storefront": "US", "web": web})
-            return self.reply(200, {"ok": True, "version": "fake", "authorized": True, "canPlayCatalog": True,
-                                    "stream": f"http://127.0.0.1:{PORT}/omarock.ogg", "storefront": "us"})
+            health = {"ok": True, "version": "fake", "authorized": True, "canPlayCatalog": True,
+                      "stream": f"http://127.0.0.1:{PORT}/omarock.ogg", "storefront": "us"}
+            if bridge.min_bitrate:
+                health["minBitrate"] = True
+            return self.reply(200, health)
         if self.server.token and self.headers.get("Authorization") != "Bearer " + self.server.token:
             return self.reply(401, {"error": "Wrong or missing token"})
         if bridge.slowpages and method == "GET" and parts[1:2] in (["albums"], ["artists"]):
@@ -540,6 +547,9 @@ class Handler(BaseHTTPRequestHandler):
                     return {"ok": True}
                 if path == "fake/genres":
                     b.genres_route = bool(body["on"])
+                    return {"ok": True}
+                if path == "fake/minbitrate":
+                    b.min_bitrate = bool(body["on"])
                     return {"ok": True}
                 if path == "fake/volume":
                     b.volume = 40 if body["on"] else None

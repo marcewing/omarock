@@ -17,8 +17,8 @@
 // (mpd's, which ./install sets when mpd listens somewhere else);
 // `appleBridge` and `appleStream`, which override apple.json (./install
 // apple-music writes that); `appleRejoin` (default on: reconnect mpd to the
-// Apple Music stream after each change, for a stock libFLAC; ./install turns
-// it off when mpd has the patched one); `timeMachineYear`, the year Time
+// Apple Music stream after each change, which only a bridge before 0.7.0
+// needs); `timeMachineYear`, the year Time
 // Machine's button picked (0 or none: off); `radioState`, the US state
 // "Your area" replaced (still read while radioArea is empty); `timeZone`,
 // the time zone that says which country an area is likelier in (else the

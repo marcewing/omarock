@@ -201,7 +201,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.13.1"
+  readonly property string version: "0.13.2"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -816,9 +816,9 @@ Panel {
       }
       root.rememberLocal()
       client.setLive(true)
-      // mpd joins the stream at once, so the panel switches; the stream is
-      // quiet until the Mac resumes, so mpd rejoins once it has
-      // (AppleClient.catchUp), or else it would stay behind.
+      // mpd joins the stream at once, so the panel switches. With a bridge
+      // before 0.7.0 the stream is near-empty until the Mac resumes, so mpd
+      // rejoins once it has (AppleClient.catchUp), or else it stays behind.
       client.playStream(root.appleStream, root.streamPrefixes())
       apple.post("/v1/resume", {}, apple.catchUp)
       root.clearSearch()
@@ -3805,7 +3805,7 @@ Panel {
     checksToken: true
     refusedHint: ": the settings' Apple Music tab copies the new one"
     idleStopSeconds: Math.max(0, Number(root.setting("appleIdleStop", 60)) || 0)
-    // On unless switched off: only a patched libFLAC keeps up without it.
+    // On unless switched off; it only matters for a bridge before 0.7.0.
     rejoinAfterChange: root.setting("appleRejoin", true) === true
     onLastErrorChanged: if (root.appleMode && apple.lastError !== "") root.say(apple.lastError)
     onBridgeStatusChanged: if (root.appleMode) root.recheckQueue()

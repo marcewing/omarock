@@ -672,24 +672,38 @@ def apple_scenario(host, output, socket_path, failures):
     host.call("press", "Return")
     wait_for(lambda: bridge_requests("/v1/queue/jump"), "jump")
     check(bridge_requests("/v1/queue/jump")[-1][2] == {"index": host.state()["cursor"]}, "Enter on a queue row jumps to it", failures)
-    # mpd plays on, on the same connection: with the patched libFLAC it stays
-    # about 0.3 s behind the Mac by itself, and a reconnect is a stutter 2 s
-    # into the song.
+    # mpd plays on, on the same connection: it keeps up with bridge 0.7.0's
+    # stream by itself, and a reconnect is a stutter 2 s into the song.
     host.settle(3.5)
     status = mpd_state(socket_path)
     check(command_count(socket_path, "playid") == playids and status["state"] == "play",
           "after a jump mpd plays on, without reconnecting to the stream", failures)
-    # appleRejoin (for a stock libFLAC): mpd reconnects to the stream, at
-    # live, 2 s later, once the change has reached the stream (1.5 to 1.8 s).
+    # appleRejoin is for a bridge before 0.7.0 (no minBitrate in its health),
+    # whose stream a stock libFLAC fell behind on: from 0.7.0 it changes nothing.
     host.call("settings", json.dumps({"appleRejoin": True}))
     host.settle(.3)
+    host.call("press", "Return")
+    wait_for(lambda: len(bridge_requests("/v1/queue/jump")) >= 2, "a second jump")
+    host.settle(3.5)
+    check(command_count(socket_path, "playid") == playids,
+          "with bridge 0.7.0 (health's minBitrate), appleRejoin changes nothing: no reconnect after a jump", failures)
+    # An older bridge: mpd reconnects to the stream, at live, 2 s later, once
+    # the change has reached the stream (1.5 to 1.8 s). The settings screen
+    # asks the bridge's health again as it opens.
+    fake_bridge_info(False, "minbitrate")
+    healths = len(bridge_requests("/v1/health"))
+    host.call("press", ",")
+    wait_for(lambda: len(bridge_requests("/v1/health")) > healths, "the bridge's health again")
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["settingsOpen"], "the settings closed")
     host.call("press", "Return")
     jumped = time.monotonic()
     wait_for(lambda: command_count(socket_path, "playid") > playids, "mpd reconnects")
     waited = time.monotonic() - jumped
     current = dict(l.split(": ", 1) for l in mpd_query(socket_path, "currentsong")).get("file")
     check(mpd_state(socket_path)["state"] == "play" and current == stream and 1.5 < waited < 4,
-          f"with appleRejoin, mpd reconnects to the stream (playid of its entry) {waited:.1f} s after a jump", failures)
+          f"with appleRejoin and a bridge before 0.7.0, mpd reconnects to the stream (playid of its entry) {waited:.1f} s after a jump", failures)
+    fake_bridge_info(True, "minbitrate")
     host.call("settings", "{}")
     host.call("press", "x")
     wait_for(lambda: bridge_requests("/v1/queue/remove"), "remove")
@@ -5204,7 +5218,7 @@ def setup_scenario(host, output, failures):
     last = str(BRIDGE["port"])[-1]
     retype("appleMac", last, last)
     wait_for(lambda: window()["notes"]["bridgeToken"] == "Mac scp enabled", "scp enabled")
-    check(window()["canStart"] and window()["args"] == ["--yes", "scp-token", "--yes", "flac", "--yes", "mpris"],
+    check(window()["canStart"] and window()["args"] == ["--yes", "scp-token", "--yes", "mpris"],
           "Remote Login on: \"Mac scp enabled\" under the token field, and Start setup would have setup scp it (--yes scp-token)",
           failures)
     host.call("setupFocus", "bridgeToken")
@@ -5213,14 +5227,14 @@ def setup_scenario(host, output, failures):
     check(not window()["canStart"], "a token the bridge refuses: the field says so, and Start setup waits", failures)
     retype("bridgeToken", "wrong", "fake-bridge-token")
     wait_for(lambda: window()["notes"]["bridgeToken"] == "The bridge takes it", "the right token")
-    # The smooth-playback fixes start ticked (recommended); one unticked.
+    # The smooth-playback fix starts ticked (recommended); unticked here.
     host.call("setupClick", "setupCheck:mpris")
     host.call("grabSetupWindow", str(output / "setup-apple-music.png"))
     host.call("setupClick", "setupStart")
-    wait_for(lambda: launched().endswith("/install' apple-music --yes flac --no mpris"), "Apple Music's terminal")
+    wait_for(lambda: launched().endswith("/install' apple-music --no mpris"), "Apple Music's terminal")
     check(json.loads(apple_json.read_text()) == {"bridge": url, "stream": url + "/omarock.ogg"}
           and token_file.read_text() == "fake-bridge-token" and token_file.stat().st_mode & 0o777 == 0o600,
-          "the Mac's address saved with the stream the bridge names, and the token; ./install apple-music --yes flac --no mpris",
+          "the Mac's address saved with the stream the bridge names, and the token; ./install apple-music --no mpris",
           failures)
     open_settings()
     finished()

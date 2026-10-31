@@ -151,10 +151,12 @@ There are two halves, and the Mac's is the user's to build. Follow
   - `~/.config/omarock/apple.json` names the bridge and the stream.
   - The bridge's token goes in `~/.config/omarock/bridge-token` (mode 600), put
     there by the user.
-- **The stream's lag:** with the stock libFLAC, keep `appleRejoin` on (the default).
-  For smooth starts, offer the patches in `patches/README.md`: the patched
-  libFLAC (then `"appleRejoin": false` in settings.json) and mpd-mpris. Ask before changing
-  mpd's or mpd-mpris's unit.
+- **The stream's lag:** bridge 0.7.0 and later keep Arch's own libFLAC in step
+  (`"minBitrate": true` in its `/v1/health`); for an older one, update it on the
+  Mac, and keep `appleRejoin` on (the default) until then. A patched libFLAC left
+  from before (`mpd.service.d/omarock-flac.conf`) can go: `./install apple-music`
+  offers it. For smooth play and pause, offer the patched mpd-mpris in
+  `patches/README.md`. Ask before changing mpd's or mpd-mpris's unit.
 - **Check:** `tools/omarock-doctor`'s Apple Music section is all green.
 - **Then the switch:** `appleMusic` on.
 

@@ -20,8 +20,8 @@
 #                              accounts and keys
 #   ./install PIECE --yes NAME --no NAME --output NAME
 #                              questions answered ahead, as omarock's setup
-#                              window does: terms (SiriusXM's risk), flac and
-#                              mpris (Apple Music's patched builds),
+#                              window does: terms (SiriusXM's risk), mpris
+#                              (Apple Music's patched mpd-mpris),
 #                              scp-token (the bridge's token copied from the
 #                              Mac with scp, as ssh's config reaches it), and
 #                              the output (the sound output's)
@@ -1125,25 +1125,13 @@ step_apple() {
   fi
   [[ $tokenfile == "$config/bridge-token" ]] || pending[appleTokenFile]=$(jq -cn --arg s "$tokenfile" '$s')
 
-  # Smooth playback: the patches (patches/README.md). Without the libFLAC
-  # one, omarock reconnects mpd after each change (appleRejoin), a short stutter.
-  local pid flac=false
-  pid=$(systemctl --user show -p MainPID --value mpd 2>/dev/null)
-  if [[ -n $pid && $pid != 0 ]] && grep -q omarock-flac "/proc/$pid/maps" 2>/dev/null; then flac=true; fi
-  if $flac; then
-    ok "mpd uses the patched libFLAC"
-    [[ $(setting appleRejoin true) == true ]] && pending[appleRejoin]=false
+  # The stream: from 0.7.0 the bridge encodes its silence so that Arch's own
+  # libFLAC keeps mpd in step (apple-bridge/API.md). omarock's patched libFLAC
+  # did that before; a copy left from then can go.
+  if [[ -n $h ]] && ! jq -e '.minBitrate == true' >/dev/null <<<"$h"; then
+    note "the bridge is older than 0.7.0: update it (git pull, then ./install, in the Mac's omarock clone). Until then mpd can fall behind the Mac, and omarock reconnects it after each change."
   else
-    explain "For smooth playback, mpd needs a fix to libFLAC that isn't in Arch's repo yet (patches/README.md). Without it, mpd falls behind the Mac, and omarock catches it up after each change, with a short stutter. This builds the fixed library for mpd only (a few minutes; needs cmake and ninja)."
-    if confirm "Build the patched libFLAC?" no flac; then
-      run sudo pacman -S --needed --noconfirm base-devel cmake ninja git \
-        && run "$repo/tools/build-libflac" \
-        && install -d "$units/mpd.service.d" \
-        && printf '# omarock: the patched libFLAC, for mpd only (patches/README.md)\n[Service]\nEnvironment=LD_LIBRARY_PATH=%%h/.local/lib/omarock-flac\n' >"$units/mpd.service.d/omarock-flac.conf" \
-        && run systemctl --user daemon-reload \
-        && run systemctl --user restart mpd \
-        && ok "mpd uses the patched libFLAC" && pending[appleRejoin]=false
-    fi
+    remove_flac "omarock's patched libFLAC isn't needed any more: the bridge's stream keeps mpd in step with Arch's own."
   fi
   if [[ ! -f $units/mpd-mpris.service.d/omarock-mpris.conf ]]; then
     explain "mpd-mpris also asks mpd for the stream's cover art at every play and pause, which holds mpd for seconds. A patched mpd-mpris doesn't (a minute to build; needs Go)."
@@ -1426,22 +1414,28 @@ soloist_follow_bus() {
   run systemctl --user restart omarock-soloist
 }
 
+# omarock's patched libFLAC, from before bridge 0.7.0 (patches/README.md):
+# offered for removal, with WHY first.
+remove_flac() {
+  local flac
+  mapfile -t flac < <(present "$units/mpd.service.d/omarock-flac.conf" "$HOME/.local/lib/omarock-flac")
+  ((${#flac[@]})) || return 0
+  explain "$1 This deletes it and the drop-in that loads it, and restarts mpd with Arch's own (anything playing stops for a moment):"
+  listing "${flac[@]}"
+  confirm "Remove the patched libFLAC, and restart mpd?" || return 0
+  run rm -rf "${flac[@]}"
+  run systemctl --user daemon-reload
+  run systemctl --user restart mpd
+  mpd_back
+}
+
 un_patches() {
   local flac mpris
   mapfile -t flac < <(present "$units/mpd.service.d/omarock-flac.conf" "$HOME/.local/lib/omarock-flac")
   mapfile -t mpris < <(present "$units/mpd-mpris.service.d/omarock-mpris.conf" "$HOME/.local/lib/omarock-mpris")
   ((${#flac[@]} + ${#mpris[@]})) || return 0
   step "The Apple Music patches"
-  if ((${#flac[@]})); then
-    explain "mpd uses omarock's patched libFLAC. This deletes it and the drop-in that loads it, and restarts mpd with Arch's own (anything playing stops for a moment):"
-    listing "${flac[@]}"
-    if confirm "Remove the patched libFLAC, and restart mpd?"; then
-      run rm -rf "${flac[@]}"
-      run systemctl --user daemon-reload
-      run systemctl --user restart mpd
-      mpd_back
-    fi
-  fi
+  remove_flac "mpd uses omarock's patched libFLAC."
   if ((${#mpris[@]})); then
     explain "mpd-mpris runs omarock's patched build. This deletes it and its drop-in, and restarts Arch's own:"
     listing "${mpris[@]}"
@@ -1662,7 +1656,7 @@ uninstall() {
   ((step_no > before)) || ok "nothing of omarock's is set up here"
   printf '\n%sWhat stays%s\n' "$bold" "$reset"
   explain "mpd, mpc and mpd-mpris, with mpd's config, database and playlists. omarock's radio favourites are the mpd playlist \"Radio\"."
-  explain "If Apple Music's two fixes were built here, the packages they were built with stay too (base-devel, cmake, ninja, go, git): sudo pacman -Rs those you don't otherwise need."
+  explain "If Apple Music's fixes were built here, the packages they were built with stay too (go, git, and for the old libFLAC base-devel, cmake and ninja): sudo pacman -Rs those you don't otherwise need."
   mapfile -t backups < <(compgen -G "$(mpd_conf).before-omarock-*")
   if ((${#backups[@]})); then explain "Copies of mpd.conf from before each change:"; listing "${backups[@]}"; fi
   mapfile -t backups < <(compgen -G "$bindings.before-omarock-*")

@@ -191,15 +191,18 @@ address changes, **Fix…** there (or `./install apple-music`) asks again. Its o
   stream.
 
 And in the file only:
-- `appleRejoin` (on by default): reconnects mpd to the stream after each change, so it
-  stays near live with a stock libFLAC. `./install apple-music` turns it off when mpd
-  has the patched one.
+- `appleRejoin` (on by default): reconnects mpd to the stream after each change. Only a
+  bridge older than 0.7.0 needs it: its stream was nearly empty while paused, and a stock
+  libFLAC fell behind on it. From 0.7.0 (`"minBitrate": true` in `/v1/health`) it does
+  nothing.
 - `appleBridge` and `appleStream`: the addresses, instead of `apple.json`'s.
 
-For smooth playback, the setup window's two ticks (on to start) build a patched libFLAC
-for mpd and a patched mpd-mpris on the Linux side; [patches/README.md](../patches/README.md)
-says what they fix, and when `appleRejoin` is needed. `tools/omarock-doctor` checks
-the Linux side: `apple.json`, the token file, the bridge's `/v1/health` and libFLAC.
+For smooth playback, the setup window's tick (on to start) builds a patched mpd-mpris
+on the Linux side; [patches/README.md](../patches/README.md) says what it fixes. Arch's own
+libFLAC keeps up with the stream from bridge 0.7.0; a patched libFLAC built for an older
+bridge can go (`./install apple-music` offers to remove it). `tools/omarock-doctor`
+checks the Linux side: `apple.json`, the token file, the bridge's `/v1/health`, and
+whether the bridge is new enough.
 
 ## Troubleshooting
 
@@ -221,7 +224,8 @@ the Linux side: `apple.json`, the token file, the bridge's `/v1/health` and libF
   launchd hasn't got it (left by an uninstall of 0.5.0 or older), the bridge registers it
   again, or runs without it. With 0.5.0 or older, switch OmarockBridge off and on in
   System Settings → General → Login Items & Extensions (App Background Activity).
-- **mpd far behind live:** see [patches/README.md](../patches/README.md).
+- **mpd far behind live:** update the bridge to 0.7.0 or later (`git pull`, then
+  `./install`, in the Mac's clone). Older bridges' streams made mpd fall behind.
 - **On Linux,** run `tools/omarock-doctor`.
 - **Another Icecast on port 8000:** the bridge uses whatever answers on 127.0.0.1:8000,
   so stop the other one, or move it.

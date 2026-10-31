@@ -62,7 +62,7 @@ test("SiriusXM: the risk is ticked, and the login filled in", () => {
 })
 
 test("Apple Music: the Mac has to answer; a token typed has to be taken", () => {
-  const values = { appleMac: "my-mac", bridgeToken: "", flac: true, mpris: false }
+  const values = { appleMac: "my-mac", bridgeToken: "", mpris: false }
   assert.equal(Setup.blocker("apple-music", values, {}, {}), "Checking the bridge…")
   assert.equal(Setup.blocker("apple-music", values, {}, { appleMac: { kind: "bad", text: "Nothing answers" } }), "Nothing answers")
   const answers = { appleMac: { kind: "ok", text: "The bridge answers" } }
@@ -77,8 +77,8 @@ test("Apple Music: the Mac has to answer; a token typed has to be taken", () => 
   assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "checking" } }, answers)), "Checking the token…")
   assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "bad", text: "Refused" } }, answers)), "Refused")
   assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "ok" } }, answers)), "")
-  assert.deepEqual(Setup.args("apple-music", values), ["--yes", "scp-token", "--yes", "flac", "--no", "mpris"])
-  assert.deepEqual(Setup.args("apple-music", typed), ["--yes", "flac", "--no", "mpris"])
+  assert.deepEqual(Setup.args("apple-music", values), ["--yes", "scp-token", "--no", "mpris"])
+  assert.deepEqual(Setup.args("apple-music", typed), ["--no", "mpris"])
 })
 
 test("a Mac's address is the bridge's URL", () => {
@@ -148,8 +148,9 @@ test("the windows as Marc laid them out: no Tailscale link, no list of what the 
   assert.ok(!all.some(p => p.steps.some(s => (s.links || []).some(l => /tailscale/i.test(l.label + l.url)))))
   const apple = Setup.pages["apple-music"]
   assert.equal(apple.steps[3].title, "Smooth playback (optional, recommended)")
-  // The recommended fixes start ticked.
-  assert.deepEqual(Setup.args("apple-music", Setup.initial("apple-music", {})), ["--yes", "scp-token", "--yes", "flac", "--yes", "mpris"])
+  // The recommended fix starts ticked; the libFLAC one is gone (bridge 0.7.0's stream needs none).
+  assert.deepEqual(Setup.args("apple-music", Setup.initial("apple-music", {})), ["--yes", "scp-token", "--yes", "mpris"])
+  assert.ok(!apple.steps[3].fields.some(f => f.key === "flac"))
   // Spotify: where the Client ID comes from, Soloist's own page, and what Start setup does next, as step 3.
   const spotify = Setup.pages.spotify
   assert.match(spotify.steps[0].fields[0].lead, /copy the app's Client ID and paste it here/)
