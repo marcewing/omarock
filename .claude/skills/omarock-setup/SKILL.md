@@ -64,7 +64,7 @@ below.
 - `sudo pacman -S mpd mpd-mpris mpc` (all in Arch's `extra`), version 0.24 or later.
 - **The config** needs more than `music_directory`: without `playlist_directory`, mpd
   turns stored playlists off, and omarock's playlists and radio favourites with
-  them. Use README.md's five-line mpd.conf, and make its folders. mpd scans on its
+  them. Use README.md's six-line mpd.conf, and make its folders. mpd scans on its
   first start; after that, new music needs `mpc update`.
 - **The socket.** omarock reaches mpd only through a unix socket, by default
   `$XDG_RUNTIME_DIR/mpd/socket`. There are two ways (README.md, Install), so let

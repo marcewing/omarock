@@ -124,11 +124,14 @@ playlist_directory  "~/.local/share/mpd/playlists"
 db_file             "~/.local/share/mpd/database"
 state_file          "~/.local/state/mpd/state"
 sticker_file        "~/.local/share/mpd/sticker.sql"
+restore_paused      "yes"
 ```
 
 and make the folders: `mkdir -p ~/.local/share/mpd/playlists ~/.local/state/mpd`.
 Without `playlist_directory`, mpd turns stored playlists off, and omarock's
-playlists and radio favourites with them.
+playlists and radio favourites with them. `restore_paused` makes mpd start
+paused, at login or after a crash, rather than playing on from its last saved
+state, which can be minutes old.
 
 omarock talks to mpd over a unix socket, so mpd must listen on one. Either:
 - **The quick way:** `systemctl --user enable --now mpd.socket`. The unit that comes
@@ -148,6 +151,18 @@ omarock talks to mpd over a unix socket, so mpd must listen on one. Either:
 
 mpd scans your music the first time it starts. After you add music later, run
 `mpc update`.
+
+**After a crash,** mpd's own unit leaves it down. A drop-in brings it back
+(paused, with `restore_paused`):
+
+```ini
+# ~/.config/systemd/user/mpd.service.d/restart.conf
+[Service]
+Restart=on-failure
+RestartSec=2
+```
+
+Then `systemctl --user daemon-reload`.
 
 **The media keys** go through mpd-mpris. It exits whenever mpd restarts, and its
 unit doesn't bring it back, so give it a drop-in that does:
@@ -427,6 +442,8 @@ A few are in the file only, for when you know you need them:
 - `appleRejoin` (on): reconnect mpd to the Apple Music stream after each change.
   A stock libFLAC needs it; `./install apple-music` turns it off when mpd has the
   patched one ([patches/README.md](patches/README.md)).
+- `streamRetryFor` (300): how many seconds omarock keeps trying to reconnect a
+  radio station or SiriusXM channel that lost its connection, before it gives up.
 
 ## Troubleshooting
 
@@ -434,6 +451,15 @@ A few are in the file only, for when you know you need them:
   $XDG_RUNTIME_DIR/mpd/socket` and `systemctl --user status mpd`, or set `socket` in settings.json.
 - **No covers:** omarock reads `cover.jpg` (or `folder.png`, and the like) from each
   album's folder, through mpd. Folders without one show a note.
+- **"Reconnecting…" on a station or channel:** its stream lost its connection
+  (the network, or the station's server). mpd's buffer rides out short drops;
+  after that omarock tries again after 2 and 5 seconds, then every 10, for 5
+  minutes (`streamRetryFor`), and says why if it gives up. A station that
+  refuses (a 403, say) isn't tried again.
+- **"Not connected" on Apple Music or Spotify:** omarock can't reach the bridge
+  on the Mac, or omarock-spotify. It looks again every 3 seconds and carries on
+  once it answers. Spotify stays the source meanwhile: Spotify's player plays
+  on without it.
 - **A change didn't show up after updating:** `omarchy restart shell`.
 - **Anything else:** `journalctl --user -b | grep omarock`. The panel logs its
   version when it loads, and any mpd command or service request that was slow.
