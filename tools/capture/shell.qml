@@ -336,6 +336,7 @@ ShellRoot {
         cursor: p.cursorActive ? p.cursorIndex : -1, notice: p.notice,
         // The now playing card's links as the keys reach them, the one they're on, and its box.
         cardLinks: p.cardLinks, cardFocus: p.cardFocus, cardBoxes: host.cardBoxes(),
+        playingStation: p.playingStation ? { name: p.playingStation.name, favorite: p.playingStation.favorite } : null,
         panelSwitches: host.panelSwitches,
         hint: p.hintParts.map(function(h) { return h.key + " " + h.what }).join(" · "),
         hintLine: host.hintLine(), headerButtons: host.headerButtons(), cardHeight: popup() ? Math.round(popup().contentItem[0].parent.parent.height) : 0,
@@ -527,6 +528,23 @@ ShellRoot {
       // into a window (after clicks in the bar's) only enters it.
       keyboard.mouseMove(card, x - 1, y, -1, Qt.NoButton, Qt.NoModifier)
       return keyboard.mouseMove(card, x, y, -1, Qt.NoButton, Qt.NoModifier) ? "ok" : "no window"
+    }
+    // Where a row is on the card, {x, y} (a third in, halfway down), or {}
+    // when it isn't in view: in the panel's list, or in a named column
+    // ("leftColumnList", "rightColumnList").
+    function rowPoint(name: string, index: int): string {
+      var card = popup().contentItem[0].parent.parent
+      var list = name === "" ? host.panel.listView : host.findNamed(card, name)
+      if (list && typeof list.itemAtIndex !== "function")
+        list = list.children.filter(function(c) { return typeof c.itemAtIndex === "function" })[0]
+      var delegate = list ? list.itemAtIndex(index) : null
+      var row = delegate ? delegate.children[1] : null
+      if (!row || !row.visible) return "{}"
+      // The list makes rows past its edges too; only one in view will do.
+      var middle = delegate.y + row.y + row.height / 2
+      if (middle < list.contentY || middle > list.contentY + list.height) return "{}"
+      var at = row.mapToItem(card, row.width / 3, row.height / 2)
+      return JSON.stringify({ x: Math.round(at.x), y: Math.round(at.y) })
     }
     // The list scrolled to y, as a mouse wheel would.
     function scrollList(y: real): void { host.panel.listView.contentY = y }

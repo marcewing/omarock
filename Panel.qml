@@ -201,7 +201,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.14.0"
+  readonly property string version: "0.14.1"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -211,6 +211,10 @@ Panel {
   property bool searching: false
   property int cursorIndex: 0
   property bool cursorActive: false
+  // The cursor is where the pointer put it (hoverRow), not the keys: it goes
+  // when the pointer leaves the list.
+  property bool pointerCursor: false
+  onCursorIndexChanged: root.pointerCursor = false
   property bool returnPressed: false
   property string notice: ""
   property string localCoverUrl: ""
@@ -540,14 +544,23 @@ Panel {
       var line = (root.cardPosition() || { row: -1 }).row
       return (enter ? [enter] : []).concat([
         hint((root.cardLinks[line] || []).length > 1 ? "↑↓←→" : "↑↓", "move", "Between the song's links; ↓ from the last goes back to the list"),
-        hint("Esc", "to the list", "Back to the list", true),
-        hint("i", "info", "Everything known about the song playing"), hint("?", "keys", "", true)])
+        hint("Esc", "to the list", "Back to the list", true)], root.playingFavoriteHint(),
+        [hint("i", "info", "Everything known about the song playing"), hint("?", "keys", "", true)])
     }
     var parts = root.listHintParts()
     // At the top of the list, ↑ goes up to the song playing.
     if (!root.typing && root.cursorActive && root.cursorIndex === 0 && root.cardLinks.length > 0)
       parts.splice(Math.max(0, parts.length - 1), 0, hint("↑", "now playing", "Up to the song playing: its artist, album and the rest"))
     return parts
+  }
+
+  // A for the channel or station playing, when there's no cursor.
+  function playingFavoriteHint() {
+    var row = root.playingStation
+    if (!row) return []
+    var what = row.kind === "channel" ? "channel" : "station"
+    return [Hints.hint("A", row.favorite ? "unfavourite" : "favourite", row.favorite
+      ? "Take the " + what + " playing out of your favourites" : "Add the " + what + " playing to your favourites")]
   }
 
   function listHintParts() {
@@ -579,8 +592,8 @@ Panel {
       parts = root.cursorActive && row
         ? [hint("Enter", "tune", "Tune it", true), hint("A", row.favorite ? "unfavourite" : "favourite",
           row.favorite ? "Take it out of your favourites" : "Add it to your favourites"), info, steps]
-        : [hint("Space", "play/stop", "Play or stop", true),
-          hint("/", root.sxmMode ? "find a channel" : "find a station", root.sxmMode ? "Search the channels" : "Search for a station"), steps]
+        : [hint("Space", "play/stop", "Play or stop", true)].concat(root.playingFavoriteHint(),
+          [hint("/", root.sxmMode ? "find a channel" : "find a station", root.sxmMode ? "Search the channels" : "Search for a station"), steps])
       return parts.concat(root.cursorActive && row ? [] : time, source, [hint("H", "history", "What you've played here")], [keys])
     }
     if (!root.searchMode && !root.browsing) {
@@ -760,9 +773,10 @@ Panel {
     radio.click(station.stationuuid)
   }
 
-  function toggleFavorite(row) {
-    // In the list (not search results), the cursor follows it to its new place.
-    root.favoriteFollow = root.searchMode || root.browsing ? null
+  // follow: the cursor is on it in the list (not search results), so it
+  // follows it to its new place.
+  function toggleFavorite(row, follow) {
+    root.favoriteFollow = !follow || root.searchMode || root.browsing ? null
       : { kind: row.kind, id: row.kind === "station" ? row.stationUuid : row.channelId, favorite: !row.favorite,
           until: Date.now() + 10000 }
     var done = function(error, adding) {
@@ -1853,6 +1867,18 @@ Panel {
   }
   readonly property string playingLibraryHover: root.playingLibrary === "yes" && root.bridge.canUnsave ? "󰅖 Remove from library" : ""
   readonly property bool canAddPlayingToPlaylist: !root.live && root.player.ready && !!root.player.currentSong.file
+  // The channel or station playing, as its row in the list, or null: with no
+  // cursor, A makes it a favourite or takes it out.
+  readonly property var playingStation: {
+    if (root.sxmMode) {
+      var id = sxm.currentId
+      var channel = sxm.channels.filter(function(c) { return c.id === id })[0]
+      return channel ? Sxm.channelRow(channel, null, "", id) : null
+    }
+    if (root.radioMode && radio.station)
+      return Radio.stationRow(radio.station, "", radio.currentUuid, radio.favorites.map(function(s) { return s.stationuuid }))
+    return null
+  }
 
   // The now playing card's links: the album, the artist and the genre open
   // (o, O, g), a live station's song and artist are looked up, then Add to
@@ -1883,7 +1909,11 @@ Panel {
     if (last) root.cardFocus = last[0]
     else root.leaveCard(false)
   }
-  onCursorActiveChanged: if (root.cursorActive) root.cardFocus = ""
+  onCursorActiveChanged: if (root.cursorActive) {
+    root.cardFocus = ""
+    root.cardReturn = -1
+  }
+  onListKeyChanged: root.cardReturn = -1
   onTypingChanged: if (root.typing) root.cardFocus = ""
 
   function cardPosition() {
@@ -1902,6 +1932,26 @@ Panel {
     root.cardFocus = links[links.length - 1][0]
     root.cursorActive = false
     return true
+  }
+
+  // Out of the list (↑ from its top with nothing in the card to go to, or
+  // the pointer leaving it): no cursor, so the keys act on what's playing;
+  // ↑ or ↓ brings it back where it was.
+  function leaveList() {
+    root.cardReturn = root.cursorIndex
+    root.cursorActive = false
+    root.pointerCursor = false
+  }
+
+  // The pointer left the list: a cursor it put there goes. Not while the
+  // panel closes, or a page over the list takes the pointer.
+  function pointerLeftList() {
+    if (!root.pointerCursor || !root.cursorActive) return
+    Qt.callLater(function() {
+      if (root.opened && root.pointerCursor && root.cursorActive && !root.infoOpen && !root.keysOpen
+          && !root.settingsOpen && !root.pickerOpen && !root.confirmOpen && !root.yearPickerOpen)
+        root.leaveList()
+    })
   }
 
   // Back to the list, where the cursor was. into (↓): the cursor shows
@@ -2745,9 +2795,12 @@ Panel {
   function moveCursor(dy) {
     if (root.rows.length === 0) return
     if (!root.cursorActive) {
-      root.cursorActive = true
+      // Back where it left the list, else on the song or station playing.
+      var back = root.cardReturn
       var current = root.currentQueueRow()
-      root.cursorIndex = !root.searchMode && !root.browsing && current >= 0 && current < root.rows.length ? current : 0
+      root.cursorIndex = back >= 0 && back < root.rows.length ? back
+        : !root.searchMode && !root.browsing && current >= 0 && current < root.rows.length ? current : 0
+      root.cursorActive = true
       return
     }
     root.cursorIndex = Math.max(0, Math.min(root.rows.length - 1, root.cursorIndex + dy))
@@ -2756,6 +2809,7 @@ Panel {
   function hoverRow(index) {
     root.cursorActive = true
     root.cursorIndex = index
+    root.pointerCursor = true
   }
 
   // PgUp and PgDn: to the first or last row in full view, then a page on
@@ -3542,8 +3596,9 @@ Panel {
       if (root.rowQueues(row)) root.activateRow(root.cursorIndex, "add")
     } else if (t === "A") {
       var picked = root.cursorRow()
-      if (picked && (picked.kind === "channel" || picked.kind === "station")) root.toggleFavorite(picked)
+      if (picked && (picked.kind === "channel" || picked.kind === "station")) root.toggleFavorite(picked, true)
       else if (root.cursorActive) root.addToPlaylistIn(root.browseTop, root.rows, root.cursorIndex)
+      else if (root.playingStation) root.toggleFavorite(root.playingStation, false)
       else if (root.canAddPlayingToPlaylist) root.addPlayingToPlaylist()
     } else if (t === "\u007f" && root.cursorActive) root.removeRow(root.cursorIndex)
     else if (t === "\b") root.goBack()
@@ -3961,8 +4016,12 @@ Panel {
           return
         }
         if (root.cardFocus !== "") { root.moveInCard(dx, dy); return }
-        // ↑ from the top of the list: up into the now playing card.
-        if (dy < 0 && (root.rows.length === 0 || (root.cursorActive && root.cursorIndex === 0)) && root.enterCard()) return
+        // ↑ from the top of the list: up into the now playing card, else
+        // out of the list.
+        if (dy < 0 && (root.rows.length === 0 || (root.cursorActive && root.cursorIndex === 0))) {
+          if (root.enterCard()) return
+          if (root.cursorActive) { root.leaveList(); return }
+        }
         if (dy !== 0) root.moveCursor(dy)
         else if (dx > 0) root.openCursorRow()
         else root.goBack()
@@ -4431,6 +4490,12 @@ Panel {
       return Paging.page(cursor, list.count, listRoot.shownRows(), direction)
     }
     onMarkIndexChanged: Qt.callLater(listRoot.keepMarkVisible)
+    // The pointer leaving the list takes a cursor it put there away
+    // (root.pointerLeftList). The columns share one, around both.
+    HoverHandler {
+      enabled: listRoot.registers
+      onHoveredChanged: if (!hovered) root.pointerLeftList()
+    }
     // Not the row under the pointer: the pointer put the cursor there, and
     // scrolling a row half off the edge into view moved the list under the
     // pointer (the list rocked a row up and down as the mouse went over it).
@@ -5454,6 +5519,11 @@ Panel {
 
         readonly property real gap: Style.space(16)
         readonly property real columnWidth: Math.floor((width - gap) / 2)
+        // One pointer area for both columns: moving to the preview keeps the
+        // cursor the preview follows.
+        HoverHandler {
+          onHoveredChanged: if (!hovered) root.pointerLeftList()
+        }
         // Each list starts under its own heading. Made as tall as the
         // other, the results' heading followed the preview's buttons as the
         // cursor moved: a gap above the results, and the list jumping under
@@ -5511,6 +5581,7 @@ Panel {
         }
 
         TrackList {
+          objectName: "rightColumnList"
           anchors.right: parent.right
           anchors.top: rightHeading.bottom
           anchors.topMargin: Style.space(8)

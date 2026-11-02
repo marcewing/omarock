@@ -269,7 +269,11 @@ stay until you remove them too.
   The keys reach all of these too: ↑ from the top of the list goes up to the
   song playing, ↑ ↓ (and ← → between the two Add links) move, Enter does what a
   click would, and ↓ from the last line or Esc goes back to the list. `A` with
-  no cursor in the list adds the song playing to a playlist.
+  no cursor in the list adds the song playing to a playlist (on SiriusXM and
+  the radio, it makes the channel or station playing a favourite, or takes it
+  out). A cursor the pointer put on a row goes when the pointer leaves the
+  list, as does ↑ from the top when there's nothing above to go to; the keys
+  then act on what's playing, and ↑ or ↓ brings the cursor back where it was.
 - **Your library (`L`):** on Apple Music or Spotify, `L` adds the song, album
   or (Apple Music) playlist under the cursor to your library, or, with no
   cursor, the song playing. In the info card it adds what the card shows. A
@@ -356,8 +360,8 @@ stay until you remove them too.
   sees the searches made from it (your area's names and its coordinates), and
   which station you tune to (it counts plays, as its directory asks of
   players); the station's own server sees you listening. `/` finds stations by name, call sign, frequency
-  or genre; Enter tunes; `A` keeps a favourite (in the mpd playlist "Radio", so
-  `mpc load Radio` plays them); `n`/`p` step through the favourites. Stations that
+  or genre; Enter tunes; `A` keeps a favourite, the station under the cursor or
+  else the one playing (in the mpd playlist "Radio", so `mpc load Radio` plays them); `n`/`p` step through the favourites. Stations that
   send their song show it. HLS-only stations are dimmed: mpd can't play them.
 - **Spotify:** search your library, then Spotify's catalog; browse artists,
   albums and playlists; its queue, **P** for your Spotify playlists, **A** to add
@@ -377,7 +381,8 @@ stay until you remove them too.
   Play reconnects.
 - **SiriusXM:** your favourite channels, then all of them, each with its logo
   and what's on. Enter tunes, `n`/`p` step through the favourites, `A` adds or
-  removes a favourite (your account's, as in the SiriusXM app). Space stops and
+  removes a favourite, the channel under the cursor or else the one playing
+  (your account's, as in the SiriusXM app). Space stops and
   starts: it's live.
 - **On more than one machine:** local music, the radio and SiriusXM play on
   each machine on its own. Apple Music and Spotify play on one machine at a

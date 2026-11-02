@@ -289,6 +289,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     history_scenario(host, output, socket_path, failures)
     scrolling_scenario(host, output, socket_path, failures)
     favourite_follow_scenario(host, output, failures)
+    list_exit_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
     heard_scenario(host, socket_path, failures)
     elsewhere_scenario(host, socket_path, failures)
@@ -4208,8 +4209,10 @@ def hover_scroll_scenario(host, failures):
         host.call("press", key)
         host.settle(.4)
         after = host.state()
-        check(after["cursor"] == cut["index"] + step and (after["listY"] - s["listY"]) * step > 0,
-              f"then {key} scrolls to row {after['cursor']} ({s['listY']} -> {after['listY']})", failures)
+        # The cursor left the list with the pointer: the key brings it back
+        # there, scrolled into view.
+        check(after["cursor"] == cut["index"] and (after["listY"] - s["listY"]) * step > 0,
+              f"then {key} brings the cursor back to row {after['cursor']}, in view ({s['listY']} -> {after['listY']})", failures)
 
 
 def page_sweep(host, what, get, failures):
@@ -4463,6 +4466,120 @@ def favourite_follow_scenario(host, output, failures):
         check(in_view(s), f"{source}: A again, and it follows {name} back to its place, in view "
               f"(row {s['cursor']}, y {s['listY']})", failures)
     to_source(host, "local")
+    host.call("close")
+
+
+def list_exit_scenario(host, output, failures):
+    """Marc, 11-02: on SiriusXM, A favourites the channel under the cursor,
+    and the cursor stayed where the pointer left the list, so making the
+    channel playing a favourite meant finding it first. A cursor the pointer
+    put on a row now leaves the list with it, as does ↑ from the top (into
+    the card, or off the list); with no cursor, A makes the channel or
+    station playing a favourite or takes it out, and ↓ brings the cursor
+    back where it was. The expanded panel's columns are one area: moving to
+    the preview keeps the cursor it follows."""
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.call("expand", "false")
+    host.settle(.4)
+
+    def soon(predicate, timeout=3):
+        end = time.time() + timeout
+        while time.time() < end:
+            if predicate(): return True
+            time.sleep(.1)
+        return predicate()
+
+    def point(name, index):
+        return json.loads(host.call("rowPoint", name, index))
+
+    def flip(source, how):
+        before = host.state()["playingStation"]
+        host.call("press", "A")
+        flipped = soon(lambda: (host.state()["playingStation"] or {}).get("favorite") == (not before["favorite"]), 10)
+        s = host.state()
+        check(flipped and s["cursor"] < 0,
+              f"{source}: {how}, A {'unfavourites' if before['favorite'] else 'favourites'} {before['name']}, "
+              f"the one playing, and no cursor comes back ({s['cursor']})", failures)
+        host.call("press", "A")
+        soon(lambda: (host.state()["playingStation"] or {}).get("favorite") == before["favorite"], 10)
+
+    for source, mode in (("sxm", "sxmMode"), ("radio", "radioMode")):
+        to_source(host, source)
+        wait_for(lambda: host.state()[mode] and host.state()["playingStation"], source + ": something playing")
+        reopen(host)
+        playing = host.state()["playingStation"]
+        rows = host.state()["rows"]
+        other = next(i for i, r in enumerate(rows) if r.split(":", 1)[1] != playing["name"] and point("", i))
+        at = point("", other)
+        host.hover(at["x"], at["y"])
+        host.settle(.4)
+        check(host.state()["cursor"] == other, f"{source}: the pointer on {rows[other]} puts the cursor there", failures)
+        host.hover(4, 4)
+        left = soon(lambda: host.state()["cursor"] < 0)
+        s = host.state()
+        want = "A unfavourite" if playing["favorite"] else "A favourite"
+        check(left and want in s["hint"], f"{source}: the pointer off the list, and so is the cursor; "
+              f"the hints offer {want} for {playing['name']}: {s['hint']}", failures)
+        flip(source, "the pointer off the list")
+        host.call("press", "Down")
+        host.settle(.3)
+        check(host.state()["cursor"] == other, f"{source}: ↓ brings the cursor back to {rows[other]}", failures)
+
+        for _ in range(len(rows) + 1):
+            if host.state()["cursor"] == 0: break
+            host.call("press", "Up")
+        host.call("press", "Up")
+        host.settle(.3)
+        s = host.state()
+        check(s["cursor"] < 0 and (s["cardFocus"] != "" or not s["cardLinks"]),
+              f"{source}: ↑ from the top leaves the list ({'into the card: ' + s['cardFocus'] if s['cardFocus'] else 'off it'})",
+              failures)
+        flip(source, "after ↑ off the top")
+        host.call("press", "Down")
+        host.settle(.3)
+        check(host.state()["cursor"] == 0, f"{source}: ↓ comes back to the top row", failures)
+
+    to_source(host, "local")
+    reopen(host)
+    rows = host.state()["rows"]
+    at = point("", 2)
+    if at:
+        host.hover(at["x"], at["y"])
+        host.settle(.4)
+        host.hover(4, 4)
+        left = soon(lambda: host.state()["cursor"] < 0)
+        host.call("press", "Down")
+        host.settle(.3)
+        check(left and host.state()["cursor"] == 2,
+              f"local: the cursor leaves the queue with the pointer, and ↓ brings it back to {rows[2]}", failures)
+
+    host.call("expand", "true")
+    host.settle(.6)
+    host.call("press", "/")
+    host.call("typeKeys", "basement")
+    soon(lambda: host.state()["query"] == "basement" and len(host.state()["rows"]) >= 2, 10)
+    host.settle(.5)
+    rows = host.state()["rows"]
+    at = point("leftColumnList", 1)
+    if len(rows) < 2 or not at:
+        check(False, "the expanded panel: two results to hover: " + ", ".join(rows), failures)
+    else:
+        host.hover(at["x"], at["y"])
+        wait_for(lambda: host.state()["cursor"] == 1 and host.state()["preview"] != "", "the second result's preview")
+        host.settle(.6)
+        preview = host.state()["preview"]
+        there = json.loads(host.call("itemAt", "rightColumnList"))
+        host.hover(there["x"] + 30, there["y"] + 10)
+        host.settle(.6)
+        s = host.state()
+        check(s["cursor"] == 1 and s["preview"] == preview,
+              f"the expanded panel: into the preview, the cursor stays on {rows[1]} and its preview ({s['preview']})", failures)
+        host.hover(4, 4)
+        check(soon(lambda: host.state()["cursor"] < 0), "then off both columns, the cursor goes", failures)
+    host.call("press", "Escape")
+    host.call("press", "Escape")
+    host.call("expand", "false")
     host.call("close")
 
 
@@ -6012,6 +6129,7 @@ def main():
                             elif name == "history": history_scenario(host, output, socket_path, failures)
                             elif name == "time-machine": time_machine_scenario(host, output, socket_path, failures)
                             elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)
+                            elif name == "list-exit": list_exit_scenario(host, output, failures)
                             elif name == "bus-volume": bus_volume_scenario(host, socket_path, failures)
                             elif name == "real-apple-info": real_apple_info_scenario(host, output, socket_path, failures)
                             elif name == "real-apple-keys": real_apple_keys_scenario(host, output, socket_path, failures)

@@ -58,7 +58,7 @@ Rectangle {
       ["r", "Repeat on or off"]
     ] },
     { title: "LISTS", keys: [
-      ["↑  ↓", "Move through the list (or j k)"],
+      ["↑  ↓", "Move through the list (or j k). The pointer moves the cursor too; when it leaves the list, so does the cursor, and the keys act on what's playing"],
       ["PgUp  PgDn", "A page up or down the list (in the settings, the info card and these keys too)"],
       ["→  Enter", "Open an artist, album, genre or playlist (or l)"],
       ["←  Esc  ⌫", "Go back a level (or h)"],
@@ -68,11 +68,12 @@ Rectangle {
       ["i", "Everything known about the song, album, station or channel (else what's playing): its service and, for Apple Music and Spotify, whether it's in your library"],
       ["L", "Apple Music and Spotify: add the song, album or playlist to your library (else the song playing; in the info card, what it shows). On Spotify, again takes it out"],
       ["o  O  g", "Open the album, artist or genre of the song playing (or click them, or the cover, above). On SiriusXM or the radio, o and O look the song or artist up in Apple Music or Spotify"],
-      ["↑", "From the top of the list: up to the song playing. ↑ ↓ (and ← → on its last line) go between its artist, album, genre, Add to library and Add to playlist; Enter does what a click would; ↓ from the last line or Esc goes back to the list"]
+      ["↑", "From the top of the list: up to the song playing (with nothing there to go to, off the list: the keys act on what's playing). ↑ ↓ (and ← → on its last line) go between its artist, album, genre, Add to library and Add to playlist; Enter does what a click would; ↓ from the last line or Esc goes back to the list"]
     ] },
     { title: "PLAYLISTS", keys: [
       ["P", "Your playlists; saving the queue as one, and History, are at the top"],
       ["A", "Add the song, album, artist or genre to a playlist, or start a new one (with no cursor, the song playing)"],
+      ["A", "On SiriusXM or the radio: make the channel or station a favourite, or take it out (with no cursor, the one playing)"],
       ["x", "In a playlist, remove the song; on a playlist, delete it (asks first)"]
     ] },
     { title: "HISTORY", keys: [
