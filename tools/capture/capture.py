@@ -25,6 +25,7 @@ The approach follows crmne.mpris's tools/capture (MIT).
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -3810,11 +3811,22 @@ def reconnect_scenario(host, socket_path, failures):
     to_source(host, "apple")
     wait_for(lambda: host.state()["appleReady"] and host.state()["bar"]["playing"], "Apple Music playing")
     host.settle(1)
+    log_at = len(BRIDGE["qs_log"].read_text(errors="replace"))
     back = offline(url, 4, 10)
     wait_for(lambda: host.state()["stateText"] == "Apple Music · Not connected", "the bridge out of reach", timeout=8)
     wait_for(lambda: host.state()["appleReady"], "the bridge back", timeout=40)
     after = time.monotonic() - back
     check(after < 6, f"the bridge shows again {after:.1f} s after it's back (the long poll alone: up to 25 s)", failures)
+    # The journal: the first request with no answer, and when it answers
+    # again (Marc's laptop, 11-03: a line every 8 s for half an hour).
+    host.settle(.5)
+    lines = [line for line in BRIDGE["qs_log"].read_text(errors="replace")[log_at:].splitlines() if "omarock: Apple Music" in line]
+    unanswered = [line for line in lines if "(no answer)" in line]
+    again = [line for line in lines if " answers again, after " in line]
+    count = re.search(r"and (\d+) requests? with no answer", again[0]) if len(again) == 1 else None
+    check(len(unanswered) == 1 and "only POSTs are logged" in unanswered[0] and count and int(count.group(1)) >= 2,
+          f"logged: the first with no answer and the answer again ({len(unanswered)} unanswered lines, "
+          f"{again[0].split('omarock: ')[-1] if again else 'no answer-again line'})", failures)
     to_source(host, "local")
     BRIDGE["config"].unlink()
 

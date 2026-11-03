@@ -67,6 +67,10 @@ Item {
   property bool reachable: false
   // How often a request failed outright (reachable went false), for tests.
   property int dropouts: 0
+  // A run of requests with no answer, for the journal: when it began (ms,
+  // 0: none) and how many there have been.
+  property real unansweredSince: 0
+  property int unansweredCount: 0
   property bool authorized: false
   // What /v1/health said last. A status reply also sets `authorized` (the
   // token works), but omarock-spotify answers status before it's signed in.
@@ -179,16 +183,36 @@ Item {
   // command (POST), and anything else over 2 s, with what was in flight when
   // it went out (Qt sends at most 6 requests to a host at once). Not the
   // status long poll, which waits on purpose. When a song picked in search
-  // takes seconds to play, this says where the time went.
+  // takes seconds to play, this says where the time went. While nothing
+  // answers (the Mac asleep, a laptop on the move), only the first request
+  // and the POSTs, then one line when it answers again.
   function logTiming(method, entry, status) {
     var took = Date.now() - entry.sentAt
+    if (root.unansweredSince > 0) {
+      if (!status) {
+        root.unansweredCount++
+        if (method !== "POST") return
+      } else {
+        var gone = Math.round((Date.now() - root.unansweredSince) / 1000)
+        console.info("omarock: " + root.service + " answers again, after " + (gone < 120 ? gone + " s" : Math.round(gone / 60) + " min")
+          + " and " + root.unansweredCount + (root.unansweredCount === 1 ? " request" : " requests") + " with no answer")
+        root.unansweredSince = 0
+        root.unansweredCount = 0
+      }
+    }
     // A volume drag sends a run of POSTs: only a slow one is worth a line.
     // Background requests wait their turn: only a failure is.
-    if (entry.path === "/v1/status" || ((method !== "POST" || entry.path === "/v1/volume") && took <= 2000)
+    if (entry.path === "/v1/status" || (status && (method !== "POST" || entry.path === "/v1/volume") && took <= 2000)
         || (entry.background && status === 200)) return
+    var first = !status && root.unansweredSince === 0
+    if (first) {
+      root.unansweredSince = entry.sentAt
+      root.unansweredCount = 1
+    }
     console.info("omarock: " + root.service + " " + method + " " + entry.path + " answered in " + took + " ms ("
       + (status || "no answer") + "), sent with " + entry.ahead.length + " in flight"
-      + (entry.ahead.length > 0 ? ": " + entry.ahead.slice(0, 8).join(", ") : ""))
+      + (entry.ahead.length > 0 ? ": " + entry.ahead.slice(0, 8).join(", ") : "")
+      + (first ? "; until it answers, only POSTs are logged" : ""))
   }
 
   function get(path, callback, timeoutMs) { root.request("GET", path, null, callback, timeoutMs || 15000) }
