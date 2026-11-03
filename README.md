@@ -20,10 +20,11 @@ media keys and any other mpd client are always in sync.
   ("husker" finds Hüsker Dü).
 - **Browse like a file manager:** `→` opens an artist, then one of their albums;
   `←` goes back. A genre opens to its artists. Album covers are displayed throughout.
-- **Now Playing:** click the artist, the album or its cover, or the
+- **Now Playing:** Click the artist, the album or its cover, or the
   genre, to open them.
 - **Build Playlists:** `A` adds any song, album, artist or genre to
   a playlist (mpd's playlists).
+- **Find Heard Songs:** Click the song or artist displayed on FM or SiriusXM to find that song on Spotify or Apple Music.
 - **Song and Album Info:** `i` show tags, format, bitrate and
   size, and, on a streaming service, whether it's in your library.
 - **Time Machine:** Enter a year to pretend you are listening in that year.  Only music released prior shows or
