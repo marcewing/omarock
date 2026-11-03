@@ -5438,6 +5438,9 @@ def setup_scenario(host, output, failures):
     check(w["macs"] == ["Attic Mac 127.0.0.2"] and w["values"]["appleMac"] == "127.0.0.2" and not w["otherMac"] and not w["canStart"]
           and w["blocker"].startswith("Nothing answers"),
           "the tailnet's one Mac is picked, and checked: nothing answers there, so Start setup waits", failures)
+    # The token, left blank, isn't checked against a Mac that doesn't answer
+    # (the VM, 11-03: it said "✗ Checking the Mac's Remote Login…" in red).
+    check(w["notes"]["bridgeToken"] == "", "and the blank token says nothing under it: " + repr(w["notes"]["bridgeToken"]), failures)
     ssh_mode, ssh_log = home / ".fake-ssh", home / "ssh.log"
     ssh_mode.write_text("refused")
     host.call("setupClick", "setupMacOther")

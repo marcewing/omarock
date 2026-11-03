@@ -167,11 +167,14 @@ Rectangle {
   }
 
   // What's said under a field: a check's answer, or what's wrong with what
-  // was typed (an empty field only counts in the footer).
+  // was typed (an empty field only counts in the footer). Before its check
+  // has begun, a field checked live says nothing: the footer's "Checking…"
+  // waits for it.
   function fieldNote(field) {
     var l = root.live[field.key]
     var p = Setup.problem(field, root.values[field.key], root.known, l)
     if (l && l.kind === "checking") return { kind: "", text: "Checking…" }
+    if (!l && (field.type === "mac" || root.values[field.key] === "")) return { kind: "", text: "" }
     if (p !== "" && p.indexOf("Needs ") !== 0) return { kind: "bad", text: p }
     if (l && l.kind === "ok") return { kind: l.warn ? "bad" : "ok", text: l.text }
     return { kind: "", text: "" }

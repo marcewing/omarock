@@ -1141,7 +1141,8 @@ step_apple() {
         && printf '# omarock: mpd-mpris, patched (patches/README.md)\n[Service]\nExecStart=\nExecStart=%%h/.local/lib/omarock-mpris/mpd-mpris -no-instance\n' >"$units/mpd-mpris.service.d/omarock-mpris.conf" \
         && run systemctl --user daemon-reload \
         && run systemctl --user restart mpd-mpris \
-        && ok "mpd-mpris is the patched one"
+        && ok "mpd-mpris is the patched one" \
+        || bad "The patched mpd-mpris didn't go in (above). Apple Music plays without it; run ./install apple-music again to try once more."
     fi
   fi
   done_[apple]=1
