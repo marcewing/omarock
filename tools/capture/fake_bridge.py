@@ -212,8 +212,10 @@ class Bridge:
         self.stream_delay = 0.0
         # omarock-spotify 0.3 without omarock's sound output: Soloist's own
         # volume, in the status and set by POST /v1/volume (POST
-        # /v1/fake/volume {on} switches it; off, as with the bus).
+        # /v1/fake/volume {on} switches it; off, as with the bus). Its
+        # {delay} makes each POST /v1/volume answer that many seconds late.
         self.volume = None
+        self.volume_delay = 0.0
         # omarock-spotify's Web API sign-in: POST /v1/logout forgets it, POST
         # /v1/fake/signin {on} sets it (no browser here).
         self.signed_in = True
@@ -504,6 +506,8 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(1)
         if bridge.slowsearch and method == "GET" and parts[1:2] == ["search"]:
             time.sleep(bridge.slowsearch)
+        if bridge.volume_delay and method == "POST" and parts[1:] == ["volume"]:
+            time.sleep(bridge.volume_delay)
         try:
             return self.reply(200, self.route(bridge, method, parts[1:], query, body))
         except NoEndpoint:
@@ -567,6 +571,7 @@ class Handler(BaseHTTPRequestHandler):
                     return {"ok": True}
                 if path == "fake/volume":
                     b.volume = 40 if body["on"] else None
+                    b.volume_delay = float(body.get("delay", 0))
                     b.changed()
                     return b.status(client)
                 if path == "fake/signin":

@@ -1274,8 +1274,10 @@ def spotify_volume_scenario(host, socket_path, failures):
     """Spotify without omarock's sound output (the bus): Soloist's own volume
     is the volume (omarock-spotify 0.3's status has it). The knob shows it,
     + and - and a drag set it (POST /v1/volume, one at a time), and mpd's
-    is left alone."""
-    spotify_post("/v1/fake/volume", {"on": True})
+    is left alone. Each answer takes 0.5 s, so the drag's 16 positions
+    can't each get one: answered at once, a busy machine's slow drag sent
+    16 and failed (10-28, 11-03)."""
+    spotify_post("/v1/fake/volume", {"on": True, "delay": 0.5})
     host.call("open")
     wait_for(lambda: host.state()["opened"], "open")
     to_source(host, "spotify")
@@ -1291,7 +1293,7 @@ def spotify_volume_scenario(host, socket_path, failures):
     _, backwards = drag_volume(host, "spotify")
     sent = len(spotify_requests("/v1/volume")) - sent_before
     wait_for(lambda: json.loads(host.call("slider", "volumeSlider")).get("value") == 90, "ends where let go")
-    check(backwards == 0 and 0 < sent <= 15 and command_count(socket_path, "setvol") == setvol_before,
+    check(backwards == 0 and 0 < sent <= 12 and command_count(socket_path, "setvol") == setvol_before,
           f"a drag sets Spotify's volume ({sent} requests, the knob never backwards), and mpd's isn't touched", failures)
     spotify_post("/v1/fake/volume", {"on": False})
     to_source(host, "local")
