@@ -205,7 +205,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.15.1"
+  readonly property string version: "0.15.2"
 
   property bool expanded: false
   property bool keysOpen: false

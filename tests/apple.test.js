@@ -281,7 +281,7 @@ test("the bridge's stream: its base finds the address from before 0.9.0, and wit
   assert.ok(Apple.isStream(before, now))
   assert.ok(Apple.isStream(now, before))
   assert.ok(Apple.isStream(now, now))
-  assert.ok(!Apple.isStream("http://100.64.0.10:8000/omarock.ogg", now), "another host is another stream")
+  assert.ok(Apple.isStream("http://100.64.0.10:8000/omarock.ogg", now), "another host's bridge stream counts too (another Mac, or another way to this one)")
   assert.ok(!Apple.isStream("Hüsker Dü/Zen Arcade/01.flac", now))
   assert.ok(!Apple.isStream(now, ""), "no stream known: nothing is it")
   // A streamURL of the user's is its own base.
@@ -296,8 +296,11 @@ test("the bridge's stream: a host in any case, and the same secret by another ad
   assert.ok(Apple.isStream("http://my-mac.local:8000/omarock.ogg", "http://My-Mac.local:8000/omarock-" + secret + ".ogg"))
   // The Mac by its Tailscale address and by its .local name: one stream.
   assert.ok(Apple.isStream("http://my-mac.local:8000/omarock-" + secret + ".ogg", "http://100.64.0.10:8000/omarock-" + secret + ".ogg"))
-  assert.ok(!Apple.isStream("http://my-mac.local:8000/omarock-" + "f".repeat(32) + ".ogg", "http://100.64.0.10:8000/omarock-" + secret + ".ogg"),
-    "another token's stream by another address isn't known")
+  // Another Mac's bridge, set up before this one: still Apple Music (Play swaps it).
+  assert.ok(Apple.isStream("http://old-mac.local:8000/omarock-" + "f".repeat(32) + ".ogg", "http://100.64.0.10:8000/omarock-" + secret + ".ogg"))
+  assert.ok(Apple.isStream("http://old-mac.local:8000/omarock.ogg", "http://new-mac.local:8000/omarock-" + secret + ".ogg"))
+  assert.ok(!Apple.isStream("http://radio.example:8000/omarock-live.ogg", "http://new-mac.local:8000/omarock-" + secret + ".ogg"))
+  assert.ok(!Apple.isStream("http://old-mac.local:8000/omarock.ogg", "http://relay.example:8080/live"), "a streamURL of the user's: only itself")
   assert.equal(Apple.streamSecret("http://h:8000/omarock.ogg"), "")
   assert.equal(Apple.streamBase("HTTP://My-Mac.LOCAL:8000/omarock.ogg"), "http://my-mac.local:8000/omarock")
 })

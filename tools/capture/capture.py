@@ -3980,6 +3980,7 @@ def apple_network_scenario(host, output, socket_path, failures):
         host.call("press", "Space")
         wait_for(lambda: new in mpd_files(socket_path) and mpd_state(socket_path)["state"] == "play", "the stream's new address plays")
         current = dict(l.split(": ", 1) for l in mpd_query(socket_path, "currentsong")).get("file")
+        wait_for(lambda: old not in mpd_files(socket_path), "the old address gone", timeout=5)
         check(current == new and old not in mpd_files(socket_path) and host.state()["source"] == "apple",
               "Play swaps the old entry for the stream's new address, and the old one goes", failures)
         to_source(host, "local")
@@ -4002,12 +4003,31 @@ def apple_network_scenario(host, output, socket_path, failures):
         wait_for(lambda: mpd_state(socket_path)["state"] == "stop", "paused")
         host.call("press", "Space")
         wait_for(lambda: by_name in mpd_files(socket_path) and mpd_state(socket_path)["state"] == "play", "the new address plays")
-        check(new not in mpd_files(socket_path), "and Play moves it to the new address, the old entry gone: " + repr(mpd_files(socket_path)[-3:]), failures)
+        # The old entry goes once the new one plays (deleteStreams after playid).
+        wait_for(lambda: new not in mpd_files(socket_path), "the old entry gone", timeout=5)
+        check(True, "and Play moves it to the new address, the old entry gone", failures)
         to_source(host, "local")
         BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": old}))
         host.call("close")
         host.call("open")
         wait_for(lambda: host.state()["appleStream"] == new, "back to the first address")
+
+        # A Mac set up before this one (Marc's laptop, 11-04: moved to another
+        # Mac, the bar said "omarock-1637fdd…"): its stream still counts as
+        # Apple Music, and Play swaps in this Mac's, the old entry gone.
+        before_mac = f"http://127.0.0.1:{port}/omarock-{'f' * 32}.ogg"
+        mpd_client(socket_path, f'addid "{before_mac}"')
+        mpd_client(socket_path, f"play {mpd_files(socket_path).index(before_mac)}")
+        wait_for(lambda: host.state()["source"] == "apple", "another Mac's stream is still Apple Music")
+        check(True, "another Mac's bridge stream in mpd's queue still counts as Apple Music", failures)
+        mpd_client(socket_path, "pause 1")
+        wait_for(lambda: mpd_state(socket_path)["state"] == "stop", "paused")
+        host.call("press", "Space")
+        wait_for(lambda: mpd_state(socket_path)["state"] == "play"
+                 and dict(l.split(": ", 1) for l in mpd_query(socket_path, "currentsong")).get("file") == new, "this Mac's stream plays")
+        wait_for(lambda: before_mac not in mpd_files(socket_path), "the other Mac's gone", timeout=5)
+        check(True, "and Play swaps in this Mac's stream, the other's gone", failures)
+        to_source(host, "local")
 
         # No token, and no stream in apple.json: switching says why it can't.
         saved = token_file.read_text()

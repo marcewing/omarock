@@ -32,14 +32,22 @@ function streamSecret(url) {
   return m ? m[1] : ""
 }
 
+// A bridge's stream as the bridge names it: http://HOST:8000/omarock.ogg,
+// or /omarock-SECRET.ogg from 0.9.0.
+function bridgeStream(url) {
+  return /^https?:\/\/[^\/]+:8000\/omarock(-[0-9a-f]{32})?\.ogg$/i.test(String(url || ""))
+}
+
 // Whether mpd's file is the bridge's stream at url: the same base (as
-// streamBase), or the same secret by another address of the Mac (its
-// Tailscale address, say, and its .local name).
+// streamBase), the same secret by another address of the Mac (its Tailscale
+// address, say, and its .local name), or another bridge's stream while url
+// is one too: a Mac set up before this one (Play then swaps it for url's).
 function isStream(file, url) {
   var secret = streamSecret(url)
   if (secret !== "" && streamSecret(file) === secret) return true
   var base = streamBase(url)
-  return base !== "" && streamBase(file) === base
+  if (base !== "" && streamBase(file) === base) return true
+  return bridgeStream(url) && bridgeStream(file)
 }
 
 // Apple's artwork URLs are templates; px is the size on screen, so ask for
@@ -568,6 +576,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     streamBase: streamBase,
     streamSecret: streamSecret,
+    bridgeStream: bridgeStream,
     isStream: isStream,
     artUrl: artUrl,
     nameOf: nameOf,

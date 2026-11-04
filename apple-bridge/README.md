@@ -107,6 +107,14 @@ incoming connections" on, nothing gets through: switch that off first.
 If macOS says the login item needs approval, allow OmarockBridge in System Settings →
 General → Login Items.
 
+### Keep the Mac awake
+
+The bridge keeps the Mac awake only while it plays. A Mac that sleeps, a laptop with its
+lid closed or idle on battery, takes the bridge with it: omarock says the bridge didn't
+answer until the Mac wakes. For a Mac that serves omarock, keep it on power and switch on
+System Settings → Battery → Options → **Prevent automatic sleeping on power adapter when
+the display is off** (on a desktop Mac: System Settings → Energy).
+
 ### Keep the Music app running
 
 Changes to your library reach the Mac's library only while the Music app runs. That
@@ -258,9 +266,11 @@ whether the bridge is new enough.
 - **`capturing: false`, or the stream is silent:** the audio capture permission (above).
   It belongs to the app's code signature, so building with another identity or bundle
   id asks again.
-- **Nothing answers on :8710:** from Linux, `avahi-browse -rt _omarock._tcp` lists the
-  bridges on your network. A bridge older than 0.9.0 listens only on the Mac's Tailscale
-  address: update it (`git pull`, then `./install`, in the Mac's clone). On the Mac, check
+- **Nothing answers on :8710:** is the Mac asleep? A sleeping Mac may still answer
+  `ping`, slowly, while the bridge doesn't (above, "Keep the Mac awake"). From Linux,
+  `avahi-browse -rt _omarock._tcp` lists the bridges on your network. A bridge older
+  than 0.9.0 listens only on the Mac's Tailscale address: update it (`git pull`, then
+  `./install`, in the Mac's clone). On the Mac, check
   `launchctl print gui/$UID/<your bundle ID>`; `bridge.log`'s `login:` lines
   say what it did about its launch agent: since 0.5.1, if macOS lists the agent but
   launchd hasn't got it (left by an uninstall of 0.5.0 or older), the bridge registers it
