@@ -21,11 +21,23 @@ var UNPLAYABLE = "Not available to play"
 function streamBase(url) {
   var u = String(url || "")
   var m = /^(.*\/omarock)(-[0-9a-f]+)?\.ogg$/.exec(u)
-  return m ? m[1] : u
+  // A host name is the same in any case, and Qt asks in lower case, so the
+  // bridge's address for it can differ from apple.json's (My-Mac.local).
+  return (m ? m[1] : u).replace(/^[a-z]+:\/\/[^\/]*/i, function(h) { return h.toLowerCase() })
 }
 
-// Whether mpd's file is the bridge's stream at url (as streamBase).
+// The secret in the stream's address from bridge 0.9.0, "" in any other.
+function streamSecret(url) {
+  var m = /\/omarock-([0-9a-f]{32})\.ogg$/.exec(String(url || ""))
+  return m ? m[1] : ""
+}
+
+// Whether mpd's file is the bridge's stream at url: the same base (as
+// streamBase), or the same secret by another address of the Mac (its
+// Tailscale address, say, and its .local name).
 function isStream(file, url) {
+  var secret = streamSecret(url)
+  if (secret !== "" && streamSecret(file) === secret) return true
   var base = streamBase(url)
   return base !== "" && streamBase(file) === base
 }
@@ -555,6 +567,7 @@ function badges(song) {
 if (typeof module !== "undefined") {
   module.exports = {
     streamBase: streamBase,
+    streamSecret: streamSecret,
     isStream: isStream,
     artUrl: artUrl,
     nameOf: nameOf,

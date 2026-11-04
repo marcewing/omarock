@@ -466,7 +466,8 @@ Item {
   function startStream() {
     if (!root.streamed || !root.active || !root.mpd || root.mpd.status.state === "play") return
     var file = root.mpd.currentSong ? root.mpd.currentSong.file : ""
-    if (root.streamUrl !== "" && file !== root.streamUrl) root.mpd.playStream(root.streamUrl, root.streamDrop)
+    // The entry it was (another address) goes too, whatever its prefix.
+    if (root.streamUrl !== "" && file !== root.streamUrl) root.mpd.playStream(root.streamUrl, root.streamDrop.concat(file !== "" ? [file] : []))
     else root.mpd.send("play")
   }
   // Spotify: become omarock's source (mpd stops, and Spotify carries on with

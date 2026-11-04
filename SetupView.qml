@@ -106,8 +106,12 @@ Rectangle {
     var out = Object.assign({}, root.values)
     var changed = false
     for (var key in start) {
-      if (root.touched[key] || out[key] === start[key] || (out[key] !== "" && out[key] !== undefined)) continue
+      // What's set fills in a field, unless it was changed by hand or holds
+      // something else; the Mac picked for you gives way to the one set.
+      var picked = key === "appleMac" && root.autoMac !== "" && out[key] === root.autoMac && start[key] !== ""
+      if (root.touched[key] || out[key] === start[key] || (out[key] !== "" && out[key] !== undefined && !picked)) continue
       out[key] = start[key]
+      if (picked) root.autoMac = ""
       changed = true
     }
     if (!changed) return

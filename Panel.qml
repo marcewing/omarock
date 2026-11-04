@@ -205,7 +205,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.15.0"
+  readonly property string version: "0.15.1"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -5058,6 +5058,9 @@ Panel {
       root.say("A setup is still running in its terminal")
       return
     }
+    // What's set is read again, and the window waits for it: what it read
+    // before (a Remove since, say) would fill in the Mac that was removed.
+    root.accounts = ({})
     accountReader.running = true
     setupView.macs = []
     setupView.outputs = []

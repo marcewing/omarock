@@ -288,3 +288,16 @@ test("the bridge's stream: its base finds the address from before 0.9.0, and wit
   assert.equal(Apple.streamBase("http://relay.example:8080/live"), "http://relay.example:8080/live")
   assert.ok(Apple.isStream("http://relay.example:8080/live", "http://relay.example:8080/live"))
 })
+
+test("the bridge's stream: a host in any case, and the same secret by another address", () => {
+  const secret = "0123456789abcdef0123456789abcdef"
+  // Qt asks the bridge in lower case; apple.json keeps the case typed.
+  assert.ok(Apple.isStream("http://my-mac.local:8000/omarock-" + secret + ".ogg", "http://My-Mac.local:8000/omarock-" + secret + ".ogg"))
+  assert.ok(Apple.isStream("http://my-mac.local:8000/omarock.ogg", "http://My-Mac.local:8000/omarock-" + secret + ".ogg"))
+  // The Mac by its Tailscale address and by its .local name: one stream.
+  assert.ok(Apple.isStream("http://my-mac.local:8000/omarock-" + secret + ".ogg", "http://100.64.0.10:8000/omarock-" + secret + ".ogg"))
+  assert.ok(!Apple.isStream("http://my-mac.local:8000/omarock-" + "f".repeat(32) + ".ogg", "http://100.64.0.10:8000/omarock-" + secret + ".ogg"),
+    "another token's stream by another address isn't known")
+  assert.equal(Apple.streamSecret("http://h:8000/omarock.ogg"), "")
+  assert.equal(Apple.streamBase("HTTP://My-Mac.LOCAL:8000/omarock.ogg"), "http://my-mac.local:8000/omarock")
+})

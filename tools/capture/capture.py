@@ -3985,6 +3985,30 @@ def apple_network_scenario(host, output, socket_path, failures):
         to_source(host, "local")
         check(new not in mpd_files(socket_path), "back to local music, the stream goes", failures)
 
+        # Another address of the same Mac (Tailscale's, then its .local name):
+        # the same secret is the same stream, and Play moves it to the new
+        # address, the old entry gone. Qt asks in lower case.
+        other = f"http://LocalHost:{port}"
+        by_name = f"http://localhost:{port}/omarock-{secret}.ogg"
+        BRIDGE["config"].write_text(json.dumps({"bridge": other}))
+        host.call("close")
+        host.call("open")
+        wait_for(lambda: host.state()["appleStream"] == by_name, "the stream by the new address, in lower case")
+        mpd_client(socket_path, f'addid "{new}"')
+        mpd_client(socket_path, f"play {mpd_files(socket_path).index(new)}")
+        wait_for(lambda: host.state()["source"] == "apple", "the stream by its old address is still Apple Music")
+        check(True, "the Mac by another address: mpd's entry by the old one still counts as Apple Music (the same secret)", failures)
+        mpd_client(socket_path, "pause 1")
+        wait_for(lambda: mpd_state(socket_path)["state"] == "stop", "paused")
+        host.call("press", "Space")
+        wait_for(lambda: by_name in mpd_files(socket_path) and mpd_state(socket_path)["state"] == "play", "the new address plays")
+        check(new not in mpd_files(socket_path), "and Play moves it to the new address, the old entry gone: " + repr(mpd_files(socket_path)[-3:]), failures)
+        to_source(host, "local")
+        BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": old}))
+        host.call("close")
+        host.call("open")
+        wait_for(lambda: host.state()["appleStream"] == new, "back to the first address")
+
         # No token, and no stream in apple.json: switching says why it can't.
         saved = token_file.read_text()
         token_file.write_text("")
@@ -4003,17 +4027,27 @@ def apple_network_scenario(host, output, socket_path, failures):
         # The setup window: the tailnet's Attic Mac is also on this network, and
         # Studio Mac only here. One Mac found: its tailnet address is picked
         # (nothing set up yet, so nothing is filled in before).
-        BRIDGE["config"].unlink()
         avahi = home / ".fake-avahi"
         attic = ("=;enp1s0;IPv4;Attic\\032Mac;_omarock._tcp;local;Attic-Mac.local;192.0.2.7;8710;\"version=0.9.0\"\n"
                  "=;enp1s0;IPv6;Attic\\032Mac;_omarock._tcp;local;Attic-Mac.local;fe80::7;8710;\"version=0.9.0\"\n")
         avahi.write_text(attic)
+        # A Mac set up already: the window shows that one, not one it picks.
+        host.call("openSetup", "apple-music")
+        wait_for(lambda: host.state()["setupWindow"]["open"] and len(host.state()["setupWindow"]["macs"]) == 2, "both ways to the Mac")
+        wait_for(lambda: host.state()["setupWindow"]["values"]["appleMac"] == url, "the Mac set up")
+        check(True, "set up already: the window shows the Mac set up, over the one it would pick", failures)
+        host.call("setupClick", "setupCancel")
+        wait_for(lambda: not host.state()["setupWindow"]["open"], "closed")
+        # Removed (apple.json gone): the window reads what's set again, so the
+        # Mac removed isn't filled in (Marc's laptop, 11-04).
+        BRIDGE["config"].unlink()
         host.call("openSetup", "apple-music")
         wait_for(lambda: host.state()["setupWindow"]["open"] and len(host.state()["setupWindow"]["macs"]) == 2, "both ways to the Mac")
         w = host.state()["setupWindow"]
         check(w["macs"] == ["Attic Mac 127.0.0.2", "Attic Mac Attic-Mac.local"] and w["macWays"] == ["tailnet", "network"]
               and w["values"]["appleMac"] == "127.0.0.2",
-              "one Mac on the tailnet and this network: listed both ways, the tailnet's first and picked: " + repr(w["macs"]), failures)
+              "one Mac on the tailnet and this network: listed both ways, the tailnet's first and picked: "
+              + repr(w["macs"]) + " " + repr(w["values"].get("appleMac")) + " other " + repr(w["otherMac"]), failures)
         host.call("grabSetupWindow", str(output / "setup-apple-network.png"))
         host.call("setupClick", "setupCancel")
         wait_for(lambda: not host.state()["setupWindow"]["open"], "closed")
