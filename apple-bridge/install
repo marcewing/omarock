@@ -532,7 +532,7 @@ step_network() {
   for p in $app $ice; do firewall_lists $p && ! firewall_blocks $p || need+=($p); done
   if (( $#need )); then
     explain "The firewall is on. The bridge (port 8710) and Icecast (port 8000) need to accept connections from your network: otherwise macOS asks about each the first time, or blocks Icecast. After Homebrew upgrades Icecast, run ./install again to let the new one through."
-    if confirm "Let ${(j: and :)${need:t}} through the firewall (sudo socketfilterfw)?"; then
+    if confirm "Let ${(j: and :)${(u)need[@]:t}} through the firewall (sudo socketfilterfw)?"; then
       for p in $need; do
         run sudo $firewall --add $p >/dev/null && run sudo $firewall --unblockapp $p >/dev/null || bad "couldn't add $p"
       done
@@ -542,7 +542,7 @@ step_network() {
   need=()
   for p in $app $ice; do firewall_lists $p && ! firewall_blocks $p || need+=($p); done
   if (( $#need )); then
-    bad "the firewall may block ${(j: and :)${need:t}}: allow them in System Settings, Network, Firewall, Options"
+    bad "the firewall may block ${(j: and :)${(u)need[@]:t}}: allow them in System Settings, Network, Firewall, Options"
   else
     ok "the firewall lets the bridge and Icecast through"
   fi
@@ -652,6 +652,37 @@ uninstall() {
     fi
   fi
 
+  # The firewall entries ./install adds (step_network): this app and Icecast's Cellar
+  # binaries, any version, if they're listed. Nothing else in the firewall is touched.
+  step "The firewall"
+  local -a entries=() keep=()
+  local entry
+  for entry in ${(f)"$($firewall --listapps 2>/dev/null | sed -n 's/^ *[0-9]* : //p')"}; do
+    if [[ $entry == $app ]]; then
+      $kept_app && keep+=($entry) || entries+=($entry)
+    elif [[ $entry == (/opt/homebrew|/usr/local)/Cellar/icecast/*/bin/icecast ]]; then
+      entries+=($entry)
+    fi
+  done
+  (( $#keep )) && note "kept the firewall's entry for the bridge app: it's still installed"
+  if (( ! $#entries )); then
+    ok "the firewall has no entries for the bridge or Icecast"
+  else
+    explain "The firewall lets these take incoming connections (./install added them):"
+    print -rl -- $entries | sed "s#^$HOME#~#; s/^/    /"
+    if confirm "Remove them from the firewall (sudo socketfilterfw)?"; then
+      for entry in $entries; do
+        run sudo $firewall --remove $entry >/dev/null || bad "couldn't remove $entry"
+      done
+      local left=()
+      for entry in $entries; do firewall_lists $entry && left+=($entry); done
+      (( $#left )) || ok "removed them"
+      entries=($left)
+    else
+      note "kept them"
+    fi
+  fi
+
   step "Its files"
   if [[ ! -d $support ]]; then
     ok "nothing left in ${support/#$HOME/~}"
@@ -678,6 +709,7 @@ uninstall() {
     "omarock on your Omarchy machine: run ./install --uninstall there, or switch Apple Music off in its settings."
   )
   [[ -d $support ]] && ! $kept_app && stays+=("${support/#$HOME/~}: delete it to remove the token and passwords.")
+  (( $#entries )) && stays+=("The firewall's entries for ${(j: and :)${(u)entries[@]:t}}: remove them in System Settings, Network, Firewall, Options.")
   $removed && ! $forget && stays+=("macOS's record of the bridge's permissions: in System Settings, Privacy & Security (Media & Apple Music, and Screen & System Audio Recording).")
   local item
   for item in $stays; do
