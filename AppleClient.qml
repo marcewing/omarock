@@ -26,6 +26,11 @@ Item {
   property string serviceKey: "apple"
   // Whether its sound comes through mpd (the bridge's stream).
   property bool streamed: true
+  // The stream's address now (the panel's appleStream), and the prefixes of
+  // the streams to take out of mpd's queue when it goes in. An entry from
+  // before (another token, a bridge before 0.9.0) is swapped for it on play.
+  property string streamUrl: ""
+  property var streamDrop: []
   // Whether songs can be taken out of its queue (Spotify's can't).
   property bool canRemove: true
   // Whether things can be taken out of your library (Apple Music's API can
@@ -120,7 +125,12 @@ Item {
     path: root.tokenFile
     watchChanges: true
     printErrors: false
-    onLoaded: root.token = text().trim()
+    onLoaded: {
+      var had = root.token
+      root.token = text().trim()
+      // A new token: from bridge 0.9.0 health gives the stream only with it.
+      if (root.token !== had && root.token !== "" && root.healthKnown && root.reachable) root.checkHealth()
+    }
     onFileChanged: reload()
     onLoadFailed: root.token = ""
   }
@@ -454,7 +464,10 @@ Item {
   // Only while mpd's source is this stream: a song played here from a lookup
   // (the radio playing) mustn't start the radio.
   function startStream() {
-    if (root.streamed && root.active && root.mpd && root.mpd.status.state !== "play") root.mpd.send("play")
+    if (!root.streamed || !root.active || !root.mpd || root.mpd.status.state === "play") return
+    var file = root.mpd.currentSong ? root.mpd.currentSong.file : ""
+    if (root.streamUrl !== "" && file !== root.streamUrl) root.mpd.playStream(root.streamUrl, root.streamDrop)
+    else root.mpd.send("play")
   }
   // Spotify: become omarock's source (mpd stops, and Spotify carries on with
   // what it had), or stop being it (Spotify pauses).

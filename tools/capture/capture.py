@@ -22,6 +22,8 @@ playlists there. Your mpd, its playlists and its config are not touched.
 
 The approach follows crmne.mpris's tools/capture (MIT).
 """
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -77,12 +79,13 @@ def prepare(work):
     shutil.copy(THEME, theme / "colors.toml")
     # Stand-ins first on the panel's PATH: a systemctl that reaches no real
     # services, a terminal that plays a setup out without ./install, and a
-    # tailnet and PipeWire outputs for the setup windows.
+    # tailnet, bridges on the network and PipeWire outputs for the setup windows.
     fakes = work / "bin"
     fakes.mkdir()
     (fakes / "systemctl").symlink_to(TOOLS / "fake-systemctl")
     (fakes / "omarchy-launch-floating-terminal-with-presentation").symlink_to(TOOLS / "fake-terminal")
     (fakes / "tailscale").symlink_to(TOOLS / "fake-tailscale")
+    (fakes / "avahi-browse").symlink_to(TOOLS / "fake-avahi-browse")
     (fakes / "pactl").symlink_to(TOOLS / "fake-pactl")
     # Never the real compositor: hyprctl only logs, and lists no windows.
     (fakes / "hyprctl").symlink_to(TOOLS / "fake-hyprctl")
@@ -297,6 +300,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     reconnect_scenario(host, socket_path, failures)
     outages_scenario(host, socket_path, failures)
     apple_genres_scenario(host, output, socket_path, failures)
+    apple_network_scenario(host, output, socket_path, failures)
     time_machine_scenario(host, output, socket_path, failures)
 
     # mpd goes away: the panel says so instead of failing silently.
@@ -3927,6 +3931,107 @@ def outages_scenario(host, socket_path, failures):
     host.call("settings", "{}")
 
 
+def apple_network_scenario(host, output, socket_path, failures):
+    """Marc, 11-04: no Tailscale needed ("I'm OK with telling the user that
+    stuff is sent in the clear ... or use tailscale"). Bridge 0.9.0 listens
+    on any network and says so over Bonjour, and its stream's address has a
+    secret from the token, which /v1/health gives only with the token (the
+    fake's secretstream). omarock takes the stream from health, still knows an
+    entry with the old address as Apple Music and swaps it on play, says why
+    it can't switch without a stream, and its setup window lists the Macs on
+    this network as well as the tailnet's, the tailnet's way first."""
+    port = BRIDGE["port"]
+    url = f"http://127.0.0.1:{port}"
+    old = url + "/omarock.ogg"
+    secret = hmac.new(b"fake-bridge-token", b"stream", hashlib.sha256).hexdigest()[:32]
+    new = f"{url}/omarock-{secret}.ogg"
+    token_file = BRIDGE["config"].parent / "bridge-token"
+    home = BRIDGE["config"].parents[2]
+    fake_bridge("secretstream", {"on": True})
+    try:
+        def health(token, host_name=None):
+            headers = {"X-Omarock": "1"}
+            if token: headers["Authorization"] = "Bearer " + token
+            if host_name: headers["Host"] = f"{host_name}:{port}"
+            return json.loads(urllib.request.urlopen(urllib.request.Request(url + "/v1/health", headers=headers), timeout=5).read())
+        check("stream" not in health(None) and "stream" not in health("wrong") and health("fake-bridge-token")["stream"] == new
+              and health("fake-bridge-token", "studio-mac.local")["stream"] == f"http://studio-mac.local:{port}/omarock-{secret}.ogg",
+              "the bridge's health gives the stream only with the token, at the address it was asked by", failures)
+
+        # Installed before 0.9.0: apple.json has the old address, and so has mpd's queue.
+        BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": old}))
+        host.call("open")
+        wait_for(lambda: host.state()["opened"], "open")
+        wait_for(lambda: host.state()["appleStream"] == new, "the stream from the bridge's health")
+        check(True, "the panel takes the stream's address from the bridge's health, over apple.json's", failures)
+        to_source(host, "local")
+        host.call("close")
+        mpd_client(socket_path, f'addid "{old}"')
+        files = mpd_files(socket_path)
+        mpd_client(socket_path, f"play {files.index(old)}")
+        wait_for(lambda: host.state()["source"] == "apple", "the old address counts as Apple Music")
+        check(True, "mpd playing the stream's old address: still Apple Music", failures)
+        host.call("open")
+        wait_for(lambda: host.state()["opened"], "open")
+        wait_for(lambda: host.state()["appleReady"], "Apple Music")
+        # mpd paused (the media keys): the Mac pauses, and mpd stops.
+        mpd_client(socket_path, "pause 1")
+        wait_for(lambda: mpd_state(socket_path)["state"] == "stop" and not host.state()["bar"]["playing"], "paused")
+        host.call("press", "Space")
+        wait_for(lambda: new in mpd_files(socket_path) and mpd_state(socket_path)["state"] == "play", "the stream's new address plays")
+        current = dict(l.split(": ", 1) for l in mpd_query(socket_path, "currentsong")).get("file")
+        check(current == new and old not in mpd_files(socket_path) and host.state()["source"] == "apple",
+              "Play swaps the old entry for the stream's new address, and the old one goes", failures)
+        to_source(host, "local")
+        check(new not in mpd_files(socket_path), "back to local music, the stream goes", failures)
+
+        # No token, and no stream in apple.json: switching says why it can't.
+        saved = token_file.read_text()
+        token_file.write_text("")
+        BRIDGE["config"].write_text(json.dumps({"bridge": url}))
+        host.call("close")
+        host.call("open")
+        wait_for(lambda: host.state()["appleStream"] == "", "no stream known")
+        host.call("setSource", "apple")
+        wait_for(lambda: "hasn't given omarock its stream" in host.state()["notice"], "the reason")
+        check(host.state()["source"] == "local", "no token: Apple Music says the bridge hasn't given its stream, and stays off", failures)
+        token_file.write_text(saved)
+        wait_for(lambda: host.state()["appleStream"] == new, "the token back, the stream again")
+        check(True, "the token back: the stream's address comes with it", failures)
+        host.call("close")
+
+        # The setup window: the tailnet's Attic Mac is also on this network, and
+        # Studio Mac only here. One Mac found: its tailnet address is picked
+        # (nothing set up yet, so nothing is filled in before).
+        BRIDGE["config"].unlink()
+        avahi = home / ".fake-avahi"
+        attic = ("=;enp1s0;IPv4;Attic\\032Mac;_omarock._tcp;local;Attic-Mac.local;192.0.2.7;8710;\"version=0.9.0\"\n"
+                 "=;enp1s0;IPv6;Attic\\032Mac;_omarock._tcp;local;Attic-Mac.local;fe80::7;8710;\"version=0.9.0\"\n")
+        avahi.write_text(attic)
+        host.call("openSetup", "apple-music")
+        wait_for(lambda: host.state()["setupWindow"]["open"] and len(host.state()["setupWindow"]["macs"]) == 2, "both ways to the Mac")
+        w = host.state()["setupWindow"]
+        check(w["macs"] == ["Attic Mac 127.0.0.2", "Attic Mac Attic-Mac.local"] and w["macWays"] == ["tailnet", "network"]
+              and w["values"]["appleMac"] == "127.0.0.2",
+              "one Mac on the tailnet and this network: listed both ways, the tailnet's first and picked: " + repr(w["macs"]), failures)
+        host.call("grabSetupWindow", str(output / "setup-apple-network.png"))
+        host.call("setupClick", "setupCancel")
+        wait_for(lambda: not host.state()["setupWindow"]["open"], "closed")
+        avahi.write_text(attic + "=;enp1s0;IPv4;Studio\\032Mac;_omarock._tcp;local;Studio-Mac.local;192.0.2.8;8710;\"\"\n")
+        host.call("openSetup", "apple-music")
+        wait_for(lambda: host.state()["setupWindow"]["open"] and len(host.state()["setupWindow"]["macs"]) == 3, "three")
+        w = host.state()["setupWindow"]
+        check(w["macs"] == ["Attic Mac 127.0.0.2", "Attic Mac Attic-Mac.local", "Studio Mac Studio-Mac.local"]
+              and w["values"]["appleMac"] == "",
+              "two Macs: Studio Mac, on this network only, listed by its host name, and none picked for you: " + repr(w), failures)
+        host.call("setupClick", "setupCancel")
+        wait_for(lambda: not host.state()["setupWindow"]["open"], "closed")
+        avahi.unlink()
+    finally:
+        fake_bridge("secretstream", {"on": False})
+        BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": old}))
+
+
 def apple_genres_scenario(host, output, socket_path, failures):
     """Marc, 10-29, in Apple Music with Time Machine on 1989: "I enter punk in
     the box, but I'm not seeing any genres listed". Apple's catalog has only
@@ -6208,6 +6313,7 @@ def main():
                             elif name == "reconnect": reconnect_scenario(host, socket_path, failures)
                             elif name == "outages": outages_scenario(host, socket_path, failures)
                             elif name == "apple-genres": apple_genres_scenario(host, output, socket_path, failures)
+                            elif name == "apple-network": apple_network_scenario(host, output, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "scrolling": scrolling_scenario(host, output, socket_path, failures)
                             elif name == "hover-scroll": hover_scroll_scenario(host, failures)

@@ -100,9 +100,35 @@ test("the tailnet's Macs, from tailscale status", () => {
     b: { OS: "macOS", HostName: "Marc's M2 Pro", TailscaleIPs: ["100.64.0.3", "fd7a::3"] },
     c: { OS: "macOS", HostName: "Attic Mac", TailscaleIPs: ["100.64.0.4"] } } })
   assert.deepEqual(Setup.tailnetMacs(status), [
-    { address: "100.64.0.4", name: "Attic Mac" }, { address: "100.64.0.3", name: "Marc's M2 Pro" }])
+    { address: "100.64.0.4", name: "Attic Mac", via: "tailnet" }, { address: "100.64.0.3", name: "Marc's M2 Pro", via: "tailnet" }])
   assert.deepEqual(Setup.tailnetMacs("not json"), [])
   assert.deepEqual(Setup.tailnetMacs("{}"), [])
+})
+
+test("the bridges on this network, from avahi-browse, each Mac once by its host name", () => {
+  const text = [
+    "+;enp1s0;IPv4;Studio\\032Mac;_omarock._tcp;local",
+    "=;enp1s0;IPv4;Studio\\032Mac;_omarock._tcp;local;Studio-Mac.local;192.0.2.5;8710;\"version=0.9.0\"",
+    "=;enp1s0;IPv6;Studio\\032Mac;_omarock._tcp;local;Studio-Mac.local;fe80::5;8710;\"version=0.9.0\"",
+    "=;wlan0;IPv4;Studio\\032Mac;_omarock._tcp;local;Studio-Mac.local;192.0.2.5;8710;\"version=0.9.0\"",
+    "=;wlan0;IPv4;Mina\\226\\128\\153s\\032Mac;_omarock._tcp;local;Minas-Mac.local;192.0.2.6;8711;\"\"",
+    "=;enp1s0;IPv4;Printer;_ipp._tcp;local;printer.local;192.0.2.9;631;\"\""
+  ].join("\n")
+  assert.deepEqual(Setup.bonjourMacs(text), [
+    { address: "Minas-Mac.local:8711", name: "Mina’s Mac", via: "network" },
+    { address: "Studio-Mac.local", name: "Studio Mac", via: "network" }])
+  assert.deepEqual(Setup.bonjourMacs(""), [])
+  assert.equal(Setup.unescapeAvahi("Marc\\039s\\032M2\\032Pro"), "Marc's M2 Pro")
+})
+
+test("the Macs offered: by name, a Mac's tailnet address before its address on this network", () => {
+  const tailnet = [{ address: "100.64.0.10", name: "Studio Mac", via: "tailnet" }]
+  const network = [{ address: "Attic.local", name: "Attic", via: "network" }, { address: "Studio-Mac.local", name: "Studio Mac", via: "network" }]
+  assert.deepEqual(Setup.macList(tailnet, network).map(Setup.macLabel), [
+    "Attic  ·  Attic.local  (this network)",
+    "Studio Mac  ·  100.64.0.10  (Tailscale)",
+    "Studio Mac  ·  Studio-Mac.local  (this network)"])
+  assert.deepEqual(Setup.macList([], []), [])
 })
 
 test("the outputs, as ./install offers them", () => {

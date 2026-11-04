@@ -279,6 +279,10 @@ newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1) ==
 active() { systemctl --user is-active --quiet "$1"; }
 # X-Omarock: omarock's own services answer only requests that carry it.
 health() { curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
+# avahi-browse's \DDD escapes (decimal bytes): "Studio\032Mac" is "Studio Mac".
+avahi_name() {
+  python3 -I -c 'import re, sys; print(re.sub(rb"\\(\d{3})", lambda m: bytes([int(m[1])]), sys.argv[1].encode()).decode("utf-8", "replace"))' "$1"
+}
 
 mpd_socket=""
 mpd_answers() { [[ -S $mpd_socket ]] && MPD_HOST=$mpd_socket mpc status >/dev/null 2>&1; }
@@ -1043,10 +1047,16 @@ bridge_status() {  # BRIDGE TOKENFILE: the HTTP status of an authenticated reque
   printf 'header = "Authorization: Bearer %s"\n' "$(<"$2")" \
     | curl -s -m 5 -o /dev/null -w '%{http_code}' -K - "$1/v1/status" 2>/dev/null
 }
+# The bridge's stream, from its health asked with the token: from bridge 0.9.0
+# the stream's address has a secret in it, given only with the token.
+bridge_stream() {  # BRIDGE TOKENFILE
+  printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "$(<"$2")" \
+    | curl -s -m 5 -K - "$1/v1/health" 2>/dev/null | jq -r '.stream // empty' 2>/dev/null
+}
 
 step_apple() {
   step "Apple Music"
-  explain "For Omarock to play Apple Music, you'll need to have a bridge program running on a Mac signed into Apple Music. The bridge is an app built on your Mac with your own Apple Developer membership (apple-bridge/README.md). Clone omarock on the Mac and run ./install there. Its sound comes here as a stream. Both machines need to reach each other, over Tailscale, say."
+  explain "For Omarock to play Apple Music, you'll need to have a bridge program running on a Mac signed into Apple Music. The bridge is an app built on your Mac with your own Apple Developer membership (apple-bridge/README.md). Clone omarock on the Mac and run ./install there. Its sound comes here as a stream. Both machines need to reach each other, over Tailscale, say. Nothing between them is encrypted: use a network you trust, or Tailscale."
   local bridge="" stream="" h
   if [[ -f $config/apple.json ]]; then
     bridge=$(jq -r '.bridge // empty' "$config/apple.json")
@@ -1058,27 +1068,41 @@ step_apple() {
     [[ -n $bridge ]] && note "the bridge at $bridge doesn't answer"
     confirm "Is the bridge built and running on your Mac?" || {
       note "Set it up on the Mac first (clone omarock there and run ./install), then run ./install here again."; return 1; }
-    local args=() host ip addr
+    local args=() host ip addr name port
     if command -v tailscale >/dev/null; then
       # The address first: a Mac's name usually has spaces ("Marc's M2 Pro").
-      while read -r ip host; do args+=("$ip" "$host ($ip)"); done < <(tailscale status --json 2>/dev/null \
+      while read -r ip host; do args+=("$ip" "$host ($ip, Tailscale)"); done < <(tailscale status --json 2>/dev/null \
         | jq -r '.Peer[]? | select(.OS == "macOS") | "\(.TailscaleIPs[0]) \(.HostName)"')
+    fi
+    # The bridges on this network (0.9.0 says so over Bonjour), by host name,
+    # each once: avahi lists one for each interface and protocol.
+    if command -v avahi-browse >/dev/null; then
+      local -A seen=()
+      while IFS=';' read -r _ _ _ name _ _ host _ port _; do
+        host=${host%.}
+        [[ -n $host ]] || continue
+        [[ $port == 8710 ]] || host=$host:$port
+        [[ -n ${seen[$host]:-} ]] && continue
+        seen[$host]=1
+        args+=("$host" "$(avahi_name "$name") ($host, this network)")
+      done < <(timeout 5 avahi-browse -rpt _omarock._tcp 2>/dev/null | grep '^=;')
     fi
     while :; do
       addr=other
       if ((${#args[@]})); then addr=$(choose "Which Mac?" "" "${args[@]}" other "Another address…") || exit 1; fi
-      if [[ $addr == other ]]; then addr=$(ask "The Mac's address (Blank to stop here):" "" "100.64.0.10 or my-mac") || exit 1; fi
+      if [[ $addr == other ]]; then addr=$(ask "The Mac's address (Blank to stop here):" "" "my-mac.local or 100.64.0.10") || exit 1; fi
       [[ -z $addr ]] && return 1
-      bridge="http://$addr:8710"
+      [[ $addr == *:* ]] && bridge="http://$addr" || bridge="http://$addr:8710"
       h=$(health "$bridge")
       [[ -n $h ]] && break
       bad "nothing answers at $bridge. Is the bridge running, and can this machine reach the Mac?"
     done
     ok "the bridge answers at $bridge"
+    # Before 0.9.0 the bridge gives its stream to anyone; from 0.9.0 only with
+    # the token, which comes next.
     stream=$(jq -r '.stream // empty' <<<"$h")
-    [[ -n $stream ]] || stream="http://$addr:8000/omarock.ogg"
     install -d "$config"
-    jq -n --arg b "$bridge" --arg s "$stream" '{bridge: $b, stream: $s}' >"$config/apple.json"
+    jq -n --arg b "$bridge" --arg s "$stream" '{bridge: $b} + (if $s == "" then {} else {stream: $s} end)' >"$config/apple.json"
     ok "wrote $config/apple.json"
   fi
   if [[ -n $h ]] && ! jq -e '.authorized' >/dev/null <<<"$h"; then
@@ -1124,6 +1148,18 @@ step_apple() {
     if [[ $code == 200 ]]; then ok "the bridge accepts the token"; else bad "the bridge refused the token (HTTP $code)"; return 1; fi
   fi
   [[ $tokenfile == "$config/bridge-token" ]] || pending[appleTokenFile]=$(jq -cn --arg s "$tokenfile" '$s')
+
+  # The stream, now that the bridge has the token (from 0.9.0 it's given only
+  # with it); an address from before (a new token, an older bridge) is updated.
+  local now
+  now=$(bridge_stream "$bridge" "$tokenfile")
+  if [[ -n $now && $now != "$stream" ]]; then
+    jq --arg s "$now" '.stream = $s' "$config/apple.json" >"$config/apple.json.new" && mv "$config/apple.json.new" "$config/apple.json"
+    ok "the bridge's stream: wrote it to $config/apple.json"
+  elif [[ -z $now && -z $stream ]]; then
+    bad "the bridge didn't say where its stream is"
+    return 1
+  fi
 
   # The stream: from 0.7.0 the bridge encodes its silence so that Arch's own
   # libFLAC keeps mpd in step (apple-bridge/API.md). omarock's patched libFLAC

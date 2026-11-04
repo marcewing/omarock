@@ -151,7 +151,8 @@ ShellRoot {
     var w = host.panel.setupWindow
     return { open: true, piece: v.piece, title: w.title, values: values, notes: notes, blocker: v.blocker,
       canStart: v.canStart, notice: v.notice, busy: v.busy, otherMac: v.otherMac,
-      macs: v.macs.map(function(m) { return m.name + " " + m.address }), outputs: v.outputs.map(function(o) { return o.name }),
+      macs: v.macs.map(function(m) { return m.name + " " + m.address }), macWays: v.macs.map(function(m) { return m.via || "" }),
+      outputs: v.outputs.map(function(o) { return o.name }),
       resizable: w.minimumSize.width < w.maximumSize.width, footer: host.findNamed(v, "setupFooter").text, args: v.startArgs }
   }
 
@@ -365,7 +366,7 @@ ShellRoot {
         pickerTitle: p.picker.title, pickerIndex: p.picker.index,
         pickerChoices: p.picker.choices.map(function(c) { return (c.isNew ? "new:" : "") + c.name }),
         playlists: p.picker.playlists.map(function(pl) { return pl.name }),
-        pointerArmed: p.pointerArmed, listY: p.listView ? Math.round(p.listView.contentY) : -1, listIndex: p.listView ? p.listView.currentIndex : -2, appleMode: p.appleMode, appleConfigured: p.appleConfigured,
+        pointerArmed: p.pointerArmed, listY: p.listView ? Math.round(p.listView.contentY) : -1, listIndex: p.listView ? p.listView.currentIndex : -2, appleMode: p.appleMode, appleConfigured: p.appleConfigured, appleStream: p.appleStream,
         sxmMode: p.sxmMode, radioMode: p.radioMode, source: p.source, sources: p.sources,
         // The radio's local stations (favourites among them), in radio mode.
         radioLocal: p.radioMode && p.player.local ? p.player.local.map(function(st) { return String(st.name).trim() }) : [],
@@ -486,6 +487,11 @@ ShellRoot {
       if (!v || !v.Window.window) return "No setup window"
       v.Window.window.requestActivate()
       v.forceActiveFocus()
+      return "ok"
+    }
+    // A source's setup window, as Set up… opens it, whether or not it's set up.
+    function openSetup(piece: string): string {
+      host.panel.openSetupWindow(piece)
       return "ok"
     }
     // A field of the setup window takes the keys, as when it's clicked (or

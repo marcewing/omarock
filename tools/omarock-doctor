@@ -148,7 +148,9 @@ if [[ $(setting appleMusic false) == true ]] || [[ -e $HOME/.config/omarock/appl
     bridge=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("bridge",""))' "$HOME/.config/omarock/apple.json" 2>/dev/null)
   fi
   [[ -n $bridge ]] && ok "the bridge: $bridge" || bad "no bridge address: ~/.config/omarock/apple.json (apple-bridge/README.md)"
-  private_file "$(setting appleTokenFile "$HOME/.config/omarock/bridge-token")" "the bridge's token" "apple-bridge/README.md, the Linux side"
+  tokenfile=$(setting appleTokenFile "$HOME/.config/omarock/bridge-token")
+  tokenfile=${tokenfile/#\~/$HOME}
+  private_file "$tokenfile" "the bridge's token" "apple-bridge/README.md, the Linux side"
   if [[ -n $bridge ]]; then
     h=$(health "$bridge")
     if [[ -n $h ]]; then
@@ -157,8 +159,23 @@ import json, sys
 h = json.loads(sys.argv[1])
 print("  " + ("\033[32m✓\033[0m the bridge answers, and may use Apple Music" if h.get("authorized") else "\033[31m✗\033[0m the bridge answers, but Apple Music access isn'"'"'t allowed on the Mac yet"))
 ' "$h"
+      # The token, read by curl from stdin (never printed): with it the bridge
+      # answers, and says where its stream is (from 0.9.0 only with it).
+      if [[ -r $tokenfile ]]; then
+        code_stream=$(printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "$(tr -d '\n\r"\\' <"$tokenfile")" \
+          | curl -s -m 5 -K - -w '\n%{http_code}' "$bridge/v1/status" 2>/dev/null | tail -1)
+        if [[ $code_stream == 401 ]]; then
+          bad "the bridge refused omarock's token: Copy with ssh, in the settings' Apple Music tab, fetches the new one"
+        elif [[ $code_stream == 200 ]]; then
+          ok "the bridge accepts omarock's token"
+          stream=$(printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "$(tr -d '\n\r"\\' <"$tokenfile")" \
+            | curl -s -m 5 -K - "$bridge/v1/health" 2>/dev/null \
+            | python3 -I -c 'import json, sys; print(json.load(sys.stdin).get("stream") or "")' 2>/dev/null)
+          [[ -n $stream ]] && ok "the bridge gives omarock its stream" || bad "the bridge doesn't say where its stream is"
+        fi
+      fi
     else
-      bad "the bridge doesn't answer at $bridge (is the Mac awake, and on the same tailnet?)"
+      bad "the bridge doesn't answer at $bridge (is the Mac awake, and can this machine reach it?)"
     fi
   fi
   # From 0.7.0 the bridge's stream keeps a stock libFLAC in step; omarock's

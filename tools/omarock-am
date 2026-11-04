@@ -27,8 +27,9 @@
 #
 # KIND is song, album, artist or playlist (or queue); SOURCE is catalog or
 # library. Settings: OMAROCK_BRIDGE and OMAROCK_STREAM, else "bridge" and
-# "stream" in ~/.config/omarock/apple.json (as omarock reads them); and the
-# token in ~/.config/omarock/bridge-token.
+# "stream" in ~/.config/omarock/apple.json (as omarock reads them; the
+# bridge's health, asked with the token, has the stream too, and that wins);
+# and the token in ~/.config/omarock/bridge-token.
 set -euo pipefail
 
 CONFIG=$HOME/.config/omarock/apple.json
@@ -40,7 +41,7 @@ TOKEN_FILE=${OMAROCK_BRIDGE_TOKEN:-$HOME/.config/omarock/bridge-token}
 die() { echo "omarock-am: $*" >&2; exit 1; }
 
 call() {  # METHOD PATH [JSON]
-  [[ -n $BRIDGE && -n $STREAM ]] || die "no bridge set up: put \"bridge\" and \"stream\" in $CONFIG (apple-bridge/README.md), or set OMAROCK_BRIDGE and OMAROCK_STREAM"
+  [[ -n $BRIDGE ]] || die "no bridge set up: put \"bridge\" in $CONFIG (apple-bridge/README.md), or set OMAROCK_BRIDGE"
   local token=""
   [[ -r $TOKEN_FILE ]] && token=$(<"$TOKEN_FILE")
   local args=(-sS --max-time 30 -X "$1" -w '\n%{http_code}')
@@ -85,6 +86,23 @@ show_status() {
 # stream while it was quiet, or fell behind in a network stall, plays late
 # until it reconnects (as omarock's AppleClient.catchUp). Only when the
 # stream is mpd's current song; mpd stopped there starts playing.
+# The stream now: from bridge 0.9.0 its address has a secret, given only with
+# the token, so the bridge's word wins over apple.json's.
+fresh_stream() {
+  local now
+  [[ -n ${OMAROCK_STREAM:-} ]] && return 0
+  now=$(call GET /v1/health | jq -r '.stream // empty')
+  [[ -n $now ]] && STREAM=$now
+  [[ -n $STREAM ]] || die "the bridge didn't say where its stream is: is its token in $TOKEN_FILE?"
+}
+# The stream's address without its secret (as omarock's Apple.streamBase), so
+# an entry from before a new token or a bridge update is found too.
+stream_base() { sed -E 's#(/omarock)(-[0-9a-f]+)?\.ogg$#\1#' <<<"$1"; }
+# Queue positions (1-based) whose file is the bridge's stream, any address of it.
+stream_positions() {
+  mpc -f '%position%~%file%' playlist | awk -F'~' -v b="$(stream_base "$STREAM")" '{ f = $2; sub(/(-[0-9a-f]+)?\.ogg$/, "", f) } f == b { print $1 }'
+}
+
 rejoin() {
   local pos file
   pos=$(mpc status '%songpos%')
@@ -161,7 +179,11 @@ case $cmd in
     ;;
   on)
     # Like omarock's m: the stream after the current song in mpd, playing.
-    call GET /v1/health >/dev/null
+    fresh_stream
+    # An entry from before (another token, an older bridge) goes.
+    for pos in $(mpc -f '%position%~%file%' playlist | awk -F'~' -v s="$STREAM" '$2 != s {print $1}' | grep -xFf <(stream_positions) | sort -rn); do
+      mpc -q del "$pos"
+    done
     pos=$(mpc -f '%position%~%file%' playlist | awk -F'~' -v s="$STREAM" '$2 == s {print $1; exit}')
     if [[ -z $pos ]]; then
       mpc -q insert "$STREAM"
@@ -181,7 +203,8 @@ case $cmd in
     ;;
   off)
     call POST /v1/pause '{}' >/dev/null || true
-    for pos in $(mpc -f '%position%~%file%' playlist | awk -F'~' -v s="$STREAM" '$2 == s {print $1}' | sort -rn); do
+    [[ -n $STREAM ]] || fresh_stream
+    for pos in $(stream_positions | sort -rn); do
       mpc -q del "$pos"
     done
     mpc -q single off

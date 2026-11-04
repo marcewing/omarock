@@ -102,8 +102,9 @@ everything else:
   that only logs and keeps the units "enabled" in the test HOME, and Omarchy's
   terminal launcher, which plays a setup or removal out on the test HOME's
   files (as `./install` would leave them) without a terminal or `./install`;
-  `fake-tailscale` and `fake-pactl` give the setup windows a tailnet's Mac and
-  two outputs, `fake-hyprctl` stands in for the compositor (a window it
+  `fake-tailscale`, `fake-avahi-browse` and `fake-pactl` give the setup windows
+  a tailnet's Mac, the bridges "on the network" that `$HOME/.fake-avahi` lists,
+  and two outputs, `fake-hyprctl` stands in for the compositor (a window it
   says is tiled gets floated), and `fake-ssh` for the Mac's Remote Login.
   The test HOME starts with Spotify and SiriusXM "set up"; `--only setup` sets
   pieces up and removes them through the settings.

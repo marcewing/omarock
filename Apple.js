@@ -12,6 +12,24 @@ var EXPLICIT = "󰬌"
 // its row is dimmed, like a local song that has left the library.
 var UNPLAYABLE = "Not available to play"
 
+// The bridge's stream (apple-bridge/API.md): from bridge 0.9.0
+// http://HOST:8000/omarock-SECRET.ogg, the secret from the token; before it
+// http://HOST:8000/omarock.ogg. Its base, without the secret, finds either in
+// mpd's queue, so an entry from before a new token or a bridge update still
+// counts as the stream (and is taken out with it). Any other address (a
+// streamURL of the user's) is its own base.
+function streamBase(url) {
+  var u = String(url || "")
+  var m = /^(.*\/omarock)(-[0-9a-f]+)?\.ogg$/.exec(u)
+  return m ? m[1] : u
+}
+
+// Whether mpd's file is the bridge's stream at url (as streamBase).
+function isStream(file, url) {
+  var base = streamBase(url)
+  return base !== "" && streamBase(file) === base
+}
+
 // Apple's artwork URLs are templates; px is the size on screen, so ask for
 // twice that, for sharp covers on HiDPI screens.
 function artUrl(artwork, px) {
@@ -536,6 +554,8 @@ function badges(song) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    streamBase: streamBase,
+    isStream: isStream,
     artUrl: artUrl,
     nameOf: nameOf,
     ref: ref,

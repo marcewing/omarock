@@ -9,10 +9,12 @@
 #   omarock-account sxm-password     the SiriusXM password
 #   omarock-account spotify-client   the Spotify developer app's Client ID
 #   omarock-account soloist-key      Spotify's Soloist key
-#   omarock-account bridge-token     the Apple Music bridge's token
+#   omarock-account bridge-token     the Apple Music bridge's token (and then the
+#                                    stream's address, which the bridge gives
+#                                    only with it, into apple.json)
 #   omarock-account apple-bridge     the bridge's address (http://HOST:8710), into
-#                                    apple.json, with its stream (the bridge says
-#                                    where; else port 8000 on the same host)
+#                                    apple.json, with its stream if the bridge
+#                                    says where (from 0.9.0, only with the token)
 #   omarock-account music-folder     mpd's music folder: mpd.conf's music_directory
 #                                    line only (a copy of mpd.conf first), then mpd
 #                                    restarts and reads the folder
@@ -34,6 +36,20 @@ value() {  # the one line on stdin, without its newline
 # Saved is saved: a service that isn't there, or won't restart, says so in
 # the settings (its health), not here.
 restart() { systemctl --user try-restart "$1" 2>/dev/null || true; }
+# The bridge's stream, as its health says, asked with the token if there is
+# one (from bridge 0.9.0 the stream's address has a secret, given only with
+# it). The token goes to curl on stdin, never on its command line.
+apple_stream() {  # BRIDGE
+  local token=""
+  [[ -r $config/bridge-token ]] && token=$(<"$config/bridge-token")
+  printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "${token//[$'\n\r "\\']/}" \
+    | curl -s -m 5 -K - "$1/v1/health" 2>/dev/null | jq -r '.stream // empty' 2>/dev/null
+}
+write_apple() {  # BRIDGE STREAM: apple.json
+  install -d "$config"
+  jq -n --arg b "$1" --arg s "$2" '{bridge: $b} + (if $s == "" then {} else {stream: $s} end)' >"$config/apple.json.new" \
+    && mv "$config/apple.json.new" "$config/apple.json"
+}
 
 case ${1:-} in
   show)
@@ -67,15 +83,18 @@ print(json.dumps({"username": login.get("username", ""), "password": login.get("
   soloist-key)
     value | { cat; echo; } | write_private "$config/soloist-key" && restart omarock-soloist ;;
   bridge-token)
-    value | write_private "$config/bridge-token" ;;
+    value | write_private "$config/bridge-token" || exit 1
+    # With the token in, the bridge says where its stream is.
+    bridge=$(jq -r '.bridge // empty' "$config/apple.json" 2>/dev/null)
+    if [[ -n $bridge ]]; then
+      stream=$(apple_stream "$bridge")
+      [[ -n $stream ]] && write_apple "$bridge" "$stream"
+    fi
+    true ;;
   apple-bridge)
     bridge=$(value) && bridge=${bridge%/}
     [[ $bridge =~ ^https?://[^/]+$ ]] || { echo "omarock-account: not a bridge's address: $bridge" >&2; exit 1; }
-    host=${bridge#*://} && host=${host%:*}
-    stream=$(curl -s -m 5 "$bridge/v1/health" 2>/dev/null | jq -r '.stream // empty' 2>/dev/null)
-    install -d "$config"
-    jq -n --arg b "$bridge" --arg s "${stream:-http://$host:8000/omarock.ogg}" '{bridge: $b, stream: $s}' >"$config/apple.json.new" \
-      && mv "$config/apple.json.new" "$config/apple.json" ;;
+    write_apple "$bridge" "$(apple_stream "$bridge")" ;;
   music-folder)
     dir=$(value) && dir=${dir/#\~/$HOME}
     [[ -d $dir ]] || { echo "omarock-account: no folder $dir" >&2; exit 1; }

@@ -30,9 +30,13 @@ Rectangle {
   property var known: ({})
   // This machine's name, which Spotify's apps list for the pairing.
   property string host: ""
-  // The tailnet's Macs [{ address, name }], PipeWire's outputs [{ name,
-  // label }] and the default one: read for the pieces that ask.
+  // The Macs found, on the tailnet and on this network (Setup.macList:
+  // [{ address, name, via }]), PipeWire's outputs [{ name, label }] and the
+  // default one: read for the pieces that ask.
   property var macs: []
+  // The Mac picked for you (the only one found), so a better way to it
+  // arriving later (its tailnet address) can take its place.
+  property string autoMac: ""
   property var outputs: []
   property string defaultOutput: ""
   // The panel's word once Start setup is pressed: saving, or why it couldn't.
@@ -83,6 +87,7 @@ Rectangle {
   // A piece opening: its fields as they start, from the top.
   function reset() {
     scpProbe.running = false
+    root.autoMac = ""
     root.values = Setup.initial(root.piece, root.known, root.defaultOutput)
     root.touched = {}
     root.live = {}
@@ -112,11 +117,22 @@ Rectangle {
   }
   onKnownChanged: root.fill()
   onDefaultOutputChanged: root.fill()
-  // The Macs arriving: the tailnet's one Mac is likely the one; an address
-  // set already that isn't one of them is typed.
+  // The Macs arriving: one Mac found is likely the one, by its first way
+  // (the tailnet's, when it's on both), until another Mac turns up; an
+  // address set already that isn't one of them is typed.
   onMacsChanged: {
     if (root.touched.appleMac) return
-    if (root.macs.length === 1 && !root.values.appleMac) root.setValue("appleMac", root.macs[0].address, true)
+    var names = {}
+    root.macs.forEach(function(m) { names[m.name] = true })
+    var current = root.values.appleMac || ""
+    if (Object.keys(names).length === 1 && (current === "" || current === root.autoMac)) {
+      root.autoMac = root.macs[0].address
+      root.setValue("appleMac", root.autoMac, true)
+    } else if (Object.keys(names).length > 1 && current !== "" && current === root.autoMac) {
+      // Another Mac came after: which one is yours to say.
+      root.autoMac = ""
+      root.setValue("appleMac", "", true)
+    }
     var address = root.values.appleMac || ""
     root.otherMac = root.macs.length === 0 || (address !== "" && !root.macListed(address))
   }
@@ -563,7 +579,7 @@ Rectangle {
                 }
               }
 
-              // The tailnet's Macs, then Another address…
+              // The Macs found, then Another address…
               Repeater {
                 model: field.f.type === "mac" ? root.macs : []
 
@@ -572,7 +588,7 @@ Rectangle {
                   objectName: "setupMac:" + modelData.address
                   width: Math.min(field.width, Style.space(480))
                   leftAlign: true
-                  text: modelData.name + "  ·  " + modelData.address
+                  text: Setup.macLabel(modelData)
                   selected: !root.otherMac && Setup.bridgeUrl(field.value) === Setup.bridgeUrl(modelData.address)
                   bordered: true
                   focusable: true

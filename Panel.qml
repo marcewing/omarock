@@ -60,10 +60,13 @@ Panel {
   // plays from it. Apple Music mode is mpd playing that stream, so the mode
   // lives in mpd too, and mpc shows it. The addresses come from the widget's
   // settings, else ~/.config/omarock/apple.json ({ "bridge", "stream" }),
-  // which omarock-am reads too.
+  // which omarock-am reads too. The bridge's health, asked with the token,
+  // has the stream's address too (from bridge 0.9.0 only with the token: it
+  // has a secret in it), and that wins over apple.json's.
   property var appleConfig: ({})
   readonly property string appleBridge: root.setting("appleBridge", "") || appleConfig.bridge || ""
-  readonly property string appleStream: root.setting("appleStream", "") || appleConfig.stream || ""
+  readonly property string appleStream: root.setting("appleStream", "")
+    || (typeof apple.health.stream === "string" ? apple.health.stream : "") || appleConfig.stream || ""
   readonly property string appleTokenFile: {
     var configured = root.setting("appleTokenFile", "")
     return configured !== "" ? configured : Quickshell.env("HOME") + "/.config/omarock/bridge-token"
@@ -76,7 +79,8 @@ Panel {
   readonly property bool spotifyEnabled: root.setting("spotify", false) === true
   readonly property bool appleEnabled: root.setting("appleMusic", false) === true
   readonly property bool sxmEnabled: root.setting("siriusXM", false) === true
-  readonly property bool appleConfigured: appleEnabled && appleBridge !== "" && appleStream !== ""
+  // The stream needn't be known yet: the bridge gives it once the token is in.
+  readonly property bool appleConfigured: appleEnabled && appleBridge !== ""
   // Switched on, or set up (the installer writes apple.json, then switches
   // Apple Music on): read the files again, and see how the bridge is doing.
   onAppleEnabledChanged: if (root.appleEnabled) root.rereadConfig()
@@ -84,7 +88,7 @@ Panel {
   // mpd's current song is the stream: Apple Music mode, unless Spotify is
   // the source (it plays without mpd, which stops). The same for SiriusXM and
   // the radio.
-  readonly property bool mpdOnApple: appleConfigured && !!client.currentSong && client.currentSong.file === appleStream
+  readonly property bool mpdOnApple: appleConfigured && !!client.currentSong && Apple.isStream(client.currentSong.file, appleStream)
   readonly property bool appleMode: source === "apple"
   // SiriusXM (sxm/README.md): the omarock-sxm service on this machine. Like
   // Apple Music, its mode is mpd playing one of its streams (a channel).
@@ -201,7 +205,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.14.4"
+  readonly property string version: "0.15.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -677,7 +681,7 @@ Panel {
 
   // The streams of the sources other than local, to drop when changing source.
   function streamPrefixes() {
-    return [root.appleStream, sxm.prefix, Radio.MARKER].filter(function(p) { return p !== "" })
+    return [Apple.streamBase(root.appleStream), sxm.prefix, Radio.MARKER].filter(function(p) { return p !== "" })
   }
 
   // Leaving local music: where its song was, to resume it later.
@@ -827,6 +831,11 @@ Panel {
     apple.checkHealth(function(ok, error) {
       if (!ok) {
         root.say(error !== "" ? error : "Can't reach Apple Music on the Mac")
+        return
+      }
+      if (root.appleStream === "") {
+        root.say(apple.tokenRefused ? "The bridge refused omarock's token: the settings' Apple Music tab copies the new one"
+          : "The bridge hasn't given omarock its stream: is its token set? (the settings' Apple Music tab)")
         return
       }
       root.rememberLocal()
@@ -3870,6 +3879,8 @@ Panel {
     mpd: client
     clientName: root.clientName
     active: root.mpdOnApple
+    streamUrl: root.appleStream
+    streamDrop: root.streamPrefixes()
     checksToken: true
     refusedHint: ": the settings' Apple Music tab copies the new one"
     idleStopSeconds: Math.max(0, Number(root.setting("appleIdleStop", 60)) || 0)
@@ -5053,7 +5064,12 @@ Panel {
     setupView.defaultOutput = ""
     setupView.piece = piece
     setupView.reset()
-    if (piece === "apple-music") tailnetReader.running = true
+    root.tailnetFound = []
+    root.networkFound = []
+    if (piece === "apple-music") {
+      tailnetReader.running = true
+      networkReader.running = true
+    }
     if (piece === "sound") outputsReader.running = true
     root.close()
     if (!setupFloat.visible) {
@@ -5211,13 +5227,32 @@ Panel {
     }
   }
 
-  // The tailnet's Macs, for Apple Music's setup window: none without Tailscale.
+  // The Macs for Apple Music's setup window: the tailnet's (none without
+  // Tailscale), and the bridges on this network, which say so over Bonjour
+  // (bridge 0.9.0; Omarchy has Avahi). Each list as it comes.
+  property var tailnetFound: []
+  property var networkFound: []
+  function showMacs() { setupView.macs = Setup.macList(root.tailnetFound, root.networkFound) }
   Process {
     id: tailnetReader
     command: ["sh", "-c", "command -v tailscale >/dev/null && tailscale status --json 2>/dev/null"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: setupView.macs = Setup.tailnetMacs(text)
+      onStreamFinished: {
+        root.tailnetFound = Setup.tailnetMacs(text)
+        root.showMacs()
+      }
+    }
+  }
+  Process {
+    id: networkReader
+    command: ["sh", "-c", "command -v avahi-browse >/dev/null && timeout 5 avahi-browse -rpt _omarock._tcp 2>/dev/null"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.networkFound = Setup.bonjourMacs(text)
+        root.showMacs()
+      }
     }
   }
 

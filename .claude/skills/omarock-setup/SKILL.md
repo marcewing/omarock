@@ -146,9 +146,14 @@ There are two halves, and the Mac's is the user's to build. Follow
 - **On the Mac:** the user builds and installs the bridge, with their own Apple
   Developer team and MusicKit enabled, and allows Apple Music access when macOS
   asks. `./install` in a clone on the Mac walks them through it (it runs
-  `apple-bridge/install`). Both machines need Tailscale (or another way to reach the Mac).
+  `apple-bridge/install`). Both machines need to reach each other: the same
+  network (the bridge says so over Bonjour: `avahi-browse -rt _omarock._tcp`), or
+  Tailscale. Nothing between them is encrypted; say so, and that Tailscale is one
+  way to secure it.
 - **Here:**
-  - `~/.config/omarock/apple.json` names the bridge and the stream.
+  - `~/.config/omarock/apple.json` names the bridge (`http://my-mac.local:8710`),
+    and the stream once the bridge has given it: from bridge 0.9.0 the stream's
+    address has a secret, which `/v1/health` gives only with the token.
   - The bridge's token goes in `~/.config/omarock/bridge-token` (mode 600), put
     there by the user.
 - **The stream's lag:** bridge 0.7.0 and later keep Arch's own libFLAC in step

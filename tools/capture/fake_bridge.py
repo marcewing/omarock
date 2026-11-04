@@ -17,6 +17,8 @@ makes Spotify current; mpd starting to play pauses Spotify and makes it not
 current; /v1/activate and /v1/release are omarock switching to and from it.
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -210,6 +212,12 @@ class Bridge:
         # /v1/fake/streamdelay {seconds} sets it, {seconds: null} leaves it
         # out (as bridge 0.7.0 does).
         self.stream_delay = 0.0
+        # Bridge 0.9.0's stream: its address has a secret from the token,
+        # http://HOST:PORT/omarock-SECRET.ogg (HOST as the request named it),
+        # and health gives it only with the token. Off, the stream is
+        # /omarock.ogg for anyone, as before 0.9.0 (POST /v1/fake/secretstream
+        # {on} switches it).
+        self.secret_stream = False
         # omarock-spotify 0.3 without omarock's sound output: Soloist's own
         # volume, in the status and set by POST /v1/volume (POST
         # /v1/fake/volume {on} switches it; off, as with the bus). Its
@@ -495,6 +503,13 @@ class Handler(BaseHTTPRequestHandler):
                                         "current": bridge.current, "stream": "", "storefront": "US", "web": web})
             health = {"ok": True, "version": "fake", "authorized": True, "canPlayCatalog": True,
                       "stream": f"http://127.0.0.1:{PORT}/omarock.ogg", "storefront": "us"}
+            if bridge.secret_stream:
+                host = (self.headers.get("Host") or "127.0.0.1").rsplit(":", 1)[0]
+                secret = hmac.new(self.server.token.encode(), b"stream", hashlib.sha256).hexdigest()[:32]
+                if self.server.token and self.headers.get("Authorization") == "Bearer " + self.server.token:
+                    health["stream"] = f"http://{host}:{PORT}/omarock-{secret}.ogg"
+                else:
+                    del health["stream"]
             if bridge.min_bitrate:
                 health["minBitrate"] = True
             if bridge.stream_delay is not None:
@@ -561,6 +576,9 @@ class Handler(BaseHTTPRequestHandler):
                     return {"ok": True}
                 if path == "fake/minbitrate":
                     b.min_bitrate = bool(body["on"])
+                    return {"ok": True}
+                if path == "fake/secretstream":
+                    b.secret_stream = bool(body["on"])
                     return {"ok": True}
                 if path == "fake/streamdelay":
                     b.stream_delay = None if body.get("seconds") is None else float(body["seconds"])

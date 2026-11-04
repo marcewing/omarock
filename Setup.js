@@ -88,7 +88,7 @@ var pages = {
     name: "Apple Music",
     intro: [
       "Apple Music plays on your Mac, in omarock's bridge, an app you build there. Its sound comes here as a stream that mpd plays, and omarock browses and controls it through the bridge.",
-      "Both machines need to reach each other, over Tailscale, say."
+      "Both machines need to reach each other: on your home network, or over Tailscale. Nothing between them is encrypted, so use a network you trust, or Tailscale."
     ],
     steps: [
       { title: "The bridge, on your Mac",
@@ -99,8 +99,8 @@ var pages = {
           { label: "Apple Developer Program", url: "https://developer.apple.com/programs/" }
         ] },
       { title: "Which Mac",
-        text: ["The Mac running the bridge: one of the Macs on your tailnet, or its address."],
-        fields: [{ key: "appleMac", type: "mac", required: true, needs: "the Mac running the bridge", placeholder: "100.64.0.10 or my-mac",
+        text: ["The Mac running the bridge: one found on this network or your tailnet, or its address."],
+        fields: [{ key: "appleMac", type: "mac", required: true, needs: "the Mac running the bridge", placeholder: "my-mac.local or 100.64.0.10",
           account: "apple-bridge" }] },
       { title: "The bridge's token",
         text: ["From the Mac: ~/Library/Application\\ Support/omarock-bridge/token",
@@ -275,7 +275,8 @@ function tokenCopyState(code, stderr, host) {
   return { kind: "bad", text: "Can't reach the Mac with ssh: paste the token" }
 }
 
-// The Macs on a tailnet, from `tailscale status --json`: [{ address, name }].
+// The Macs on a tailnet, from `tailscale status --json`:
+// [{ address, name, via: "tailnet" }].
 function tailnetMacs(text) {
   var status
   try { status = JSON.parse(text) } catch (e) { return [] }
@@ -284,9 +285,62 @@ function tailnetMacs(text) {
   for (var id in peers) {
     var p = peers[id]
     if (p && p.OS === "macOS" && p.TailscaleIPs && p.TailscaleIPs.length > 0)
-      out.push({ address: p.TailscaleIPs[0], name: p.HostName || p.DNSName || p.TailscaleIPs[0] })
+      out.push({ address: p.TailscaleIPs[0], name: p.HostName || p.DNSName || p.TailscaleIPs[0], via: "tailnet" })
   }
   return out.sort(function(a, b) { return a.name.localeCompare(b.name) })
+}
+
+// avahi-browse's \DDD escapes (decimal bytes, UTF-8): "Marc\039s\032Mac".
+function unescapeAvahi(text) {
+  var bytes = []
+  var s = String(text || "")
+  for (var i = 0; i < s.length; i++) {
+    var m = /^\\(\d{3})/.exec(s.slice(i))
+    if (m) { bytes.push(parseInt(m[1], 10)); i += 3; continue }
+    var c = s.charCodeAt(i)
+    if (c < 0x80) bytes.push(c)
+    else encodeURIComponent(s.charAt(i)).slice(1).split("%").forEach(function(h) { bytes.push(parseInt(h, 16)) })
+  }
+  try { return decodeURIComponent(bytes.map(function(b) { return "%" + (b < 16 ? "0" : "") + b.toString(16) }).join("")) }
+  catch (e) { return s }
+}
+
+// The bridges on this network, from `avahi-browse -rpt _omarock._tcp` (bridge
+// 0.9.0 advertises itself): [{ address: the Mac's host name (my-mac.local),
+// name, via: "network" }], by host name, which stays when its address changes.
+// Each Mac comes once, though avahi lists it for each interface and protocol.
+function bonjourMacs(text) {
+  var out = []
+  var seen = {}
+  String(text || "").split("\n").forEach(function(line) {
+    var f = line.split(";")
+    // =;interface;protocol;name;type;domain;host;address;port;txt
+    if (f.length < 9 || f[0] !== "=" || f[4] !== "_omarock._tcp") return
+    var host = f[6].replace(/\.$/, "")
+    var port = parseInt(f[8], 10)
+    var address = port && port !== BRIDGE_PORT ? host + ":" + port : host
+    if (host === "" || seen[address]) return
+    seen[address] = true
+    out.push({ address: address, name: unescapeAvahi(f[3]) || host, via: "network" })
+  })
+  return out.sort(function(a, b) { return a.name.localeCompare(b.name) })
+}
+
+// The Macs to offer, by name: a Mac on the tailnet first (it works away from
+// home too, and Tailscale encrypts), then on this network.
+function macList(tailnet, network) {
+  var all = (tailnet || []).concat(network || [])
+  return all.map(function(m, i) { return { m: m, i: i } }).sort(function(a, b) {
+    var byName = a.m.name.localeCompare(b.m.name)
+    if (byName !== 0) return byName
+    if (a.m.via !== b.m.via) return a.m.via === "tailnet" ? -1 : 1
+    return a.i - b.i
+  }).map(function(e) { return e.m })
+}
+
+// One line for a Mac in the list: "Studio Mac  ·  100.64.0.10 (Tailscale)".
+function macLabel(m) {
+  return m.name + "  ·  " + m.address + (m.via === "tailnet" ? "  (Tailscale)" : m.via === "network" ? "  (this network)" : "")
 }
 
 // PipeWire's outputs from `pactl -f json list sinks`, as ./install offers
@@ -309,5 +363,6 @@ function outputList(text) {
 if (typeof module !== "undefined") {
   module.exports = { pages: pages, REDIRECT: REDIRECT, title: title, fields: fields, bridgeUrl: bridgeUrl, initial: initial,
     problem: problem, blocker: blocker, writes: writes, args: args, bridgeHost: bridgeHost, scpState: scpState, tokenCopyState: tokenCopyState,
-    tailnetMacs: tailnetMacs, outputList: outputList }
+    tailnetMacs: tailnetMacs, bonjourMacs: bonjourMacs, unescapeAvahi: unescapeAvahi, macList: macList, macLabel: macLabel,
+    outputList: outputList }
 }

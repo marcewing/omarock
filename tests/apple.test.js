@@ -272,3 +272,19 @@ test("a library genre: Shuffle, its artists in the bridge's order, then its comp
   assert.deepEqual(empty.rows, [])
   assert.equal(empty.info.emptyText, "None of your Grunge songs are from 1989 or before (Time Machine).")
 })
+
+test("the bridge's stream: its base finds the address from before 0.9.0, and with any secret", () => {
+  const before = "http://my-mac.local:8000/omarock.ogg"
+  const now = "http://my-mac.local:8000/omarock-0123456789abcdef0123456789abcdef.ogg"
+  assert.equal(Apple.streamBase(before), "http://my-mac.local:8000/omarock")
+  assert.equal(Apple.streamBase(now), "http://my-mac.local:8000/omarock")
+  assert.ok(Apple.isStream(before, now))
+  assert.ok(Apple.isStream(now, before))
+  assert.ok(Apple.isStream(now, now))
+  assert.ok(!Apple.isStream("http://100.64.0.10:8000/omarock.ogg", now), "another host is another stream")
+  assert.ok(!Apple.isStream("Hüsker Dü/Zen Arcade/01.flac", now))
+  assert.ok(!Apple.isStream(now, ""), "no stream known: nothing is it")
+  // A streamURL of the user's is its own base.
+  assert.equal(Apple.streamBase("http://relay.example:8080/live"), "http://relay.example:8080/live")
+  assert.ok(Apple.isStream("http://relay.example:8080/live", "http://relay.example:8080/live"))
+})

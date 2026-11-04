@@ -1,0 +1,7 @@
+#!/bin/bash
+# The harness's avahi-browse: the bridges "on this network" that the test
+# HOME's .fake-avahi lists, as `avahi-browse -rpt _omarock._tcp` prints
+# them; none without it. Never the real network.
+[[ $* == "-rpt _omarock._tcp" ]] || exit 1
+[[ -r $HOME/.fake-avahi ]] && cat "$HOME/.fake-avahi"
+exit 0
