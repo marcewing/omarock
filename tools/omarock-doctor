@@ -159,6 +159,10 @@ import json, sys
 h = json.loads(sys.argv[1])
 print("  " + ("\033[32m✓\033[0m the bridge answers, and may use Apple Music" if h.get("authorized") else "\033[31m✗\033[0m the bridge answers, but Apple Music access isn'"'"'t allowed on the Mac yet"))
 ' "$h"
+      # Bridge 0.9.0 announces itself over Bonjour, if the Mac lets it.
+      if [[ $(python3 -I -c 'import json, sys; print(json.loads(sys.argv[1]).get("bonjour", ""))' "$h" 2>/dev/null) == denied ]]; then
+        note "the bridge doesn't announce itself on the network (the Mac's Local Network access for omarock bridge is off), so setup won't list it: give it the Mac's name"
+      fi
       # The token, read by curl from stdin (never printed): with it the bridge
       # answers, and says where its stream is (from 0.9.0 only with it).
       if [[ -r $tokenfile ]]; then

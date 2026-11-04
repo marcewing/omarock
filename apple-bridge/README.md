@@ -8,19 +8,24 @@ transport ([API.md](API.md)).
 
 ```
 Mac:   MusicKit plays ─▶ process tap (muted on the Mac) ─▶ Ogg FLAC, libFLAC ─▶ Icecast :8000
-                                                                                    │ Tailscale
+                                                                                    │ your network
 Linux: omarock ◀──── bridge API :8710 (JSON, bearer token) ────────────────────────┤
-       mpd ◀──────── http://<mac>:8000/omarock.ogg ◀────────────────────────────────┘
+       mpd ◀──────── http://<mac>:8000/omarock-<secret>.ogg ◀───────────────────────┘
 ```
 
 - **Only the bridge's own playback is captured.** The Mac's default output, its volume
   and every other app's sound are left alone, and the bridge's playback is muted on the
   Mac, so the Mac can be your everyday machine.
-- **Tailscale only.** The API and the stream listen on the Mac's Tailscale address and
-  on loopback, never on your LAN or the internet. Every API request needs the token,
-  except `/v1/health` (the bridge's version and state) and cover art (each image's
-  address carries a key made from the token). The stream needs none: anyone on your
-  tailnet can listen to what the bridge plays.
+- **Any network, and nothing encrypted.** The API and the stream listen on every
+  network the Mac is on: your home network, Tailscale's if it runs, and a café's Wi-Fi
+  too when the Mac is a laptop there. It's plain HTTP, so the token, the replies and
+  the sound cross the network as they are. Securing the network is up to you;
+  [Tailscale](https://tailscale.com) is one way (it encrypts, and works away from home
+  too), and `listenHost` (below) keeps the bridge to one address, Tailscale's, say.
+- **The token.** Every API request needs it, except `/v1/health` (the bridge's version
+  and state) and cover art (each image's address carries a key made from the token).
+  The stream's address has a secret made from the token in it, which `/v1/health`
+  gives only with the token, so only omarock finds the stream.
 - **It runs in the background:** no Dock icon, started at login, restarted if it
   crashes. With nobody listening to the stream for 30 s, it pauses.
 
@@ -39,7 +44,8 @@ account for MusicKit to work.
 - **A paid Apple Developer Program membership** ($99 a year). MusicKit needs it, and a
   bundle ID registered with MusicKit switched on (below).
 - **An Apple Music subscription** on the Apple ID the Mac's Music app uses.
-- **Tailscale** on the Mac and the Linux machine, in the same tailnet.
+- **The Mac and the Linux machine on one network:** your home network, or both on
+  Tailscale. Omarchy finds the bridge on your network by itself (Bonjour).
 - **On Linux:** omarock with mpd, as in the [main README](../README.md).
 
 ## 1. A bundle ID with MusicKit
@@ -71,7 +77,9 @@ checks the requirements and offers to install what's missing from Homebrew (`xco
 `icecast`, and `gum` for its prompts). It asks for your Team ID and bundle ID
 and saves them in `apple-bridge/app/Local.xcconfig`, which git ignores. Then it builds and
 signs the app, installs it to `~/Applications/OmarockBridge.app`, starts it, and goes
-through the Mac's permissions with you. It ends with what your Omarchy machine needs.
+through the Mac's permissions and its network with you (the firewall, if it's on). It
+ends with what your Omarchy machine needs: this Mac's name on your network
+(`NAME.local`), and on Tailscale if it runs.
 Every command it runs is shown, and it asks before changing anything.
 
 Run it again whenever you like. What's done is checked and skipped. The bridge is
@@ -80,12 +88,21 @@ once nothing is listening to the stream.
 
 ### The Mac's questions
 
-The first time the bridge runs, the Mac asks two things. Allow both (`./install` waits
+The first time the bridge runs, the Mac asks three things. Allow them (`./install` waits
 for them, and offers to open System Settings):
 - **Apple Music access** ("OmarockBridge would like to access Apple Music…").
 - **Audio capture**, for its own playback. If you miss the prompt, switch it on in
   System Settings → Privacy & Security → Screen & System Audio Recording (the "System
   Audio Recording Only" list).
+- **Local Network access** (omarock bridge, "find devices on local networks"), so the
+  bridge can announce itself and your Omarchy machine finds it by itself. Without it
+  the bridge still works, but omarock needs the Mac's name typed in. Turned down: switch
+  omarock bridge on in System Settings → Privacy & Security → Local Network.
+
+**The firewall.** If macOS's firewall is on, `./install` offers to let the bridge (port
+8710) and Icecast (port 8000) through (`sudo socketfilterfw`). Homebrew's Icecast changes
+with each upgrade, so run `./install` again after `brew upgrade icecast`. With "Block all
+incoming connections" on, nothing gets through: switch that off first.
 
 If macOS says the login item needs approval, allow OmarockBridge in System Settings →
 General → Login Items.
@@ -118,10 +135,12 @@ It checks the requirements, asks once for your Team ID and bundle ID, builds (Xc
 output goes to `apple-bridge/app/build/build.log`), installs and starts the app, and
 prints what the Linux side needs.
 
-Check it from the Mac or Linux (`/v1/health` needs no token):
+Check it from the Mac or Linux (`/v1/health` needs no token; its `"bonjour"` says
+whether the bridge announces itself: `advertised`, or `denied` without Local Network
+access):
 
 ```sh
-curl http://100.64.0.10:8710/v1/health   # your Mac's Tailscale address
+curl http://my-mac.local:8710/v1/health   # your Mac's name, or its Tailscale address
 ```
 
 `authorized`, `canPlayCatalog`, `capturing` and `encoding` should all be `true`.
@@ -134,7 +153,7 @@ Everything lives in `~/Library/Application Support/omarock-bridge`, not in the r
 | --- | --- |
 | `token` | The API token omarock sends (made on first run). |
 | `source.password`, `admin.password`, `relay.password` | Icecast's passwords (made on first run). |
-| `icecast.xml` | Icecast's config, rewritten at each launch for the current Tailscale address. Delete its first comment line to keep your own edits. |
+| `icecast.xml` | Icecast's config, rewritten at each launch. Delete its first comment line to keep your own edits. |
 | `config.json` | Optional settings (below). |
 | `INSTALLED` | The commit the installed app was built from. |
 | `log/` | `bridge.log`, `encoder.log` (the stream's encoder), and Icecast's `error.log` and `access.log`. |
@@ -142,9 +161,10 @@ Everything lives in `~/Library/Application Support/omarock-bridge`, not in the r
 `config.json`, every field optional:
 
 ```jsonc
-{ "listenHost": "100.64.0.10",   // default: the Mac's Tailscale address
+{ "listenHost": "100.64.0.10",   // only this address and loopback, and no Bonjour
+                                 // (default: every address the Mac has)
   "port": 8710,                  // the API's port (Icecast's is 8000)
-  "streamURL": "http://…:8000/omarock.ogg",  // what /health hands out
+  "streamURL": "http://…:8000/live.ogg",  // what /health hands out (default: the secret one)
   "icecast": "/opt/homebrew/bin/icecast",
   "startAtLogin": true }         // false: no launch agent; run the app by hand
 ```
@@ -163,8 +183,8 @@ stream, because restarting the bridge under mpd gives mpd errors until it's back
 
 On your Omarchy machine, **Set up…** on the Apple Music tab of omarock's settings (`,`
 in the panel), or `./install apple-music` in your clone there, connects to the bridge.
-Its window lists the Macs among your Tailscale machines and checks that the bridge
-answers. Then the bridge's token:
+Its window lists the bridges it finds on your network, and the Macs among your Tailscale
+machines, with a Mac's Tailscale address first, and checks that the bridge answers. Then the bridge's token:
 - **Left blank,** setup copies it from the Mac with `scp`. That needs the Mac's Remote
   Login (System Settings → General → Sharing), which the window checks first.
 - **Or paste it,** and the window checks it. On the Mac it's in
@@ -176,11 +196,12 @@ By hand instead (`build.sh` prints these with your addresses filled in):
 
 ```sh
 mkdir -p ~/.config/omarock
-echo '{ "bridge": "http://100.64.0.10:8710", "stream": "http://100.64.0.10:8000/omarock.ogg" }' \
-  > ~/.config/omarock/apple.json
-scp you@100.64.0.10:'Library/Application Support/omarock-bridge/token' ~/.config/omarock/bridge-token
+echo '{ "bridge": "http://my-mac.local:8710" }' > ~/.config/omarock/apple.json
+scp you@my-mac.local:'Library/Application Support/omarock-bridge/token' ~/.config/omarock/bridge-token
 chmod 600 ~/.config/omarock/bridge-token
 ```
+
+The stream's address comes from the bridge once the token is in (omarock asks for it).
 
 Then switch Apple Music on in omarock's settings (`,` in the panel). The token can be
 pasted there later too, or copied again with **Copy with ssh** (Remote Login again).
@@ -228,8 +249,10 @@ whether the bridge is new enough.
 - **`capturing: false`, or the stream is silent:** the audio capture permission (above).
   It belongs to the app's code signature, so building with another identity or bundle
   id asks again.
-- **Nothing answers on :8710:** `bridge.log` says "waiting for a Tailscale address" until
-  Tailscale is up. Check `launchctl print gui/$UID/<your bundle ID>`. Its `login:` lines
+- **Nothing answers on :8710:** from Linux, `avahi-browse -rt _omarock._tcp` lists the
+  bridges on your network. A bridge older than 0.9.0 listens only on the Mac's Tailscale
+  address: update it (`git pull`, then `./install`, in the Mac's clone). On the Mac, check
+  `launchctl print gui/$UID/<your bundle ID>`; `bridge.log`'s `login:` lines
   say what it did about its launch agent: since 0.5.1, if macOS lists the agent but
   launchd hasn't got it (left by an uninstall of 0.5.0 or older), the bridge registers it
   again, or runs without it. With 0.5.0 or older, switch OmarockBridge off and on in
@@ -238,7 +261,8 @@ whether the bridge is new enough.
   `./install`, in the Mac's clone). Older bridges' streams made mpd fall behind.
 - **On Linux,** run `tools/omarock-doctor`.
 - **Another Icecast on port 8000:** the bridge uses whatever answers on 127.0.0.1:8000,
-  so stop the other one, or move it.
+  so stop the other one, or move it. The bridge's own Icecast serves only the stream:
+  its status pages answer 404.
 - **Logs:** `~/Library/Application Support/omarock-bridge/log/`.
 
 ## Uninstalling
@@ -250,7 +274,8 @@ whether the bridge is new enough.
 Each part is its own step, and asks first. It takes the bridge out of macOS's login
 items (`OmarockBridge --unregister`), stops it and its Icecast, removes
 `~/Applications/OmarockBridge.app`, and offers to make macOS forget
-the app's permissions. It also offers to delete the support folder (the token, the
+the app's permissions, and to take the firewall entries it added out again. It also
+offers to delete the support folder (the token, the
 passwords, `config.json`, the logs). The default is to keep that, so a reinstall works
 with your Omarchy machine as it is. It only removes an app whose bundle ID matches this
 checkout's `Local.xcconfig`. At the end it lists what stays: Homebrew's tools, Xcode,
