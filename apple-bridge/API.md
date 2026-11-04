@@ -2,17 +2,31 @@
 
 The bridge is a small macOS app on a Mac with Apple Music. It uses MusicKit to
 search, browse and play Apple Music, and answers omarock (and its command-line
-tool, `tools/omarock-am`) over Tailscale. Its sound reaches the Linux machine
+tool, `tools/omarock-am`) over the network: your home network, or Tailscale. Its sound reaches the Linux machine
 only as an Ogg FLAC stream that **mpd** plays, through mpd's own output. Nothing
 here sends audio to the Linux machine any other way. Setting it up:
 [README.md](README.md).
 
-The examples use `100.64.0.10` for the Mac's Tailscale address.
+The examples use `100.64.0.10` for the Mac's address; `my-mac.local`, its Bonjour
+name, works the same.
 
 ## Transport
 
-- HTTP/1.1, JSON bodies, UTF-8. Port **8710**. The bridge listens on the
-  Mac's Tailscale address only (`100.64.0.10` here), never on the LAN.
+- HTTP/1.1, JSON bodies, UTF-8. Port **8710**. From 0.9.0 the bridge listens on
+  every address the Mac has, IPv4 and IPv6, loopback included, from the moment it
+  starts: the home network, Tailscale's address if Tailscale runs, and any other
+  network the Mac joins. `listenHost` in its config.json limits it to one address.
+  Before 0.9.0 it listened on the Mac's Tailscale address only, and waited for it.
+- **Nothing is encrypted.** It's plain HTTP, so the token, the replies and the
+  stream cross the network as they are. Securing that network is the user's job;
+  Tailscale (WireGuard) is one way to do it.
+- **Finding the bridge (0.9.0):** it advertises itself with Bonjour as
+  `_omarock._tcp` on the API's port, under the Mac's computer name ("Studio
+  Mac"), with TXT `version=0.9.0`. omarock lists these with `avahi-browse` and
+  keeps the Mac's host name (`my-mac.local`), not its address, which can change.
+- **URLs the bridge hands out** (the stream, served artwork) are built from the
+  `Host` header of the request they answer (from 0.9.0), so they work by whichever
+  name or address omarock used to reach the bridge.
 - Every request carries `Authorization: Bearer <token>`. The token is a random
   string kept in `~/Library/Application Support/omarock-bridge/token` on the Mac
   and in `~/.config/omarock/bridge-token` on the Linux machine. A wrong or missing
@@ -24,8 +38,14 @@ The examples use `100.64.0.10` for the Mac's Tailscale address.
 - Errors: a non-2xx status and `{"error": "what went wrong, in a sentence"}`.
   Use 400 for bad input, 404 for an unknown id, 409 if MusicKit isn't
   authorized or there's no subscription, and 502 if Apple's API failed.
-- The stream is separate: Icecast on the Mac at
-  `http://100.64.0.10:8000/omarock.ogg`, Ogg FLAC, 16-bit stereo at the
+- The stream is separate: Icecast on the Mac, port 8000, on every address as the
+  API is. From 0.9.0 its address has a secret in it,
+  `http://100.64.0.10:8000/omarock-SECRET.ogg`, where SECRET is the first 32 hex
+  digits of HMAC-SHA256(token, "stream"), and `/v1/health` gives it only to a
+  request with the right token. So only someone with the token can find it, and a
+  new token gives a new address. The mount is hidden from Icecast's status pages,
+  and Icecast's admin pages need the admin password, which never leaves the Mac.
+  Before 0.9.0 it was `/omarock.ogg`, given to anyone. Ogg FLAC, 16-bit stereo at the
   Mac's mixing rate (48 kHz). From 0.7.0 (`/v1/health` has `"minBitrate": true`)
   it's encoded with libFLAC's `limit_min_bitrate`: digital silence still costs about
   6 KB/s, not a few hundred bytes, so an mpd with a stock libFLAC that joins in a
@@ -99,7 +119,7 @@ All paths start with `/v1`.
 
 | Method and path | What it does |
 | --- | --- |
-| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`), `"minBitrate": true` from 0.7.0, and from 0.8.0 `"streamDelay"`: seconds from a status's `position` to that audio reaching Icecast. In 0.8.0 it's the encoder's hold alone (0.041); from 0.8.1 it also takes off the Mac's output latency, since MusicKit's position is what the output device plays and the tap gets the audio before it, so it's near 0 and can be slightly negative (-0.006 on the built-in speakers; see the stream, above). No auth needed, and it reveals nothing private. |
+| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`), `"minBitrate": true` from 0.7.0, and from 0.8.0 `"streamDelay"`: seconds from a status's `position` to that audio reaching Icecast. In 0.8.0 it's the encoder's hold alone (0.041); from 0.8.1 it also takes off the Mac's output latency, since MusicKit's position is what the output device plays and the tap gets the audio before it, so it's near 0 and can be slightly negative (-0.006 on the built-in speakers; see the stream, above). No auth needed, and without the token it reveals nothing private: from 0.9.0 `stream` is there only when the request carries the right token (built from the request's `Host`, see Transport). |
 | `POST /authorize` | Asks for MusicKit access (`MusicAuthorization.request()`), which puts a dialog on the Mac's screen; returns health. For someone at the Mac (the bridge also asks at its first launch). |
 | `GET /status?since=SEQ` | Now playing. Returns at once if the state's `seq` differs from `SEQ` (or there is no `since`); otherwise waits up to 25 s for a change, then returns the same state (long poll). |
 | `POST /play` | `{ "items": [ {kind, id, source}, … ], "start": 0, "mode": "play" }`. `mode` is `play` (replace the queue and start at song `start`), `next` (insert after the current song) or `add` (append). Items are expanded to songs, in order (see **Items** below). `start` is the index into the tracks as the detail route lists them (`/albums|/playlists/{source}/{id}`), counted before unplayable songs are skipped; if that song is unplayable, play starts at the next playable one. A single song that can't be played answers 409 with the reason. Returns the new status. |
@@ -324,7 +344,7 @@ the queue, the library, playlists, `/info`) works the same from any machine.
   behind it; mpd playing again resumes the bridge.
 - The bridge paused or stopped for a minute (omarock's `appleIdleStop`) stops mpd
   too, so the mount has no listener. That frees the bridge for updates, and nothing
-  trickles over Tailscale. Playing again reconnects.
+  trickles over the network. Playing again reconnects.
 - The command-line tool on the Linux machine, `tools/omarock-am`, wraps these
   endpoints (curl and jq), so Apple Music can be driven from a terminal the way mpd
   is with mpc.
