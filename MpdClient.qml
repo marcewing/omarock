@@ -70,6 +70,25 @@ Item {
   property bool stalled: false
   property real inflightSince: 0
 
+  // A live stream with nothing coming in (the network gone quiet): mpd says
+  // "play" still, but its clock stands still, and once its buffer has run
+  // dry it answers no one until the stream sends again. While the panel's
+  // source is a live one (watchStreams), a quiet status every 5 s tells:
+  // starved when the clock stood still since the last one, or when mpd has
+  // sat 4 s on a command since. Only from watchAfter seconds into the
+  // stream, never as it starts, when mpd has deadlocked (DEVELOPING.md).
+  property bool watchStreams: false
+  property real watchAfter: 15
+  property bool starved: false
+  property var watchSample: null
+  property bool watchWaiting: false
+
+  // While mpd is down, each try at a socket that isn't there is a warning in
+  // the journal (Quickshell's), every 3 s: socketProbe looks for it first.
+  // One that's there but refuses (mpd gone without taking it away) is tried
+  // every 3 s for 30 s, then every 30 s.
+  property int refusedTries: 0
+
   property bool idleGreeted: false
   property bool commandGreeted: false
   property var idleChanges: []
@@ -174,6 +193,7 @@ Item {
     if (!root.idleGreeted) {
       if (line.indexOf("OK MPD ") === 0) {
         root.idleGreeted = true
+        root.refusedTries = 0
         root.lastError = ""
         root.refreshAll()
         root.enterIdle()
@@ -233,6 +253,24 @@ Item {
     root.elapsedBase = s.elapsed
     root.elapsedAt = Date.now()
     root.elapsed = s.elapsed
+  }
+
+  function watchStream() {
+    if (root.watchWaiting) {
+      if (root.inflight && Date.now() - root.inflightSince >= 4000) root.starved = true
+      return
+    }
+    if (root.mpdStatus.elapsed + (Date.now() - root.elapsedAt) / 1000 < root.watchAfter) return
+    root.watchWaiting = true
+    root.send("status", function(lines, error) {
+      root.watchWaiting = false
+      if (error !== "") return
+      root.applyStatus(lines)
+      var s = root.mpdStatus, now = Date.now(), last = root.watchSample
+      if (last && last.songId === s.songId && now - last.at >= 3000)
+        root.starved = s.elapsed - last.elapsed < (now - last.at) / 2000
+      root.watchSample = { at: now, elapsed: s.elapsed, songId: s.songId }
+    }, true)
   }
 
   function refreshCurrentSong() {
@@ -794,6 +832,23 @@ Item {
     if (!idleSocket.connected) idleSocket.connected = true
   }
 
+  function retryConnect() {
+    if (root.active && root.socketPath !== "" && !idleSocket.connected) socketProbe.running = true
+  }
+
+  Process {
+    id: socketProbe
+    command: ["test", "-S", root.socketPath]
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.refusedTries = 0
+        reconnectTimer.restart()
+      } else {
+        root.reconnect()
+      }
+    }
+  }
+
   onSocketPathChanged: reconnect()
   onActiveChanged: reconnect()
   Component.onCompleted: reconnect()
@@ -820,6 +875,7 @@ Item {
     onError: function(error) {
       Qt.callLater(function() { idleSocket.connected = false })
       if (root.lastError === "") root.lastError = "Can't reach mpd at " + root.socketPath
+      root.refusedTries++
       reconnectTimer.restart()
     }
   }
@@ -839,7 +895,11 @@ Item {
       root.commandGreeted = false
       // A command cut off mid-reply is dropped, not resent: it may already
       // have run (resending "next" would skip twice).
-      if (root.inflight) root.finishCommand("ACK [0@0] {} connection closed")
+      if (root.inflight) {
+        var word = Mpd.commandWord(root.inflight.text)
+        root.finishCommand("ACK [0@0] {} " + (root.stalled ? "mpd is answering again, but " + word + " may not have gone through"
+          : "mpd closed the connection before answering " + word))
+      }
       if (root.pending.length > 0) commandRetryTimer.restart()
     }
     onError: function(error) {
@@ -852,8 +912,8 @@ Item {
 
   Timer {
     id: reconnectTimer
-    interval: 3000
-    onTriggered: root.reconnect()
+    interval: root.refusedTries > 10 ? 30000 : 3000
+    onTriggered: root.retryConnect()
   }
 
   Timer {
@@ -870,9 +930,20 @@ Item {
   }
 
   Timer {
+    interval: 5000
+    repeat: true
+    running: root.watchStreams && root.ready && root.mpdStatus.state === "play"
+    onRunningChanged: if (!running) {
+      root.starved = false
+      root.watchSample = null
+    }
+    onTriggered: root.watchStream()
+  }
+
+  Timer {
     interval: 500
     repeat: true
-    running: root.ticking && root.status.state === "play"
+    running: root.ticking && root.status.state === "play" && !root.starved
     onTriggered: root.elapsed = Math.min(root.status.duration || 1e9,
       root.elapsedBase + (Date.now() - root.elapsedAt) / 1000)
   }

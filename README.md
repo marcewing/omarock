@@ -464,6 +464,11 @@ A few are in the file only, for when you know you need them:
   after that omarock tries again after 2 and 5 seconds, then every 10, for 5
   minutes (`streamRetryFor`), and says why if it gives up. A station that
   refuses (a 403, say) isn't tried again.
+- **"Buffering…" on a station or channel:** nothing is coming in from its
+  stream (the network has gone quiet). mpd plays on from its buffer, then
+  waits; omarock looks every 5 seconds and says Playing again once the sound
+  is back. If mpd stops answering meanwhile, the panel says "No sound is
+  coming in": mpd answers again once the stream sends.
 - **"Not connected" on Apple Music or Spotify:** omarock can't reach the bridge
   on the Mac, or omarock-spotify. It looks again every 3 seconds and carries on
   once it answers. Spotify stays the source meanwhile: Spotify's player plays
@@ -475,7 +480,8 @@ A few are in the file only, for when you know you need them:
 ## Contributing
 
 [DEVELOPING.md](DEVELOPING.md) has the layout, the tests and how omarock works
-inside. omarock is under the MIT License ([LICENSE](LICENSE)). `places.tsv` is
+inside. Work happens on the `dev` branch, and pull requests go there; `main`
+holds the releases, which is what Omarchy installs and updates. omarock is under the MIT License ([LICENSE](LICENSE)). `places.tsv` is
 GeoNames' data ([geonames.org](https://www.geonames.org)), under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with regions' local
 names from Wikidata (CC0); `tools/build-places` makes it again.

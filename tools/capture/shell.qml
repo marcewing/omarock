@@ -329,6 +329,7 @@ ShellRoot {
         opened: p.opened, connected: p.connected, expanded: p.expanded,
         stateText: p.stateText, nowPlaying: p.nowPlayingText, coverUrl: p.coverUrl,
         query: p.query, searching: p.searching, rows: p.rows.map(function(r) { return r.kind + ":" + r.title }),
+        artRows: p.rows.filter(function(r) { return !!r.artwork }).length,
         subtitles: p.rows.map(function(r) { return r.subtitle || "" }),
         // Whether each row has its cover (or logo) to show yet.
         rowCovers: p.rows.map(function(r) { return p.rowCoverUrl(r) !== "" }),

@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_mpd import png  # noqa: E402
@@ -37,6 +38,9 @@ class State:
         self.log = log
         self.lock = threading.Lock()
         self.favorites = {c[0] for c in CHANNELS if c[4]}
+        # Out of reach (POST /v1/fake/offline {closed}, seconds): every other
+        # request, art too, closes unanswered, as when omarock-sxm is gone.
+        self.closed_until = 0.0
 
 
 def art(colour):
@@ -63,6 +67,9 @@ class Handler(BaseHTTPRequestHandler):
             state.log.write(json.dumps({"method": method, "path": self.path}) + "\n")
             state.log.flush()
         parts = [p for p in self.path.split("?")[0].split("/") if p]
+        if parts[:2] != ["v1", "fake"] and time.monotonic() < state.closed_until:
+            self.close_connection = True
+            return
         # As omarock-sxm: only requests that say they're omarock's.
         if parts[:1] == ["v1"] and self.headers.get("X-Omarock") != "1":
             return self.reply(403, {"error": "Only omarock asks here (X-Omarock: 1)."})
@@ -73,6 +80,10 @@ class Handler(BaseHTTPRequestHandler):
                 png(Path(f.name), top, tuple(c // 3 for c in top), min(size, 512))
                 return self.reply(200, Path(f.name).read_bytes(), "image/png")
         path = "/".join(parts)
+        if path == "v1/fake/offline":
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            state.closed_until = time.monotonic() + float(body.get("closed", 0))
+            return self.reply(200, {"ok": True})
         if path == "v1/health":
             return self.reply(200, {"ok": True, "version": "fake", "account": True, "loggedIn": True, "error": "", "playing": []})
         if path == "v1/channels":

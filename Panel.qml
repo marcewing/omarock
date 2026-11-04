@@ -201,7 +201,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.14.3"
+  readonly property string version: "0.14.4"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -396,7 +396,7 @@ Panel {
   readonly property bool connected: client.ready && (!bridgeMode || bridge.ready) && (!sxmMode || sxm.available)
   readonly property bool playing: player.status.state === "play"
   readonly property string coverUrl: bridgeMode ? Apple.artUrl(bridge.song ? bridge.song.artwork : null, 360)
-    : sxmMode ? Apple.artUrl({ url: (sxm.now && sxm.now.art) || (sxm.channel && sxm.channel.logo) || "" }, 360)
+    : sxmMode ? (sxm.available ? Apple.artUrl({ url: (sxm.now && sxm.now.art) || (sxm.channel && sxm.channel.logo) || "" }, 360) : "")
     : radioMode ? radio.art
     : localCoverUrl
   readonly property bool searchMode: query.trim() !== ""
@@ -439,7 +439,7 @@ Panel {
 
   readonly property var queueRows: {
     if (root.bridgeMode) return Apple.queueRows(root.bridge.heardStatus)
-    if (root.sxmMode) return Sxm.channelRows(sxm.channels, sxm.nowPlaying, sxm.currentId)
+    if (root.sxmMode) return root.sxmArt(Sxm.channelRows(sxm.channels, sxm.nowPlaying, sxm.currentId))
     if (root.radioMode) return Radio.listRows(radio.favorites, radio.local, radio.currentUuid, radio.place, radio.station)
     var current = client.status.state !== "stop" ? client.status.songId : ""
     return client.queue.map(function(song, i) {
@@ -468,6 +468,7 @@ Panel {
     if (root.bridgeMode && !root.bridge.ready) return "Not connected"
     if (root.sxmMode && !sxm.available) return "SiriusXM isn't running"
     if (root.reconnecting) return "Reconnecting…"
+    if ((root.radioMode || root.sxmMode) && client.starved) return "Buffering…"
     var s = root.player.status
     return s.state === "play" ? "Playing" : s.state === "pause" ? "Paused" : "Stopped"
   }
@@ -939,6 +940,15 @@ Panel {
   property real livePlayingSince: 0
   readonly property bool reconnecting: root.streamRetry !== null
   readonly property real streamRetryFor: Math.max(0, Number(root.setting("streamRetryFor", 300)) || 0)
+  // How far into a live stream mpd's clock is first checked (MpdClient's
+  // starved), in seconds: in the file only, for tests.
+  readonly property real streamWatchAfter: Math.max(0, Number(root.setting("streamWatchAfter", 15)) || 0)
+
+  // SiriusXM's art comes from omarock-sxm: while it can't be reached, none
+  // (each cover tried would be a warning in the journal).
+  function sxmArt(rows) {
+    return sxm.available ? rows : rows.map(function(r) { return Object.assign({}, r, { artwork: undefined }) })
+  }
 
   function startStreamRetry(file, error) {
     var name = root.tunedName || (root.sxmMode ? "the channel" : "the station")
@@ -1149,7 +1159,7 @@ Panel {
       return
     }
     if (root.sxmMode) {
-      root.resultRows = Sxm.searchRows(sxm.channels, sxm.nowPlaying, query, Mpd.fold, sxm.currentId)
+      root.resultRows = root.sxmArt(Sxm.searchRows(sxm.channels, sxm.nowPlaying, query, Mpd.fold, sxm.currentId))
       root.searching = false
       return
     }
@@ -3525,7 +3535,7 @@ Panel {
       var channel = sxm.channels.filter(function(c) { return c.id === request.id })[0]
       if (!channel) { root.say("omarock-sxm hasn't sent this channel's details"); return }
       var now = sxm.nowPlaying[request.id] || null
-      show(Info.channel(channel, now), { coverUrl: Apple.artUrl({ url: (now && now.art) || channel.logo || "" }, 160) }, false)
+      show(Info.channel(channel, now), { coverUrl: sxm.available ? Apple.artUrl({ url: (now && now.art) || channel.logo || "" }, 160) : "" }, false)
     } else if (request.type === "localSong") {
       client.cover(request.file)
       show(Info.localSong({ file: request.file, title: request.title }, {}), { coverFile: request.file }, true)
@@ -3613,7 +3623,10 @@ Panel {
     id: client
     socketPath: root.socketPath
     yearLimit: root.timeYear
-    onStalledChanged: if (stalled) root.say("mpd isn't answering. If it stays stuck: systemctl --user restart mpd")
+    watchStreams: root.radioMode || root.sxmMode
+    watchAfter: root.streamWatchAfter
+    onStalledChanged: if (stalled) root.say(starved ? "No sound is coming in: mpd waits for the stream"
+      : "mpd isn't answering. If it stays stuck: systemctl --user restart mpd")
     onCurrentSongChanged: root.updateCover()
     onMusicDirectoryChanged: root.updateCover()
     onCoverResolved: function(directory, url) {

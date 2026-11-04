@@ -55,6 +55,9 @@ Rules while setting up or fixing someone's system:
 Tests never touch the user's real mpd, PipeWire or services. Keep it that way:
 fakes, a scratch mpd with mpd's `null` output, or a private PipeWire.
 
+Work goes on the `dev` branch; `main` holds releases, which is what Omarchy
+installs (DEVELOPING.md, "Branches and releases").
+
 Before installing a change to the live bar, run `omarchy plugin validate .`. Then
 `omarchy plugin update marcewing.omarock`, and `omarchy restart shell` to load it: the
 shell's own plugin reload keeps running the old code from Qt's cache. Watch

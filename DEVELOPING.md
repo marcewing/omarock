@@ -60,6 +60,16 @@
   Soloist plays on without omarock-spotify; leaving it then sends the release
   once the service answers. `--only reconnect` covers all three, with
   `fake_mpd`'s `fake_stream_drop` and the fakes' `POST /v1/fake/offline`.
+- **Quiet streams, mpd gone.** While a station or channel plays, MpdClient
+  asks mpd's status every 5 s, from 15 s into the stream (never as it starts,
+  when mpd has deadlocked): a clock that stood still since the last one, or
+  mpd sitting 4 s on a command (a starved stream's buffer runs dry, then mpd
+  answers no one), is `starved`, and the panel says "Buffering…". While mpd
+  is down, `test -S` looks for its socket before each try: each try at a
+  missing socket is a Quickshell warning in the journal. SiriusXM's art is
+  shown only while omarock-sxm answers, for the same reason. `--only outages`,
+  with `fake_mpd`'s `fake_stream_starve` and `fake_down`, and `fake_sxm`'s
+  `POST /v1/fake/offline`.
 - **Opt-in sources.** A source's switch (`spotify`, `appleMusic`, `siriusXM`,
   `radio`) gives it a button and lets omarock talk to its service; switched off,
   omarock doesn't contact it.
@@ -168,7 +178,18 @@ for a changed plugin: Quickshell has no `Qt.clearComponentCache()`, so the reloa
 gets the old compiled QML back from Qt's cache. `omarchy restart shell` starts a
 fresh process. Any plugin's reload (yours or another's) also makes omarock again
 from scratch, so each source must come up on its own, without the panel being
-opened; `--only fresh-start` checks that.
+opened; `--only fresh-start` checks that. A `file://` clone follows the branch
+this checkout has out.
+
+## Branches and releases
+
+Work goes on `dev`, and pull requests too. `main` holds releases only:
+`omarchy plugin add` and `omarchy plugin update` install main as it is on
+GitHub, and the Omarchy marketplace marks any main commit newer than the one it
+verified "Update unverified" until that one is verified too. A release bumps the
+version (`manifest.json` and `Panel.qml`), merges `dev` into `main`, tags it
+`vX.Y.Z`, and asks the marketplace to verify that commit (its Plugin verification
+form).
 
 ## Findings worth knowing
 

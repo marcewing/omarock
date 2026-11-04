@@ -56,6 +56,9 @@ Item {
       } else {
         var error = xhr.status === 0 ? "SiriusXM isn't running (omarock-sxm)"
           : (data && data.error) || "SiriusXM said " + xhr.status
+        // No answer: is the service still there? (Its art is shown only
+        // while it is.)
+        if (xhr.status === 0 && path !== "/v1/health" && root.available) root.checkHealth()
         if (callback) callback(null, error)
       }
     }
@@ -140,11 +143,11 @@ Item {
   // A channel playing when omarock starts (any plugin's reload starts it
   // again) needs the service checked at once. Otherwise only opening the
   // panel did that, and the bar showed the music note until then. While the
-  // service can't be reached, it looks again every 30 s.
+  // service can't be reached, it looks again every 5 s.
   onActiveChanged: if (root.active && !root.available) root.checkHealth()
 
   Timer {
-    interval: 30000
+    interval: 5000
     repeat: true
     running: root.active && !root.available
     onTriggered: root.checkHealth()

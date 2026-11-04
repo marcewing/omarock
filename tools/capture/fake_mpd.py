@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import random
 import re
+import socket
 import socketserver
 import struct
 import sys
@@ -208,6 +209,16 @@ class Fake:
         self.refused = []
         self.drops = 0
         self.error = ""
+        # A stream with nothing coming in (fake_stream_starve): its time stands
+        # still until starve_until, and with starve_hang nothing is answered.
+        self.starve_until = 0.0
+        self.starve_hang = False
+        # fake_down: mpd stops (every connection closed, its socket gone, or
+        # left behind with down_stale) and starts again after down_for.
+        self.handlers = set()
+        self.going_down = False
+        self.down_for = 0.0
+        self.down_stale = False
         self.random = False
         self.repeat = True
         self.single = False
@@ -249,7 +260,7 @@ class Fake:
 
     def connecting(self):
         """Like mpd, a stream has no audio format (and no time) until it connects."""
-        return self.state == "play" and time.monotonic() < self.started
+        return self.state == "play" and time.monotonic() < self.started and self.started != self.starve_until
 
     def play_index(self, index):
         if not 0 <= index < len(self.queue): return
@@ -290,6 +301,10 @@ class Fake:
             return [f"artists: {len({s.get('artist', '') for s in self.songs})}",
                     f"albums: {len({s.get('album', '') for s in self.songs})}", f"songs: {len(self.songs)}"]
         if name == "status":
+            # Like mpd once a starved stream's buffer has run dry: no one gets
+            # an answer until the stream sends again.
+            if self.starve_hang and time.monotonic() < self.starve_until:
+                time.sleep(self.starve_until - time.monotonic())
             out = [f"volume: {self.volume}", f"repeat: {int(self.repeat)}", f"random: {int(self.random)}",
                    f"single: {int(self.single)}", "consume: 0", f"playlistlength: {len(self.queue)}", f"state: {self.state}"]
             if self.queue and self.current < len(self.queue):
@@ -529,6 +544,20 @@ class Fake:
                 self.error = "Recv failure: Connection reset by peer: Failure when receiving data from the peer"
                 self.changed("player")
             return []
+        if name == "fake_stream_starve":
+            # Test control, not mpd: the stream playing gets nothing for N s.
+            # mpd still says play, but its time stands still; with "hang", mpd
+            # answers no status until then either.
+            if self.state == "play":
+                self.elapsed, self.started = self.position(), time.monotonic() + float(rest[0])
+                self.starve_until = self.started
+            self.starve_hang = rest[1:2] == ["hang"]
+            return []
+        if name == "fake_down":
+            # Test control, not mpd: mpd stops, as systemd stops it (its socket
+            # goes; "stale" leaves it behind, refusing), and is back in N s.
+            self.going_down, self.down_for, self.down_stale = True, float(rest[0]), rest[1:2] == ["stale"]
+            return []
         if name == "fake_setvol_delay":
             # Test control, not mpd: make setvol take this many seconds.
             self.setvol_delay = float(rest[0])
@@ -581,10 +610,34 @@ class Handler(socketserver.StreamRequestHandler):
                 except (ValueError, IndexError) as error:
                     reply.append(f"ACK [2@0] {{{commands[0][0]}}} {error}")
             self.wfile.write(("\n".join(reply) + "\n").encode("utf-8"))
+            if fake.going_down:
+                self.go_down()
+                break
+
+    def setup(self):
+        super().setup()
+        self.closed = False
+        with self.server.fake.lock:
+            self.server.fake.handlers.add(self)
+
+    def go_down(self):
+        """fake_down: every connection closes, and the server stops (main()
+        takes the socket away and starts it again)."""
+        fake = self.server.fake
+        with fake.lock:
+            fake.going_down = False
+            handlers = list(fake.handlers)
+            for h in handlers: h.closed = True
+            fake.lock.notify_all()
+        for h in handlers:
+            try: h.request.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+        threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def finish(self):
         with self.server.fake.lock:
             self.server.fake.events.pop(self, None)
+            self.server.fake.handlers.discard(self)
         super().finish()
 
     def idle(self, wanted):
@@ -597,8 +650,9 @@ class Handler(socketserver.StreamRequestHandler):
             pending = fake.events.setdefault(self, set())
             # omarock never sends noidle (it idles on its own connection), so
             # this simply waits for a change.
-            while not (pending & set(wanted)):
+            while not (pending & set(wanted)) and not self.closed:
                 fake.lock.wait()
+            if self.closed: return
             hits = sorted(pending & set(wanted))
             pending.difference_update(hits)
         self.wfile.write(("".join(f"changed: {s}\n" for s in hits) + "OK\n").encode("utf-8"))
@@ -611,12 +665,18 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 def main():
     path, music, log = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.unlink(missing_ok=True)
     music.mkdir(parents=True, exist_ok=True)
-    server = Server(str(path), Handler)
-    server.fake = Fake(music, log.open("a"))
-    print("fake mpd ready", flush=True)
-    server.serve_forever()
+    fake = Fake(music, log.open("a"))
+    while True:
+        path.unlink(missing_ok=True)
+        server = Server(str(path), Handler)
+        server.fake = fake
+        if not fake.down_for: print("fake mpd ready", flush=True)
+        server.serve_forever()
+        # fake_down: stopped, then started again.
+        server.server_close()
+        if not fake.down_stale: path.unlink(missing_ok=True)
+        time.sleep(fake.down_for)
 
 
 if __name__ == "__main__": main()

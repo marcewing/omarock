@@ -295,6 +295,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     heard_scenario(host, socket_path, failures)
     elsewhere_scenario(host, socket_path, failures)
     reconnect_scenario(host, socket_path, failures)
+    outages_scenario(host, socket_path, failures)
     apple_genres_scenario(host, output, socket_path, failures)
     time_machine_scenario(host, output, socket_path, failures)
 
@@ -3856,6 +3857,74 @@ def reconnect_scenario(host, socket_path, failures):
     host.call("close")
 
 
+def outages_scenario(host, socket_path, failures):
+    """The rest of what the VM's failure tests found (10-30): a live stream
+    with nothing coming in reads Buffering…, not Playing, whether mpd still
+    answers or not (and a stuck mpd then says why); while mpd is down, its
+    missing socket isn't tried every 3 s (each a warning in the journal);
+    and with omarock-sxm out of reach, no SiriusXM cover is tried (each a
+    warning too), until it's back."""
+    qs_log = lambda: BRIDGE["qs_log"].read_text(errors="replace")
+    host.call("settings", json.dumps({"streamWatchAfter": 1}))
+    host.call("open")
+    host.call("setSource", "sxm")
+    wait_for(lambda: host.state()["sxmMode"] and host.state()["bar"]["playing"], "SiriusXM playing")
+    host.settle(2)
+
+    # Nothing comes in for 14 s: mpd's clock stands still.
+    mpd_client(socket_path, "fake_stream_starve 14")
+    wait_for(lambda: host.state()["stateText"] == "SiriusXM · Buffering…", "the quiet stream noticed", timeout=13)
+    check(host.state()["bar"]["playing"], "a stream with nothing coming in reads Buffering…, still playing", failures)
+    wait_for(lambda: host.state()["stateText"] == "SiriusXM · Playing", "playing again", timeout=20)
+    check(True, "and Playing once it sends again", failures)
+
+    # And once mpd's buffer has run dry, mpd answers no one for 22 s.
+    mpd_client(socket_path, "fake_stream_starve 22 hang")
+    wait_for(lambda: host.state()["stateText"] == "SiriusXM · Buffering…", "mpd stuck on the stream noticed", timeout=13)
+    wait_for(lambda: host.state()["notice"] != "", "the stuck mpd's notice", timeout=15)
+    s = host.state()
+    check(s["notice"] == "No sound is coming in: mpd waits for the stream",
+          "a stream with nothing coming in, mpd stuck: " + s["stateText"] + " | " + s["notice"], failures)
+    wait_for(lambda: host.state()["stateText"] == "SiriusXM · Playing", "playing again", timeout=30)
+    check(True, "Playing again once mpd answers", failures)
+
+    # mpd stops (its socket goes) for 10 s, and starts again.
+    log_at = len(qs_log())
+    mpd_client(socket_path, "fake_down 10")
+    down = time.monotonic()
+    wait_for(lambda: not host.state()["connected"], "mpd gone")
+    wait_for(lambda: host.state()["connected"], "mpd back", timeout=20)
+    back = time.monotonic() - down - 10
+    missing = [line for line in qs_log()[log_at:].splitlines() if "ServerNotFoundError" in line]
+    check(not missing and back < 4, f"mpd down 10 s: no try at its missing socket ({len(missing)} warnings), back {back:.1f} s after it", failures)
+
+    # The same with its socket left behind, refusing: back as quickly.
+    mpd_client(socket_path, "fake_down 5 stale")
+    down = time.monotonic()
+    wait_for(lambda: not host.state()["connected"], "mpd gone")
+    wait_for(lambda: host.state()["connected"], "mpd back", timeout=15)
+    back = time.monotonic() - down - 5
+    check(back < 4, f"mpd down 5 s, its socket left behind: back {back:.1f} s after it", failures)
+    wait_for(lambda: host.state()["stateText"] == "SiriusXM · Playing", "SiriusXM playing")
+
+    # omarock-sxm out of reach for 25 s: its art goes until it's back.
+    request = urllib.request.Request(BRIDGE["sxm"] + "/v1/fake/offline", data=json.dumps({"closed": 25}).encode(),
+                                     method="POST", headers={"Content-Type": "application/json", "X-Omarock": "1"})
+    urllib.request.urlopen(request, timeout=5).read()
+    gone = time.monotonic()
+    wait_for(lambda: host.state()["stateText"] == "SiriusXM · SiriusXM isn't running", "omarock-sxm missed", timeout=20)
+    host.call("press", "i")
+    wait_for(lambda: host.state()["info"] is not None, "the info card")
+    s = host.state()
+    check(s["coverUrl"] == "" and s["artRows"] == 0 and s["info"]["cover"] == "",
+          f"omarock-sxm out of reach: no cover tried (card {s['coverUrl']!r}, {s['artRows']} rows, info card {s['info']['cover']!r})", failures)
+    host.call("press", "Escape")
+    wait_for(lambda: host.state()["stateText"] == "SiriusXM · Playing" and host.state()["coverUrl"] != "", "omarock-sxm back",
+             timeout=max(1, 25 - (time.monotonic() - gone)) + 8)
+    check(host.state()["artRows"] > 0, "and its art back once it is", failures)
+    host.call("settings", "{}")
+
+
 def apple_genres_scenario(host, output, socket_path, failures):
     """Marc, 10-29, in Apple Music with Time Machine on 1989: "I enter punk in
     the box, but I'm not seeing any genres listed". Apple's catalog has only
@@ -6135,6 +6204,7 @@ def main():
                             elif name == "heard": heard_scenario(host, socket_path, failures)
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
                             elif name == "reconnect": reconnect_scenario(host, socket_path, failures)
+                            elif name == "outages": outages_scenario(host, socket_path, failures)
                             elif name == "apple-genres": apple_genres_scenario(host, output, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)
                             elif name == "scrolling": scrolling_scenario(host, output, socket_path, failures)
