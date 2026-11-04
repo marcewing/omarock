@@ -596,7 +596,10 @@ ShellRoot {
       // Over the panel's content, or the pages over it (the keys).
       var item = host.findNamed(popupWindow.contentItem[0], name) || host.findNamed(popupWindow.contentItem[0].parent.parent, name)
       if (!item || !item.visible) return "not shown"
-      var x = item.width * fraction, y = item.height / 2
+      // A slider: the fraction is of its track, as its value is. The shell's
+      // PanelSlider has trackX (Omarchy 4.5.0 insets the track by half the
+      // knob at each end; before, it was the slider's whole width).
+      var x = typeof item.trackX === "function" ? item.trackX(fraction) : item.width * fraction, y = item.height / 2
       var done = action === "press" ? keyboard.mousePress(item, x, y, Qt.LeftButton, Qt.NoModifier, -1)
         : action === "release" ? keyboard.mouseRelease(item, x, y, Qt.LeftButton, Qt.NoModifier, -1)
         : keyboard.mouseMove(item, x, y, -1, Qt.LeftButton, Qt.NoModifier)
