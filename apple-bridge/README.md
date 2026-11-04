@@ -239,6 +239,15 @@ whether the bridge is new enough.
 
 - **The build fails:** `build.sh` shows the errors from its log; the whole build is in
   `apple-bridge/app/build/build.log`.
+- **`./install` waits for a certificate you've already made, or signing fails:** if
+  `security find-identity -p codesigning` lists your Apple Development certificate but
+  `security find-identity -v -p codesigning` finds 0 valid identities, Apple's
+  intermediate certificate is missing from the keychain. `./install` offers to fetch it
+  and add it to your login keychain. By hand: the certificate's issuer has an OU, G3 to
+  G6 (Keychain Access shows it). Download that one, Worldwide Developer Relations, from
+  [apple.com/certificateauthority](https://www.apple.com/certificateauthority/)
+  (`AppleWWDRCAG3.cer`, say). Then in Keychain Access, choose File → Import Items, into
+  the login keychain. Double-clicking the file can fail with error -25294.
 - **`authorized: false`:** allow the bridge in System Settings → Privacy & Security →
   Media & Apple Music, or ask again with
   `curl -X POST -H "Authorization: Bearer $(cat ~/.config/omarock/bridge-token)" http://…:8710/v1/authorize`

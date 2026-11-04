@@ -191,16 +191,52 @@ reauthorize() {
 }
 catalog_now() { reauthorize; health_true canPlayCatalog; }
 
+# The Apple Development certificate with this SHA-1 hash, as PEM.
+cert_pem() {
+  security find-certificate -a -Z -p -c "Apple Development" 2>/dev/null \
+    | awk -v h=$1 '/^SHA-1 hash:/ {on = ($3 == h)} on && /-----BEGIN/ {p = 1} p && on {print} /-----END/ {p = 0}'
+}
 # The Apple Development certificates' Team IDs (their OU).
 cert_teams() {
   local h
   for h in ${(f)"$(security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development/ {print $2}')"}; do
-    security find-certificate -a -Z -p -c "Apple Development" 2>/dev/null \
-      | awk -v h=$h '/^SHA-1 hash:/ {on = ($3 == h)} on && /-----BEGIN/ {p = 1} p && on {print} /-----END/ {p = 0}' \
-      | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]\{10\}\).*/\1/p'
+    cert_pem $h | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]\{10\}\).*/\1/p'
   done | sort -u
 }
 has_cert() { security find-identity -v -p codesigning 2>/dev/null | grep -q '"Apple Development'; }
+# A certificate that's there but not valid: without -v, find-identity lists it.
+untrusted_cert() { ! has_cert && security find-identity -p codesigning 2>/dev/null | grep -q '"Apple Development'; }
+some_cert() { has_cert || untrusted_cert; }
+# Its issuer's generation (G3 to G6, the OU of Apple's WWDR intermediate that signed it).
+cert_issuer() {
+  local h
+  h=$(security find-identity -p codesigning 2>/dev/null | awk '/"Apple Development/ {print $2; exit}')
+  [[ -n $h ]] && cert_pem $h | openssl x509 -noout -issuer 2>/dev/null | sed -n 's/.*OU *= *\(G[0-9]*\).*/\1/p'
+}
+
+# A certificate is listed but not valid, almost always because Apple's intermediate
+# (Worldwide Developer Relations) isn't in the keychain: fetch it and add it to login.
+trust_cert() {
+  local g=$(cert_issuer) dir file url
+  g=${g:-G3}
+  url=https://www.apple.com/certificateauthority/AppleWWDRCA$g.cer
+  bad "your Apple Development certificate is there, but macOS doesn't trust it: Apple's intermediate certificate ($g) is missing"
+  explain "It signs your certificate, and Xcode usually adds it. Without it, Xcode can't sign the bridge. It's at apple.com/certificateauthority (Worldwide Developer Relations - $g), and goes in your login keychain."
+  if confirm "Fetch Apple's intermediate certificate ($g) and add it to your login keychain?"; then
+    dir=$(mktemp -d) && file=$dir/AppleWWDRCA$g.cer
+    if run curl -fsSL -o "$file" "$url" \
+        && openssl x509 -inform der -in "$file" -noout -subject 2>/dev/null | grep -q "Worldwide Developer Relations.*OU *= *$g" \
+        && run security import "$file" -k ~/Library/Keychains/login.keychain-db; then
+      wait_until "Checking the certificate…" 10 has_cert
+    else
+      bad "couldn't fetch or add it"
+    fi
+    rm -rf "$dir"
+  fi
+  has_cert && return
+  explain "Add it by hand: download AppleWWDRCA$g.cer from $url, then in Keychain Access, File, Import Items, into the login keychain. (Double-clicking it can fail with error -25294.)"
+  wait_until "Waiting for the certificate to be trusted… (Ctrl-C to stop)" 900 has_cert || { bad "The certificate isn't trusted yet."; stopped; }
+}
 
 pane() {  # NAME URL: offer to open a System Settings pane
   [[ -z $answers ]] || return 0
@@ -316,11 +352,12 @@ step_requirements() {
 
 step_appid() {
   step "Your bundle ID, with MusicKit"
-  if ! has_cert; then
+  if ! some_cert; then
     explain "Xcode signs the bridge with your Apple Development certificate. In Xcode: Settings, Accounts, + to add the Apple ID of your developer membership, pick your team, Manage Certificates, + and Apple Development."
     [[ -z $answers ]] && confirm "Open Xcode?" && run open -a Xcode
-    wait_until "Waiting for the certificate… (Ctrl-C to stop)" 900 has_cert || { bad "No Apple Development certificate yet."; stopped; }
+    wait_until "Waiting for the certificate… (Ctrl-C to stop)" 900 some_cert || { bad "No Apple Development certificate yet."; stopped; }
   fi
+  has_cert || trust_cert
   ok "a signing certificate: $(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development[^"]*\)".*/\1/p' | head -1)"
 
   local team bundle
