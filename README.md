@@ -6,7 +6,7 @@
 features: search, browse, build playlists, cover art, etc.  Unlike many music players,
 in addition to your local music library, omarock can also play internet radio stations, **Spotify**,
 **Apple Music**, and **SiriusXM** all integrated in the same panel.  Note that these last three
-require paid subscriptions.
+require subscriptions, and omarock's Apple Music bridge requires a developer account.
 
 omarock works as a client for [mpd](https://www.musicpd.org), the Music Player Daemon.
 The music queue, playlists and playback live in mpd, not in omarock, so `mpc`, your
@@ -93,12 +93,39 @@ else. Most don't need it; it matters if some output must never carry music.
 
 If you keep your plugin up to date with `omarchy plugin update marcewing.omarock`,
 when the plugin detects a newer version of a service than the one running, its
-settings offer **Update…**, and its tab is marked •.
+settings offer **Update…**, and its tab is marked with a •.
 
 
 ## Get Rocking
 
 If you accepted the keybinding at install, `Super+Ctrl+M` will open up omarock and the rest I'm sure you can figure out.  If you like, you can read the entirely claude-generated **Using Omarock** and **Settings** sections below, but I doubt you need to.
+
+
+## Apple Music: Building the Bridge on a Mac
+
+Apple Music's streams are locked to Apple's own players, so omarock plays them
+through a small app on a Mac, the bridge. It plays the music with Apple's MusicKit
+and streams the sound to omarock over your network. Apple only lets MusicKit apps run
+when they're signed by a developer, so you build the bridge yourself, with your
+own Apple Developer membership.
+
+
+What you need before you start:
+
+- **[Homebrew](https://brew.sh)**, which the installer uses to add the tools it
+  needs. Homebrew supports only Apple silicon Macs with macOS 15 or later.
+- **Xcode**, from the App Store, opened once. It also gives you `git`.
+- **An Apple Developer Program membership** ($99 a year), for MusicKit.
+- **An Apple Music subscription** on the Apple ID that the Mac's Music app uses.
+- **The Mac and your Omarchy machine on the same network**, your home network, say,
+  or both on [Tailscale](https://tailscale.com), which also works away from home.
+  Nothing between them is encrypted, so securing that network is up to you:
+  Tailscale is one way.
+- **omarock installed on your Omarchy machine**, as above.
+
+
+On the Mac, clone omarock and run `./install` and it walks you through the rest.
+[apple-bridge/README.md](apple-bridge/README.md) has the details.
 
 
 ## Install by hand (not recommended)
