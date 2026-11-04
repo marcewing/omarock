@@ -1,8 +1,8 @@
 #!/bin/zsh
 # apple-bridge/install: set up omarock's Apple Music bridge on this Mac, or check it.
-# It walks through what the bridge needs (Xcode, Homebrew's tools, Tailscale),
-# your bundle ID with MusicKit, the build, the Mac's permissions, and what your
-# Omarchy machine needs next. Each step checks what's there first, says what it
+# It walks through what the bridge needs (Xcode, Homebrew's tools),
+# your bundle ID with MusicKit, the build, the Mac's permissions, the network, and
+# what your Omarchy machine needs next. Each step checks what's there first, says what it
 # will change, and asks before changing it; every command it runs is shown.
 # Run it again whenever you like: what's done is skipped, and the bridge is
 # rebuilt only when this checkout's has changed since the installed build.
@@ -161,24 +161,25 @@ up_to_date() {
     && git -C "$repo" diff --quiet HEAD -- $build_paths 2>/dev/null
 }
 
-# This Mac's Tailscale address (100.64.0.0/10), as the bridge picks it: a utun one first.
-tailnet_address() {
-  ifconfig | awk '/^[a-z]/ {ifc = $1} $1 == "inet" && $2 ~ /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./ {print ifc, $2}' \
-    | sort -k1,1 | awk '{print ($1 ~ /^utun/ ? 0 : 1), $2}' | sort -n | head -1 | cut -d' ' -f2
-}
 # config.json's value, or nothing.
 config_value() { plutil -extract "$1" raw -o - "$support/config.json" 2>/dev/null; }
-# This Mac's name among your Tailscale machines.
+# This Mac's name on the network, as Bonjour gives it and Omarchy finds it: NAME.local.
+bonjour_name() { print -r -- "$(scutil --get LocalHostName 2>/dev/null).local"; }
+# This Mac's name among your Tailscale machines (MagicDNS's), if Tailscale runs.
 tailnet_name() {
-  local cli=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+  local cli=/Applications/Tailscale.app/Contents/MacOS/Tailscale dns
   [[ -x $cli ]] || cli=${commands[tailscale]:-}
-  [[ -n $cli ]] && "$cli" status --json 2>/dev/null | plutil -extract Self.HostName raw -o - - 2>/dev/null
+  [[ -n $cli ]] || return 0
+  dns=$("$cli" status --json 2>/dev/null | plutil -extract Self.DNSName raw -o - - 2>/dev/null)
+  print -r -- ${dns%%.*}
 }
-bridge_url() { print -r -- "http://${$(config_value listenHost):-$(tailnet_address)}:${$(config_value port):-8710}"; }
+# The bridge by loopback, where it always listens (with a listenHost too).
+bridge_url() { print -r -- "http://127.0.0.1:${$(config_value port):-8710}"; }
 health() { curl -s -m 5 "$(bridge_url)/v1/health" 2>/dev/null; }
 health_ok() { [[ -n $(health) ]]; }
 health_value() { plutil -extract "$1" raw -o - - <<<"$(health)" 2>/dev/null; }
 health_true() { [[ $(health_value "$1") == true ]]; }
+health_is() { [[ $(health_value "$1") == "$2" ]]; }
 private_ok() { [[ -s $1 && $(stat -f %Lp "$1") == 600 ]]; }
 
 # Asks the bridge for Apple Music access again (a dialog on the Mac, if it hasn't
@@ -253,7 +254,7 @@ welcome() {
   local v
   v=$(sed -n 's/.*MARKETING_VERSION: *"*\([0-9.]*\).*/\1/p' "$here/project.yml" | head -1)
   print -r -- $'\n'"${bold}omarock's Apple Music bridge ${v}${reset}, for this Mac"$'\n'
-  explain "The bridge plays Apple Music here and streams it to omarock on your Omarchy machine, over Tailscale. Its sound is muted on this Mac, and nothing else on the Mac is touched. You build it yourself, signed with your Apple Developer membership, which MusicKit needs."
+  explain "The bridge plays Apple Music here and streams it to omarock on your Omarchy machine, over your network. Its sound is muted on this Mac, and nothing else on the Mac is touched. You build it yourself, signed with your Apple Developer membership, which MusicKit needs."
   echo
   explain "This goes one step at a time. It shows each command before running it, and asks before it changes anything. Run it again whenever you like: what's done is checked and skipped."
 }
@@ -302,30 +303,14 @@ step_requirements() {
   local need=() t
   for t in xcodegen icecast; do (( $+commands[$t] )) || need+=($t); done
   if (( $#need )); then
-    explain "From Homebrew: xcodegen makes the Xcode project, and Icecast serves the stream (lossless FLAC) to your tailnet."
+    explain "From Homebrew: xcodegen makes the Xcode project, and Icecast serves the stream (lossless FLAC) to your network."
     confirm "Install ${(j:, :)need} with Homebrew?" || { bad "The bridge needs them."; stopped; }
     run brew install $need || stopped
     rehash
     changed=true
   fi
   ok "xcodegen and Icecast are installed"
-
-  # Tailscale: the bridge serves only on its address (and loopback).
-  local addr
-  addr=$(tailnet_address)
-  if [[ -z $addr ]]; then
-    explain "The bridge serves only on Tailscale, never your LAN. This Mac needs Tailscale, running and logged in to the same tailnet as your Omarchy machine."
-    if [[ -d /Applications/Tailscale.app ]]; then
-      confirm "Open Tailscale?" && run open -a Tailscale
-    else
-      confirm "Open Tailscale's download page?" && run open https://tailscale.com/download/mac
-    fi
-    wait_until "Waiting for Tailscale… (Ctrl-C to stop)" 900 tailnet_address_set || { bad "No Tailscale address on this Mac yet."; stopped; }
-    addr=$(tailnet_address)
-  fi
-  ok "Tailscale: this Mac is $addr"
 }
-tailnet_address_set() { [[ -n $(tailnet_address) ]]; }
 
 # ---- 2. The bundle ID ----
 
@@ -506,15 +491,70 @@ step_health() {
   fi
 }
 
-# ---- 5. The Omarchy machine ----
+# ---- 5. The network ----
+
+firewall=/usr/libexec/ApplicationFirewall/socketfilterfw
+firewall_lists() { $firewall --listapps 2>/dev/null | grep -qF -- " : $1"; }
+firewall_blocks() { [[ $($firewall --getappblocked "$1" 2>/dev/null) == *blocked* ]]; }
+
+step_network() {
+  step "The network"
+  local name=$(bonjour_name) host=$(config_value listenHost)
+  explain "The bridge serves on every network this Mac is on: your home network, and Tailscale's if it runs.${host:+ (Here only on $host, the listenHost in config.json.)} It's plain HTTP: the token, the replies and the stream cross the network unencrypted, so anyone on it could listen in or take the token. Use a network you trust, or Tailscale, which encrypts it."
+
+  # Bonjour is how your Omarchy machine finds this Mac by itself. macOS's Local Network
+  # privacy covers advertising it (not the connections), so it asks once.
+  if [[ -n $host ]]; then
+    note "it doesn't announce itself with a listenHost: omarock needs the address, $host"
+  else
+    if ! health_is bonjour advertised && ! wait_until "Checking Local Network access…" 10 health_is bonjour advertised; then
+      explain "macOS asks whether omarock bridge may find devices on local networks: click Allow. That lets your Omarchy machine find this Mac by itself. The bridge works without it, but then omarock needs this Mac's name, $name."
+      if health_is bonjour denied; then
+        explain "It was turned down: switch omarock bridge on in System Settings, Privacy & Security, Local Network."
+        pane "Local Network" "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"
+      fi
+      wait_until "Waiting for Local Network access… (Ctrl-C to skip)" 300 health_is bonjour advertised
+    fi
+    if health_is bonjour advertised; then ok "it announces itself on the network, as $name"
+    else note "it doesn't announce itself yet (Local Network access): omarock needs this Mac's name, $name"
+    fi
+  fi
+
+  # The application firewall, if it's on, must let both take connections: Icecast, from
+  # Homebrew, isn't signed, so macOS won't let it through by itself.
+  [[ $($firewall --getglobalstate 2>/dev/null) == *enabled* ]] || { ok "the firewall is off, so nothing blocks the bridge"; return; }
+  if [[ $($firewall --getblockall 2>/dev/null) == *enabled* ]]; then
+    bad "the firewall blocks all incoming connections, so your Omarchy machine can't reach the bridge"
+    explain "Switch off \"Block all incoming connections\" in System Settings, Network, Firewall, Options, then run ./install again."
+    return
+  fi
+  local ice=${commands[icecast]:A} need=() p
+  for p in $app $ice; do firewall_lists $p && ! firewall_blocks $p || need+=($p); done
+  if (( $#need )); then
+    explain "The firewall is on. The bridge (port 8710) and Icecast (port 8000) need to accept connections from your network: otherwise macOS asks about each the first time, or blocks Icecast. After Homebrew upgrades Icecast, run ./install again to let the new one through."
+    if confirm "Let ${(j: and :)${need:t}} through the firewall (sudo socketfilterfw)?"; then
+      for p in $need; do
+        run sudo $firewall --add $p >/dev/null && run sudo $firewall --unblockapp $p >/dev/null || bad "couldn't add $p"
+      done
+      changed=true
+    fi
+  fi
+  need=()
+  for p in $app $ice; do firewall_lists $p && ! firewall_blocks $p || need+=($p); done
+  if (( $#need )); then
+    bad "the firewall may block ${(j: and :)${need:t}}: allow them in System Settings, Network, Firewall, Options"
+  else
+    ok "the firewall lets the bridge and Icecast through"
+  fi
+}
+
+# ---- 6. The Omarchy machine ----
 
 step_handoff() {
   step "Your Omarchy machine"
-  local url stream token=$support/token
-  url=$(bridge_url)
-  stream=$(health_value stream)
-  ok "the bridge: $url"
-  ok "the stream: ${stream:-${url%:*}:8000/omarock.ogg}"
+  local token=$support/token name=$(bonjour_name) ts=$(tailnet_name) host=$(config_value listenHost) port=${$(config_value port):-8710}
+  ok "the bridge: http://${host:-$name}:$port"
+  ok "the stream: port 8000, at an address that only the token gives"
   if private_ok "$token"; then
     ok "the token: ${token/#$HOME/~} (only you can read it)"
   else
@@ -522,7 +562,11 @@ step_handoff() {
     return
   fi
   echo
-  explain "Now run ./install on your Omarchy machine and pick Apple Music. It finds this Mac (${$(tailnet_name):-$(tailnet_address)}) among your Tailscale machines, then asks for the bridge's token: paste it, or let it copy the token with scp."
+  if [[ -n $host ]]; then
+    explain "Now run ./install on your Omarchy machine and pick Apple Music. Give it this Mac as $host, then the bridge's token: paste it, or let it copy the token with scp."
+  else
+    explain "Now run ./install on your Omarchy machine and pick Apple Music. It finds this Mac on your network as $name${ts:+, or on Tailscale as $ts}, then asks for the bridge's token: paste it, or let it copy the token with scp."
+  fi
   if nc -z -G 2 127.0.0.1 22 >/dev/null 2>&1; then
     ok "Remote Login is on, so scp can fetch the token"
   else
@@ -536,16 +580,17 @@ step_handoff() {
 
 # ---- ./install --uninstall ----
 
-# Listeners on the bridge's Icecast mount, from its admin stats (0 if Icecast
-# isn't up). The admin password goes to curl on stdin.
+# Listeners on the bridge's Icecast mount, from its admin list (0 if Icecast isn't
+# up): /omarock.ogg before 0.9.0, /omarock-SECRET.ogg from then on. The admin
+# password goes to curl on stdin.
 listeners() {
   local conf=$support/icecast.xml user pass
   [[ -f $conf ]] || { print 0; return; }
   user=$(sed -n 's:.*<admin-user>\(.*\)</admin-user>.*:\1:p' "$conf")
   pass=$(sed -n 's:.*<admin-password>\(.*\)</admin-password>.*:\1:p' "$conf")
   print -r -- "user = \"$user:$pass\"" \
-    | curl -s -m 5 -K - 'http://127.0.0.1:8000/admin/listclients?mount=/omarock.ogg' \
-    | sed -n 's:.*<Listeners>\([0-9]*\)</Listeners>.*:\1:p' | head -1
+    | curl -s -m 5 -K - 'http://127.0.0.1:8000/admin/listmounts' \
+    | xmllint --xpath 'string(//source[starts-with(@mount,"/omarock")]/listeners)' - 2>/dev/null
 }
 # The bridge's Icecast: it can outlive a bridge, so by its config.
 icecast_pattern() { print -r -- "icecast -c $support/icecast.xml"; }
@@ -653,6 +698,7 @@ main() {
   step_appid
   step_build
   step_health
+  step_network
   step_handoff
   echo
 }

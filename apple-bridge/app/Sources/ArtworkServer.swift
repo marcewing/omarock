@@ -11,8 +11,11 @@ import SwiftUI
 /// k = the first 16 hex digits of HMAC-SHA256(token, "{source}/{kind}/{id}").
 @MainActor
 final class ArtworkServer {
+    /// Templates start with this. API puts http://{the request's Host} in its place as it
+    /// answers, so each URL works by whichever name or address that client used.
+    nonisolated static let base = "http://omarock-bridge.invalid"
+
     private let key: SymmetricKey
-    private let base: String
     private let cache = Paths.support.appendingPathComponent("artwork-cache")
     /// Every Artwork handed out as a bridge URL, so /v1/artwork can draw it without asking
     /// Apple for the item again (catalog lookups need the developer token). Bounded.
@@ -20,9 +23,8 @@ final class ArtworkServer {
     private nonisolated(unsafe) var knownOrder: [String] = []
     private nonisolated(unsafe) var knownLock = os_unfair_lock()
 
-    init(token: String, base: String) {
+    init(token: String) {
         key = SymmetricKey(data: Data(token.utf8))
-        self.base = base
         try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
     }
 
@@ -48,7 +50,7 @@ final class ArtworkServer {
     nonisolated func template(source: Source, kind: String, id: String) -> String {
         let path = "\(source.rawValue)/\(kind)/\(id)"
         let escaped = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
-        return "\(base)/v1/artwork/\(source.rawValue)/\(kind)/\(escaped)?w={w}&h={h}&k=\(Self.sign(path, key))"
+        return "\(Self.base)/v1/artwork/\(source.rawValue)/\(kind)/\(escaped)?w={w}&h={h}&k=\(Self.sign(path, key))"
     }
 
     /// Whether `k` is the key for this artwork; checked before anything else.

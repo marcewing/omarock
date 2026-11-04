@@ -1,5 +1,5 @@
 // The omarock bridge: an agent app (no Dock icon) that serves apple-bridge/API.md on the
-// tailnet and streams its own playback to Icecast. See apple-bridge/API.md.
+// Mac's networks and streams its own playback to Icecast. See apple-bridge/API.md.
 
 import AppKit
 
@@ -13,25 +13,27 @@ if CommandLine.arguments.dropFirst().first == "--unregister" {
 }
 
 // `OmarockBridge --encode RATE [MOUNT]`: the stream's FLAC encoder, PCM in and Ogg FLAC out
-// to Icecast's MOUNT (/omarock.ogg; StreamService runs it), or to stdout for `-`.
+// to Icecast's MOUNT (the stream's, Secrets.streamMount, if none; StreamService runs it),
+// or to stdout for `-`.
 if CommandLine.arguments.dropFirst().first == "--encode" {
     let args = Array(CommandLine.arguments.dropFirst(2))
-    exit(FlacEncoder.run(sampleRate: UInt32(args.first ?? "") ?? 48000, mount: args.dropFirst().first ?? "/omarock.ogg"))
+    guard let mount = args.dropFirst().first ?? (try? Secrets.streamMount()) else {
+        FileHandle.standardError.write(Data("cannot read the token for the stream's mount\n".utf8))
+        exit(1)
+    }
+    exit(FlacEncoder.run(sampleRate: UInt32(args.first ?? "") ?? 48000, mount: mount))
 }
 
 // `OmarockBridge --setup`: make the token, Icecast's passwords and config, print what the
 // Linux side needs as JSON, and exit. Touches nothing that asks for permission (build.sh
-// runs it).
+// runs it). The stream's address isn't there: /v1/health gives it to token holders.
 if CommandLine.arguments.dropFirst().first == "--setup" {
     do {
         let config = try Config.load()
-        guard let host = config.host else {
-            FileHandle.standardError.write(Data("No Tailscale address on this Mac: is Tailscale running and logged in?\n".utf8))
-            exit(2)
-        }
         _ = try Secrets.token()
-        try IcecastConfig.prepare(host: host, icecast: config.icecast)
-        let info: [String: Any] = ["bridge": "http://\(host):\(config.port)", "stream": config.stream(host: host),
+        try IcecastConfig.prepare(listenHost: config.listenHost, icecast: config.icecast)
+        let host = config.listenHost ?? LocalName.bonjour() ?? "localhost"
+        let info: [String: Any] = ["bridge": "http://\(host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host):\(config.port)",
                                    "token": Paths.token.path, "support": Paths.support.path]
         let json = try JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         FileHandle.standardOutput.write(json + Data("\n".utf8))
@@ -68,14 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
 
-        startWhenOnTailnet()
+        start()
     }
 
-    private var waitingLogged = false
-
-    /// Serves only on the tailnet, so waits for Tailscale's address (at login it can come
-    /// up after the bridge).
-    @MainActor private func startWhenOnTailnet() {
+    @MainActor private func start() {
         let config: Config
         do {
             config = try Config.load()
@@ -83,14 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.error("startup failed: cannot read \(Paths.config.path): \(error)")
             return NSApp.terminate(nil)
         }
-        guard let host = config.host else {
-            if !waitingLogged { Log.info("waiting for a Tailscale address (100.64.0.0/10) to serve on") }
-            waitingLogged = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.startWhenOnTailnet() }
-            return
-        }
         do {
-            let bridge = try Bridge(config: config, host: host)
+            let bridge = try Bridge(config: config)
             bridge.start()
             self.bridge = bridge
         } catch {

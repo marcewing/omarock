@@ -14,7 +14,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: 0.8.1
+    MARKETING_VERSION: 0.9.0
     CURRENT_PROJECT_VERSION: 1
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: Apple Development
@@ -59,7 +59,10 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSUIElement: true
         NSAppleMusicUsageDescription: The omarock bridge plays and browses your Apple Music library for omarock on your Linux desktop.
-        NSAudioCaptureUsageDescription: The omarock bridge streams its own Apple Music playback to omarock over your tailnet.
+        NSAudioCaptureUsageDescription: The omarock bridge streams its own Apple Music playback to omarock over your network.
+        NSLocalNetworkUsageDescription: The omarock bridge announces itself on your network, so omarock on your Omarchy machine can find it.
+        NSBonjourServices:
+          - _omarock._tcp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(OMAROCK_BUNDLE_ID)

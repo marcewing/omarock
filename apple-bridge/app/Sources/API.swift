@@ -8,17 +8,19 @@ final class API {
 
     private let token: Data
     private let config: Config
-    private let streamURL: String
+    private let mount: String
+    private let bonjour: Bonjour
     private let music: MusicStatus
     private let library: MusicService
     private let stream: StreamService
     private let player: Player
     private let artwork: ArtworkServer
 
-    init(token: String, config: Config, streamURL: String, music: MusicStatus, library: MusicService, stream: StreamService,
-         player: Player, artwork: ArtworkServer) {
+    init(token: String, config: Config, mount: String, bonjour: Bonjour, music: MusicStatus, library: MusicService,
+         stream: StreamService, player: Player, artwork: ArtworkServer) {
         self.token = Data(token.utf8)
-        self.streamURL = streamURL
+        self.mount = mount
+        self.bonjour = bonjour
         self.artwork = artwork
         self.config = config
         self.music = music
@@ -40,7 +42,7 @@ final class API {
                 answered = true
                 let elapsed = Date().timeIntervalSince(started)
                 if elapsed > 2 { Log.info("slow: \(request.method) \(request.path) took \(String(format: "%.1f", elapsed)) s (\(response.status))") }
-                respond(response)
+                respond(Self.addressed(response, to: request))
             }
             let work = Task { @MainActor in
                 do {
@@ -73,7 +75,7 @@ final class API {
 
         if route == ["health"] {
             guard method == "GET" else { throw APIError(status: 405, message: "Use GET.") }
-            return respond(.json(200, health()))
+            return respond(.json(200, health(request)))
         }
         if method == "GET", route.count == 4, route[0] == "artwork" {
             // Keyed by k in the URL, not the bearer token (see apple-bridge/API.md, Objects).
@@ -103,7 +105,7 @@ final class API {
                 LibraryIndex.shared.startMembership()
             }
             Log.info("MusicKit authorization: \(status)")
-            return respond(.json(200, health()))
+            return respond(.json(200, health(request)))
         default:
             break
         }
@@ -238,14 +240,17 @@ final class API {
         respond(.json(200, player.snapshot(for: client)))
     }
 
-    private func health() -> [String: Any] {
+    /// `stream` only for the right token: its address is the secret that keeps the stream
+    /// to token holders. Built from the request's Host, so it works by the name used.
+    private func health(_ request: HTTPRequest) -> [String: Any] {
         var health: [String: Any] = [
             "ok": true,
             "version": Self.version,
             "authorized": music.authorized,
             "musicAuthorization": music.authorizationName,
             "canPlayCatalog": music.canPlayCatalog,
-            "stream": streamURL,
+            // Diagnostics: advertised, waiting, denied (Local Network), failed, or off.
+            "bonjour": bonjour.state,
             "capturing": stream.capturing,
             "encoding": stream.encoderRunning,
             // libFLAC's limit_min_bitrate: silence streams at about 6 KB/s (StreamService).
@@ -254,7 +259,17 @@ final class API {
             "streamDelay": (stream.delay * 1000).rounded() / 1000,
         ]
         if let storefront = music.storefront { health["storefront"] = storefront }
+        if authorized(request) { health["stream"] = config.streamURL ?? "http://\(request.host):8000\(mount)" }
         return health
+    }
+
+    /// Artwork URLs are made with a stand-in base (ArtworkServer.base); a reply gets the
+    /// request's own, http://{Host}.
+    private static func addressed(_ response: HTTPResponse, to request: HTTPRequest) -> HTTPResponse {
+        guard response.contentType.hasPrefix("application/json") else { return response }
+        var response = response
+        response.body = response.body.replacing(Data(ArtworkServer.base.utf8), with: Data("http://\(request.authority)".utf8))
+        return response
     }
 
     // MARK: Request helpers
@@ -312,21 +327,25 @@ final class Bridge {
     private let listeners: ListenerWatch
     private let stream: StreamService
     private let server: HTTPServer
+    private let bonjour: Bonjour
 
-    /// `host`: the address to serve on (the Mac's Tailscale address, or config's listenHost).
-    init(config: Config, host: String) throws {
+    /// Serves on every address, or on config's listenHost and loopback.
+    init(config: Config) throws {
         try FileManager.default.createDirectory(at: Paths.logs, withIntermediateDirectories: true)
         self.config = config
         let token = try Secrets.token()
-        try IcecastConfig.prepare(host: host, icecast: config.icecast)
+        try IcecastConfig.prepare(listenHost: config.listenHost, icecast: config.icecast)
         stream = try StreamService(config: config)
         listeners = ListenerWatch(player: player) { [player] in player.pause() }
         player.ensureMuted = { [stream] in await stream.waitUntilPlaybackIsTapped() }
-        let artwork = ArtworkServer(token: token, base: "http://\(host):\(config.port)")
+        let artwork = ArtworkServer(token: token)
         Normalize.artworkServer = artwork
-        let api = API(token: token, config: config, streamURL: config.stream(host: host), music: music, library: library,
-                      stream: stream, player: player, artwork: artwork)
-        server = HTTPServer(host: host, port: config.port) { request, respond in
+        // A listenHost is set up by hand, so it isn't advertised: the Bonjour name might not reach it.
+        bonjour = Bonjour(port: config.port, version: API.version, enabled: config.listenHost == nil)
+        let api = API(token: token, config: config, mount: try Secrets.streamMount(), bonjour: bonjour, music: music,
+                      library: library, stream: stream, player: player, artwork: artwork)
+        let hosts = config.listenHost.map { $0 == "127.0.0.1" ? [$0] : [$0, "127.0.0.1"] } ?? []
+        server = HTTPServer(hosts: hosts, port: config.port) { request, respond in
             api.handle(request, respond: respond)
         }
     }
@@ -354,9 +373,11 @@ final class Bridge {
         listeners.start()
         stream.start()
         server.start()
+        bonjour.start()
     }
 
     func stop() {
+        bonjour.stop()
         server.stop()
         stream.stop()
     }

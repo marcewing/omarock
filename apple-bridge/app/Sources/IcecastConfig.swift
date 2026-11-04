@@ -1,31 +1,44 @@
 import Foundation
 
-/// The Icecast config the bridge runs its Icecast with: the stream on the tailnet address
-/// and loopback only, near-live limits, and passwords made on first launch.
+/// The Icecast config the bridge runs its Icecast with: the stream on every address (or
+/// listenHost and loopback), at a mount only token holders can name, near-live limits, and
+/// passwords made on first launch. Its web root is an empty folder, so port 8000 serves
+/// the mount and nothing else (the admin pages need the admin password).
 ///
-/// It's rewritten at every launch, so it follows the tailnet address, unless someone
+/// It's rewritten at every launch, so it follows the token and listenHost, unless someone
 /// took the marker line out to keep their own edits.
 enum IcecastConfig {
     static let marker = "<!-- Written by the omarock bridge at each launch. Delete this line to keep your own edits. -->"
 
-    /// Writes icecast.xml for `host` (and the passwords it needs), unless it's the user's own.
-    static func prepare(host: String, icecast: String) throws {
+    /// Writes icecast.xml (and the passwords it needs), unless it's the user's own. An
+    /// unchanged file is left alone, so its date says when it last changed (StreamService
+    /// restarts an Icecast older than that).
+    static func prepare(listenHost: String?, icecast: String) throws {
         let source = try Secrets.sourcePassword()
         let admin = try Secrets.adminPassword()
         let relay = try Secrets.relayPassword()
-        if let existing = try? String(contentsOf: Paths.icecastConfig, encoding: .utf8), !existing.contains(marker) {
-            return
-        }
+        let mount = try Secrets.streamMount()
+        let existing = try? String(contentsOf: Paths.icecastConfig, encoding: .utf8)
+        if let existing, !existing.contains(marker) { return }
         try FileManager.default.createDirectory(at: Paths.logs, withIntermediateDirectories: true)
-        // Homebrew's web and admin pages: {prefix}/bin/icecast → {prefix}/share/icecast.
+        try FileManager.default.createDirectory(at: Paths.icecastWeb, withIntermediateDirectories: true)
+        // Homebrew's admin pages: {prefix}/bin/icecast → {prefix}/share/icecast.
         let share = URL(fileURLWithPath: icecast).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("share/icecast").path
+        // Every address: no bind-address gives one dual-stack socket, IPv4 and IPv6.
+        let sockets = (listenHost.map { [$0, "127.0.0.1"] } ?? [nil]).map { host in
+            """
+                <listen-socket>
+                    <port>8000</port>\(host.map { "\n        <bind-address>\(escape($0))</bind-address>" } ?? "")
+                </listen-socket>
+            """
+        }.joined(separator: "\n")
         let xml = """
         <icecast>
             \(marker)
             <location>omarock bridge</location>
             <admin>omarock bridge</admin>
-            <hostname>\(escape(host))</hostname>
+            <hostname>\(escape(listenHost ?? LocalName.bonjour() ?? "localhost"))</hostname>
 
             <limits>
                 <clients>8</clients>
@@ -47,18 +60,11 @@ enum IcecastConfig {
                 <admin-password>\(admin)</admin-password>
             </authentication>
 
-            <!-- Tailnet and loopback only; never a wildcard bind. -->
-            <listen-socket>
-                <port>8000</port>
-                <bind-address>\(escape(host))</bind-address>
-            </listen-socket>
-            <listen-socket>
-                <port>8000</port>
-                <bind-address>127.0.0.1</bind-address>
-            </listen-socket>
+            <!-- Every address, unless config.json's listenHost: plain HTTP, so a trusted network. -->
+        \(sockets)
 
             <mount type="normal">
-                <mount-name>/omarock.ogg</mount-name>
+                <mount-name>\(mount)</mount-name>
                 <hidden>1</hidden>
                 <public>0</public>
                 <burst-size>0</burst-size>
@@ -70,9 +76,9 @@ enum IcecastConfig {
             <paths>
                 <basedir>\(escape(Paths.support.path))</basedir>
                 <logdir>\(escape(Paths.logs.path))</logdir>
-                <webroot>\(escape(share))/web</webroot>
+                <webroot>\(escape(Paths.icecastWeb.path))</webroot>
                 <adminroot>\(escape(share))/admin</adminroot>
-                <pidfile>\(escape(Paths.support.appendingPathComponent("icecast.pid").path))</pidfile>
+                <pidfile>\(escape(Paths.icecastPid.path))</pidfile>
             </paths>
 
             <logging>
@@ -89,6 +95,7 @@ enum IcecastConfig {
         </icecast>
 
         """
+        guard xml != existing else { return }
         try Secrets.writePrivate(xml, to: Paths.icecastConfig)
     }
 

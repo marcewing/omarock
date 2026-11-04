@@ -1,5 +1,7 @@
+import CryptoKit
 import Foundation
 import Security
+import SystemConfiguration
 
 /// ~/Library/Application Support/omarock-bridge: config, secrets and logs. Never in the repo.
 /// $OMAROCK_BRIDGE_SUPPORT points a test copy (`--setup`) somewhere else.
@@ -14,6 +16,9 @@ enum Paths {
     static let config = support.appendingPathComponent("config.json")
     static let token = support.appendingPathComponent("token")
     static let icecastConfig = support.appendingPathComponent("icecast.xml")
+    /// Icecast's web root: empty, so it serves no pages.
+    static let icecastWeb = support.appendingPathComponent("icecast-web")
+    static let icecastPid = support.appendingPathComponent("icecast.pid")
     static let sourcePassword = support.appendingPathComponent("source.password")
     static let adminPassword = support.appendingPathComponent("admin.password")
     static let relayPassword = support.appendingPathComponent("relay.password")
@@ -26,10 +31,10 @@ struct Config: Decodable {
     var tapPid: Int32?
     /// Tap this app instead of the bridge's own playback (testing).
     var tapBundle: String?
-    /// The address the API and Icecast listen on; nil: the Mac's Tailscale address.
+    /// The one address the API and Icecast listen on (with loopback); nil: every address.
     var listenHost: String?
     var port: UInt16 = 8710
-    /// The stream URL /health hands out; nil: http://{listenHost}:8000/omarock.ogg.
+    /// The stream URL /health hands out to token holders; nil: built from the request's Host.
     var streamURL: String?
     var icecast = Config.homebrew("icecast")
     /// Run as a launch agent: started at login, restarted after a crash.
@@ -57,11 +62,6 @@ struct Config: Decodable {
         return try JSONDecoder().decode(Config.self, from: data)
     }
 
-    /// The address to listen on: listenHost, else the Tailscale address (nil until it's up).
-    var host: String? { listenHost ?? Tailnet.address() }
-
-    func stream(host: String) -> String { streamURL ?? "http://\(host):8000/omarock.ogg" }
-
     /// A Homebrew tool, on Apple silicon (/opt/homebrew) or Intel (/usr/local). launchd's
     /// PATH has neither, so look in both.
     static func homebrew(_ tool: String) -> String {
@@ -70,26 +70,12 @@ struct Config: Decodable {
     }
 }
 
-/// The Mac's address on the tailnet, so nothing listens anywhere else.
-enum Tailnet {
-    /// The first IPv4 address in Tailscale's range, 100.64.0.0/10, preferring a utun
-    /// interface (where Tailscale puts it); nil while Tailscale is down.
-    static func address() -> String? {
-        var list: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&list) == 0 else { return nil }
-        defer { freeifaddrs(list) }
-        var found: [(name: String, address: String)] = []
-        var next = list
-        while let entry = next {
-            defer { next = entry.pointee.ifa_next }
-            guard let sa = entry.pointee.ifa_addr, sa.pointee.sa_family == sa_family_t(AF_INET) else { continue }
-            var address = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
-            guard UInt32(bigEndian: address.s_addr) & 0xFFC0_0000 == 0x6440_0000 else { continue }
-            var text = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-            guard inet_ntop(AF_INET, &address, &text, socklen_t(text.count)) != nil else { continue }
-            found.append((String(cString: entry.pointee.ifa_name), String(cString: text)))
-        }
-        return (found.first { $0.name.hasPrefix("utun") } ?? found.first)?.address
+/// The Mac's names on the network.
+enum LocalName {
+    /// Its Bonjour host name ("my-mac.local"), from the computer's Local Hostname.
+    static func bonjour() -> String? {
+        guard let name = SCDynamicStoreCopyLocalHostName(nil) as String?, !name.isEmpty else { return nil }
+        return name + ".local"
     }
 }
 
@@ -103,6 +89,13 @@ enum Secrets {
     static func sourcePassword() throws -> String { try secret(Paths.sourcePassword, bytes: 16) }
     static func adminPassword() throws -> String { try secret(Paths.adminPassword, bytes: 16) }
     static func relayPassword() throws -> String { try secret(Paths.relayPassword, bytes: 16) }
+
+    /// The stream's Icecast mount, /omarock-SECRET.ogg: SECRET is the first 32 hex digits of
+    /// HMAC-SHA256(token, "stream"), so only token holders can find it (apple-bridge/API.md).
+    static func streamMount() throws -> String {
+        let mac = HMAC<SHA256>.authenticationCode(for: Data("stream".utf8), using: SymmetricKey(data: Data(try token().utf8)))
+        return "/omarock-" + mac.map { String(format: "%02x", $0) }.joined().prefix(32) + ".ogg"
+    }
 
     private static func secret(_ url: URL, bytes count: Int) throws -> String {
         if let existing = try? String(contentsOf: url, encoding: .utf8)

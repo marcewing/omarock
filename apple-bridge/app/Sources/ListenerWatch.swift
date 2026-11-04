@@ -3,7 +3,7 @@ import Foundation
 /// Pauses playback when the Icecast mount has had no listener for 30 s while playing,
 /// so the Mac doesn't stream Apple Music for nobody.
 ///
-/// The mount is hidden, so status-json.xsl leaves it out; /admin/stats (admin password)
+/// The mount is hidden (and Icecast serves no status pages); /admin/stats (admin password)
 /// still reports its listeners.
 @MainActor
 final class ListenerWatch {
@@ -54,8 +54,9 @@ final class ListenerWatch {
         request.setValue("Basic " + Data("admin:\(password)".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
         guard let (data, _) = try? await URLSession.shared.data(for: request),
               let xml = String(data: data, encoding: .utf8) else { return nil }
-        // <source mount="/omarock.ogg">…<listeners>N</listeners>…</source>
-        guard let mount = xml.range(of: "<source mount=\"/omarock.ogg\">") else { return 0 }  // no source: nobody hears it
+        // <source mount="/omarock-SECRET.ogg">…<listeners>N</listeners>…</source>
+        guard let name = try? Secrets.streamMount() else { return nil }
+        guard let mount = xml.range(of: "<source mount=\"\(name)\">") else { return 0 }  // no source: nobody hears it
         let rest = xml[mount.upperBound...]
         let end = rest.range(of: "</source>")?.lowerBound ?? rest.endIndex
         let source = rest[..<end]

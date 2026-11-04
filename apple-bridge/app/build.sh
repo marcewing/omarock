@@ -45,14 +45,15 @@ timed() {
   return $st
 }
 
-# Listeners on the bridge's Icecast mount, from its admin stats (0 if Icecast isn't up).
+# Listeners on the bridge's Icecast mount, from its admin list (0 if Icecast isn't up). The
+# mount is /omarock.ogg before 0.9.0, /omarock-SECRET.ogg from then on.
 listeners() {
   local conf=$support/icecast.xml user pass
   [[ -f $conf ]] || { print 0; return; }
   user=$(sed -n 's:.*<admin-user>\(.*\)</admin-user>.*:\1:p' $conf)
   pass=$(sed -n 's:.*<admin-password>\(.*\)</admin-password>.*:\1:p' $conf)
-  curl -s -m 5 -K - 'http://127.0.0.1:8000/admin/listclients?mount=/omarock.ogg' <<<"user = \"$user:$pass\"" \
-    | sed -n 's:.*<Listeners>\([0-9]*\)</Listeners>.*:\1:p' | head -1
+  curl -s -m 5 -K - 'http://127.0.0.1:8000/admin/listmounts' <<<"user = \"$user:$pass\"" \
+    | xmllint --xpath 'string(//source[starts-with(@mount,"/omarock")]/listeners)' - 2>/dev/null
 }
 
 # Forgets the installed app's launch agent through SMAppService, which stops it too: a
@@ -121,8 +122,6 @@ for tool in xcodegen icecast; do
 done
 security find-identity -v -p codesigning 2>/dev/null | grep -q '"Apple Development' \
   || problems+="an Apple Development certificate: Xcode → Settings → Accounts → your team → Manage Certificates → +"
-ifconfig | grep -qE 'inet 100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.' \
-  || problems+="Tailscale, running and logged in (no 100.64.0.0/10 address on this Mac)"
 if (( ${#problems} )); then
   print "The bridge needs:"
   for p in $problems; print "  - $p"
@@ -173,7 +172,7 @@ signed=$(codesign -dv "$built" 2>&1 || true)
 print "  ${green}✓${reset} built in $(clock $start), signed as $(sed -n 's/^Identifier=//p' <<<$signed)" \
   "(team $(sed -n 's/^TeamIdentifier=//p' <<<$signed))"
 
-# 4. Token, Icecast's passwords and config, and the addresses
+# 4. Token, Icecast's passwords and config, and the bridge's address
 info=$("$built/Contents/MacOS/OmarockBridge" --setup)
 field() { sed -n "s/^ *\"$1\" *: *\"\(.*\)\".*/\1/p" <<<"$info"; }
 
@@ -226,9 +225,9 @@ cat <<EOF
 
 On the Linux machine (omarock):
   mkdir -p ~/.config/omarock
-  echo '{ "bridge": "$(field bridge)", "stream": "$(field stream)" }' > ~/.config/omarock/apple.json
+  echo '{ "bridge": "$(field bridge)" }' > ~/.config/omarock/apple.json
   scp $(whoami)@$(field bridge | sed -E 's#^https?://##; s#:[0-9]+$##'):'$(field token)' ~/.config/omarock/bridge-token
   chmod 600 ~/.config/omarock/bridge-token
 (or copy the token file by hand), then switch Apple Music on in omarock's settings. The first time the bridge runs, the Mac asks for
-Apple Music access and for audio capture: allow both.
+Apple Music access, audio capture and Local Network access: allow all three.
 EOF

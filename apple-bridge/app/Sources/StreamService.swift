@@ -2,7 +2,7 @@ import AppKit
 import ProcessTap
 
 /// The sound path: tap → PCMWriter → pipe → `OmarockBridge --encode` (libFLAC, Ogg FLAC;
-/// see FlacEncoder), which is Icecast's source for /omarock.ogg.
+/// see FlacEncoder), which is Icecast's source for the stream's mount (Secrets.streamMount).
 ///
 /// The pipe outlives the encoder: we keep its read end open too, so when the encoder exits
 /// the writer just blocks (the tap side drops audio) instead of failing with EPIPE, and the
@@ -20,9 +20,11 @@ final class StreamService {
     private var encoder: Process?
     private var icecast: Process?
     private var stopping = false
+    private let mount: String
 
     init(config: Config) throws {
         self.config = config
+        mount = try Secrets.streamMount()
         sampleRate = try CoreAudio.nominalSampleRate(CoreAudio.defaultOutputDevice())
         var fds: [Int32] = [0, 0]
         guard Darwin.pipe(&fds) == 0 else { throw BridgeError("pipe() failed: \(String(cString: strerror(errno)))") }
@@ -112,7 +114,15 @@ final class StreamService {
 
     private func startIcecastIfNeeded(then next: @escaping () -> Void) {
         icecastAnswers { [self] up in
-            if up {
+            if up, let pid = staleIcecast() {
+                // Say, one that outlived a bridge before 0.9.0, still on the old addresses and mount.
+                Log.info("icecast: pid \(pid) started before icecast.xml last changed; restarting it")
+                kill(pid, SIGTERM)
+                waitForIcecastToGo { [self] in
+                    launchIcecast()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: next)
+                }
+            } else if up {
                 Log.info("icecast: already running on 127.0.0.1:8000, using it")
                 // Icecast only notices a dead source (say, ours before a restart) at its
                 // source-timeout, and refuses a new one until then; the mount is ours, so clear it.
@@ -148,26 +158,51 @@ final class StreamService {
         }
     }
 
+    /// The Icecast on our icecast.xml (by its pid file), if it started before the file's
+    /// last change and so runs on an older one.
+    private func staleIcecast() -> pid_t? {
+        guard let text = try? String(contentsOf: Paths.icecastPid, encoding: .utf8),
+              let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1,
+              let written = (try? FileManager.default.attributesOfItem(atPath: Paths.icecastConfig.path))?[.modificationDate] as? Date
+        else { return nil }
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0,
+              URL(fileURLWithPath: String(cString: path)).lastPathComponent == "icecast",
+              proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        let started = Date(timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1e6)
+        return started < written ? pid : nil
+    }
+
+    private func waitForIcecastToGo(tries: Int = 50, then next: @escaping () -> Void) {
+        icecastAnswers { [self] up in
+            guard up, tries > 0 else { return next() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.waitForIcecastToGo(tries: tries - 1, then: next) }
+        }
+    }
+
     private func killStaleSource(then next: @escaping () -> Void) {
         guard let password = try? String(contentsOf: Paths.adminPassword, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines) else { return next() }
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:8000/admin/killsource?mount=/omarock.ogg")!)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:8000/admin/killsource?mount=\(mount)")!)
         request.timeoutInterval = 2
         request.setValue("Basic " + Data("admin:\(password)".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
         URLSession.shared.dataTask(with: request) { data, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             // 200 with "Source Removed" if there was one; 400 if the mount was free.
-            if status == 200, body.contains("Removed") { Log.info("icecast: removed a stale source from /omarock.ogg") }
+            if status == 200, body.contains("Removed") { Log.info("icecast: removed a stale source from the stream's mount") }
             DispatchQueue.main.async(execute: next)
         }.resume()
     }
 
+    /// Whether anything answers HTTP on 127.0.0.1:8000. Ours serves no pages, so any status.
     private func icecastAnswers(_ done: @escaping (Bool) -> Void) {
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:8000/status-json.xsl")!)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:8000/")!)
         request.timeoutInterval = 1
         URLSession.shared.dataTask(with: request) { _, response, _ in
-            let up = (response as? HTTPURLResponse)?.statusCode == 200
+            let up = response is HTTPURLResponse
             DispatchQueue.main.async { done(up) }
         }.resume()
     }
@@ -178,7 +213,9 @@ final class StreamService {
         guard !stopping, encoder?.isRunning != true else { return }
         let process = Process()
         process.executableURL = Bundle.main.executableURL
-        process.arguments = ["--encode", String(Int(sampleRate)), "/omarock.ogg"]
+        // No mount argument: the encoder works out the stream's mount itself, so its
+        // secret isn't on a command line that `ps` shows.
+        process.arguments = ["--encode", String(Int(sampleRate))]
         // Each encoder gets its own copy of the read end; Process may close it after launch.
         process.standardInput = FileHandle(fileDescriptor: dup(pipeRead), closeOnDealloc: true)
         process.standardOutput = logFile("encoder.log")

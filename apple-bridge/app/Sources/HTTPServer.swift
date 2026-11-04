@@ -8,6 +8,15 @@ struct HTTPRequest {
     /// Lowercased names.
     let headers: [String: String]
     let body: Data
+    /// How the client reached the bridge, "host:port": its Host header, or else the address
+    /// it connected to. URLs the bridge hands out are built from it (apple-bridge/API.md).
+    let authority: String
+
+    /// The authority's host, with an IPv6 address's brackets.
+    var host: String {
+        if authority.hasPrefix("["), let close = authority.firstIndex(of: "]") { return String(authority[...close]) }
+        return authority.split(separator: ":", maxSplits: 1).first.map(String.init) ?? authority
+    }
 }
 
 struct HTTPResponse {
@@ -26,8 +35,9 @@ struct HTTPResponse {
     }
 }
 
-/// A minimal HTTP/1.1 server on one local IPv4 address: one request per connection
-/// (Connection: close), bodies by Content-Length only. Enough for omarock and curl.
+/// A minimal HTTP/1.1 server: one request per connection (Connection: close), bodies by
+/// Content-Length only. Enough for omarock and curl. It listens on every address, IPv4 and
+/// IPv6, through one dual-stack socket, or on just the addresses it's given.
 ///
 /// Plain BSD sockets and GCD rather than NWListener: on macOS 27 an NWListener with a
 /// required local endpoint on the Tailscale interface accepts each flow and then fails
@@ -35,64 +45,79 @@ struct HTTPResponse {
 final class HTTPServer {
     typealias Handler = (HTTPRequest, @escaping (HTTPResponse) -> Void) -> Void
 
-    private let host: String
+    /// Empty: every address.
+    private let hosts: [String]
     private let port: UInt16
     private let queue: DispatchQueue
     private let handler: Handler
-    private var listenFD: Int32 = -1
-    private var acceptSource: DispatchSourceRead?
+    private var acceptSources: [DispatchSourceRead] = []
     private var stopped = false
 
-    init(host: String, port: UInt16, queue: DispatchQueue = .main, handler: @escaping Handler) {
-        self.host = host
+    init(hosts: [String], port: UInt16, queue: DispatchQueue = .main, handler: @escaping Handler) {
+        self.hosts = hosts
         self.port = port
         self.queue = queue
         self.handler = handler
     }
 
+    private var addresses: String {
+        hosts.isEmpty ? "every address, port \(port)" : hosts.map { "\($0.contains(":") ? "[\($0)]" : $0):\(port)" }.joined(separator: " and ")
+    }
+
     func start() {
         stopped = false
+        var fds: [Int32] = []
         do {
-            listenFD = try bindAndListen()
+            for host in hosts.isEmpty ? [nil] : hosts.map(Optional.some) { fds.append(try bindAndListen(host)) }
         } catch {
-            // Typically the tailnet address isn't up yet (Tailscale starting after login).
-            Log.error("cannot listen on \(host):\(port): \(error); retrying in 5 s")
+            // The port in use (a bridge that hasn't quite quit), or listenHost not up yet.
+            fds.forEach { close($0) }
+            Log.error("cannot listen on \(addresses): \(error); retrying in 5 s")
             queue.asyncAfter(deadline: .now() + 5) { [weak self] in
                 guard let self, !stopped else { return }
                 start()
             }
             return
         }
-        let source = DispatchSource.makeReadSource(fileDescriptor: listenFD, queue: queue)
-        source.setEventHandler { [weak self] in self?.acceptPending() }
-        source.setCancelHandler { [fd = listenFD] in close(fd) }
-        source.resume()
-        acceptSource = source
-        Log.info("API listening on http://\(host):\(port)")
+        for fd in fds {
+            let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+            source.setEventHandler { [weak self] in self?.acceptPending(fd) }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            acceptSources.append(source)
+        }
+        Log.info("API listening on \(addresses)")
     }
 
     func stop() {
         stopped = true
-        acceptSource?.cancel()
-        acceptSource = nil
-        listenFD = -1
+        acceptSources.forEach { $0.cancel() }
+        acceptSources = []
     }
 
-    private func bindAndListen() throws -> Int32 {
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = port.bigEndian
-        guard inet_pton(AF_INET, host, &address.sin_addr) == 1 else { throw BridgeError("\(host) is not an IPv4 address") }
+    /// `host` nil: IPv6's any address, with IPV6_V6ONLY off, so IPv4 too.
+    private func bindAndListen(_ host: String?) throws -> Int32 {
+        var hints = addrinfo()
+        hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV
+        hints.ai_family = host == nil ? AF_INET6 : AF_UNSPEC
+        hints.ai_socktype = SOCK_STREAM
+        var info: UnsafeMutablePointer<addrinfo>?
+        let numeric = host.map { $0.hasPrefix("[") && $0.hasSuffix("]") ? String($0.dropFirst().dropLast()) : $0 }
+        let status = getaddrinfo(numeric, String(port), &hints, &info)
+        guard status == 0, let address = info?.pointee else {
+            throw BridgeError("\(host ?? "::") is not an IP address (\(String(cString: gai_strerror(status))))")
+        }
+        defer { freeaddrinfo(info) }
 
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        let fd = socket(address.ai_family, SOCK_STREAM, 0)
         guard fd >= 0 else { throw BridgeError("socket: \(String(cString: strerror(errno)))") }
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
-        let bound = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        if address.ai_family == AF_INET6 {
+            var v6only: Int32 = host == nil ? 0 : 1
+            setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, socklen_t(MemoryLayout<Int32>.size))
         }
-        guard bound == 0, listen(fd, 64) == 0 else {
+        guard bind(fd, address.ai_addr, address.ai_addrlen) == 0, listen(fd, 64) == 0 else {
             let message = String(cString: strerror(errno))
             close(fd)
             throw BridgeError(message)
@@ -102,7 +127,7 @@ final class HTTPServer {
         return fd
     }
 
-    private func acceptPending() {
+    private func acceptPending(_ listenFD: Int32) {
         while true {
             let fd = accept(listenFD, nil, nil)
             guard fd >= 0 else { return }  // EAGAIN: nothing more to accept
@@ -110,8 +135,29 @@ final class HTTPServer {
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
             _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-            HTTPConnection(fd: fd, queue: queue, handler: handler).start()
+            HTTPConnection(fd: fd, local: Self.localAuthority(fd), queue: queue, handler: handler).start()
         }
+    }
+
+    /// "address:port" of the connection's end on this Mac: IPv4 as itself (not IPv4-mapped),
+    /// IPv6 in brackets, with any zone as %25.
+    private static func localAuthority(_ fd: Int32) -> String {
+        var storage = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        var service = [CChar](repeating: 0, count: Int(NI_MAXSERV))
+        let found = withUnsafeMutablePointer(to: &storage) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { address in
+                getsockname(fd, address, &length) == 0
+                    && getnameinfo(address, length, &host, socklen_t(host.count), &service, socklen_t(service.count),
+                                   NI_NUMERICHOST | NI_NUMERICSERV) == 0
+            }
+        }
+        guard found else { return "127.0.0.1" }
+        var address = String(cString: host)
+        if address.hasPrefix("::ffff:"), address.contains(".") { address.removeFirst("::ffff:".count) }
+        if address.contains(":") { address = "[\(address.replacingOccurrences(of: "%", with: "%25"))]" }
+        return "\(address):\(String(cString: service))"
     }
 }
 
@@ -120,6 +166,7 @@ private final class HTTPConnection {
     private static let maxBody = 1024 * 1024
 
     private let fd: Int32
+    private let local: String
     private let queue: DispatchQueue
     private let handler: HTTPServer.Handler
     private var readSource: DispatchSourceRead?
@@ -128,8 +175,9 @@ private final class HTTPConnection {
     private var answered = false
     private var closed = false
 
-    init(fd: Int32, queue: DispatchQueue, handler: @escaping HTTPServer.Handler) {
+    init(fd: Int32, local: String, queue: DispatchQueue, handler: @escaping HTTPServer.Handler) {
         self.fd = fd
+        self.local = local
         self.queue = queue
         self.handler = handler
     }
@@ -204,7 +252,16 @@ private final class HTTPConnection {
         for item in components?.queryItems ?? [] { query[item.name] = item.value ?? "" }
         return .request(HTTPRequest(method: String(parts[0]), path: components?.percentEncodedPath ?? target,
                                     query: query, headers: headers,
-                                    body: buffer.subdata(in: bodyStart..<bodyStart + length)))
+                                    body: buffer.subdata(in: bodyStart..<bodyStart + length),
+                                    authority: Self.authority(headers["host"], local: local)))
+    }
+
+    /// The Host header if it's a plain name or address (it ends up in JSON and URLs), else `local`.
+    private static func authority(_ host: String?, local: String) -> String {
+        guard let host, !host.isEmpty, host.count <= 255,
+              host.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || ".-:[]%".contains($0)) })
+        else { return local }
+        return host
     }
 
     private func send(_ response: HTTPResponse) {

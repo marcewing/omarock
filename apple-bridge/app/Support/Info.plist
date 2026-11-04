@@ -27,6 +27,12 @@
 	<key>NSAppleMusicUsageDescription</key>
 	<string>The omarock bridge plays and browses your Apple Music library for omarock on your Linux desktop.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>The omarock bridge streams its own Apple Music playback to omarock over your tailnet.</string>
+	<string>The omarock bridge streams its own Apple Music playback to omarock over your network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_omarock._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>The omarock bridge announces itself on your network, so omarock on your Omarchy machine can find it.</string>
 </dict>
 </plist>

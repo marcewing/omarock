@@ -182,7 +182,7 @@ enum IcecastSource {
         let code = status.split(separator: " ").dropFirst().first
         guard code == "100" || code == "200" else {
             close(fd)
-            throw BridgeError("Icecast refused the source for \(mount): \(status.isEmpty ? "no answer" : status)")
+            throw BridgeError("Icecast refused the source for \(mount.hasPrefix("/omarock-") ? "the stream's mount" : mount): \(status.isEmpty ? "no answer" : status)")
         }
         return fd
     }
