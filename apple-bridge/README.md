@@ -29,8 +29,11 @@ account for MusicKit to work.
 
 ## Requirements
 
-- **A Mac** with macOS 14.2 or later (Core Audio process taps). Developed on macOS 27
-  on Apple silicon; Intel Macs should work but haven't been tried.
+- **An Apple silicon Mac with macOS 15 or later.** The bridge itself needs macOS 14.2
+  (Core Audio process taps), but Homebrew, which the installer uses, supports only
+  Apple silicon on macOS 15 and later: since September 2026 Intel Macs and macOS 14
+  are its Tier 3, "not supported" ([docs.brew.sh/Support-Tiers](https://docs.brew.sh/Support-Tiers)).
+  Developed on macOS 27.
 - **Xcode** from the App Store, and [Homebrew](https://brew.sh) for `xcodegen`
   and `icecast`.
 - **A paid Apple Developer Program membership** ($99 a year). MusicKit needs it, and a

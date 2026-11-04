@@ -223,6 +223,16 @@ preflight() {
   [[ -z $brew && -x /opt/homebrew/bin/brew ]] && brew=/opt/homebrew/bin/brew
   [[ -z $brew && -x /usr/local/bin/brew ]] && brew=/usr/local/bin/brew
   [[ -n $brew ]] && path=(${brew:h} $path)
+  # Without Homebrew, check it can go on this Mac: since September 2026 it
+  # supports only Apple silicon with macOS 15 or later (docs.brew.sh/Support-Tiers).
+  if [[ -z $brew && ${1:-} != --uninstall ]]; then
+    local mac=$(sw_vers -productVersion) kind="Apple silicon"
+    [[ $(sysctl -n hw.optional.arm64 2>/dev/null) == 1 ]] || kind=Intel
+    if [[ $kind == Intel ]] || (( ${mac%%.*} < 15 )); then
+      print "The installer needs Homebrew, and Homebrew supports only Apple silicon Macs with macOS 15 or later (https://docs.brew.sh/Support-Tiers). This Mac is $kind, with macOS $mac, so the bridge can't be set up on it."
+      exit 1
+    fi
+  fi
   if [[ -z $answers ]]; then
     [[ -t 0 && -t 1 ]] || { print "Run ./install in a terminal: it asks questions."; exit 1; }
     if [[ ${1:-} != --uninstall ]] && (( ! $+commands[gum] )); then
