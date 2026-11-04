@@ -97,6 +97,8 @@ print(json.dumps({"username": login.get("username", ""), "password": login.get("
     write_apple "$bridge" "$(apple_stream "$bridge")" ;;
   music-folder)
     dir=$(value) && dir=${dir/#\~/$HOME}
+    # mpd takes only absolute paths: "Music" is the one in your home folder.
+    [[ $dir == /* ]] || dir=$HOME/$dir
     [[ -d $dir ]] || { echo "omarock-account: no folder $dir" >&2; exit 1; }
     # The config mpd reads, first found, as mpd looks.
     conf=""

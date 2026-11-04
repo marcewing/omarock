@@ -279,6 +279,15 @@ newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1) ==
 active() { systemctl --user is-active --quiet "$1"; }
 # X-Omarock: omarock's own services answer only requests that carry it.
 health() { curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
+# A folder as typed, made whole for mpd, which takes only absolute paths: ~,
+# and a path relative to your home folder ("Music"); empty is DEFAULT.
+full_path() {  # TYPED DEFAULT
+  local p=${1/#\~/$HOME}
+  [[ -z $p ]] && p=$2
+  [[ $p == /* ]] || p=$HOME/$p
+  [[ $p == / ]] || p=${p%/}
+  printf '%s' "$p"
+}
 # avahi-browse's \DDD escapes (decimal bytes): "Studio\032Mac" is "Studio Mac".
 avahi_name() {
   python3 -I -c 'import re, sys; print(re.sub(rb"\\(\d{3})", lambda m: bytes([int(m[1])]), sys.argv[1].encode()).decode("utf-8", "replace"))' "$1"
@@ -407,8 +416,10 @@ step_mpd() {
   local changed=false new_music=false lines=()
   if [[ ! -f $conf ]]; then
     explain "mpd needs a config: where your music is, and where to keep its database, playlists and state."
-    music=$(ask "Where's your music?" "$(xdg-user-dir MUSIC 2>/dev/null || echo "$HOME/Music")") || exit 1
-    music=${music/#\~/$HOME}
+    local default_music
+    default_music=$(xdg-user-dir MUSIC 2>/dev/null || echo "$HOME/Music")
+    music=$(ask "Where's your music?" "$default_music") || exit 1
+    music=$(full_path "$music" "$default_music")
     [[ -d $music ]] || note "$music isn't there now; mpd will find the music once it is."
     [[ $music == "$HOME"/* ]] && music="~/${music#"$HOME"/}"
     lines=("music_directory     \"$music\"")
@@ -423,7 +434,7 @@ step_mpd() {
     if ! confirm "Keep that as your music folder?"; then
       local new
       new=$(ask "Where's your music?" "$music") || exit 1
-      new=${new/#\~/$HOME}
+      new=$(full_path "$new" "$music")
       if [[ -n $new && $new != "$music" ]]; then
         [[ -d $new ]] || note "$new isn't there now; mpd will find the music once it is."
         backup "$conf"
