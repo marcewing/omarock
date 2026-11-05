@@ -12,9 +12,9 @@ import "Setup.js" as Setup
 // opens in the browser; Copy puts its line on the clipboard (a command for
 // the Mac has none: this clipboard doesn't reach it). Start setup
 // hands the values to the panel, which saves them and runs the rest in a
-// terminal. Tab goes through the fields, ticks and buttons; Enter in a field
+// terminal. Tab goes through the fields, switches and buttons; Enter in a field
 // goes on to the next (on the last, Start setup); Space or Enter presses a
-// button or flips a tick; Esc closes.
+// button or flips a switch; Esc closes.
 //
 // The Mac's address is checked live against the bridge, so Start setup
 // waits until the bridge answers. The pairing code is traded for the
@@ -625,7 +625,7 @@ Rectangle {
                 wrapMode: Text.WordWrap
               }
 
-              // A tick, with its label beside it (a click there ticks too).
+              // A switch, with its label beside it (a click there flips it too).
               Item {
                 visible: field.f.type === "check"
                 width: parent.width
@@ -769,7 +769,7 @@ Rectangle {
                 width: parent.width
                 visible: field.note.text !== ""
                 textFormat: Text.PlainText
-                // ✓ and ✗ as well as the colour, which some themes make hard to tell apart.
+                // ✓ and ✗ as well as the color, which some themes make hard to tell apart.
                 text: (field.note.kind === "ok" ? "✓ " : field.note.kind === "bad" ? "✗ " : "") + field.note.text
                 color: field.note.kind === "bad" ? Commons.Color.urgent : field.note.kind === "ok" ? Commons.Color.accent : root.dim
                 font.family: root.fontFamily

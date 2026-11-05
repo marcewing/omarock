@@ -409,7 +409,7 @@ step_mpd() {
 
   # The config: the music, and places for the database, playlists and state.
   # Without playlist_directory mpd turns stored playlists off, and with them
-  # omarock's playlists and radio favourites.
+  # omarock's playlists and radio favorites.
   conf=$(mpd_conf)
   local changed=false new_music=false lines=()
   if [[ ! -f $conf ]]; then
@@ -891,7 +891,7 @@ step_spotify() {
   if [[ -f $config/spotify.json ]] && jq -e '.clientId | length > 0' "$config/spotify.json" >/dev/null 2>&1; then
     ok "the developer app: $config/spotify.json"
   else
-    explain "First, create a Spotify developer app of your own (free). At developer.spotify.com/dashboard, create an app with the redirect URI http://127.0.0.1:8730/callback, and tick Web API. Its Client ID goes in omarock's config."
+    explain "First, create a Spotify developer app of your own (free). At developer.spotify.com/dashboard, create an app with the redirect URI http://127.0.0.1:8730/callback, and check Web API. Its Client ID goes in omarock's config."
     if [[ -z $answers ]] && confirm "Open the dashboard in your browser?"; then xdg-open https://developer.spotify.com/dashboard >/dev/null 2>&1 & fi
     while :; do
       id=$(ask "The app's Client ID (Blank to stop here):" "" "32 letters and digits") || exit 1
@@ -1169,7 +1169,7 @@ step_apple() {
   if [[ -n $h ]] && ! jq -e '.minBitrate == true' >/dev/null <<<"$h"; then
     note "the bridge is older than 0.7.0: update it (git pull, then ./install, in the Mac's omarock clone). Until then mpd can fall behind the Mac, and omarock reconnects it after each change."
   else
-    remove_flac "omarock's patched libFLAC isn't needed any more: the bridge's stream keeps mpd in step with Arch's own."
+    remove_flac "omarock's patched libFLAC isn't needed anymore: the bridge's stream keeps mpd in step with Arch's own."
   fi
   if [[ ! -f $units/mpd-mpris.service.d/omarock-mpris.conf ]]; then
     explain "mpd-mpris also asks mpd for the stream's cover art at every play and pause, which holds mpd for seconds. A patched mpd-mpris doesn't (a minute to build; needs Go)."
@@ -1694,7 +1694,7 @@ uninstall() {
   [[ -d $state_dir ]] && rm -rf "$state_dir"
   ((step_no > before)) || ok "nothing of omarock's is set up here"
   printf '\n%sWhat stays%s\n' "$bold" "$reset"
-  explain "mpd, mpc and mpd-mpris, with mpd's config, database and playlists. omarock's radio favourites are the mpd playlist \"Radio\"."
+  explain "mpd, mpc and mpd-mpris, with mpd's config, database and playlists. omarock's radio favorites are the mpd playlist \"Radio\"."
   explain "If Apple Music's fixes were built here, the packages they were built with stay too (go, git, and for the old libFLAC base-devel, cmake and ninja): sudo pacman -Rs those you don't otherwise need."
   mapfile -t backups < <(compgen -G "$(mpd_conf).before-omarock-*")
   if ((${#backups[@]})); then explain "Copies of mpd.conf from before each change:"; listing "${backups[@]}"; fi

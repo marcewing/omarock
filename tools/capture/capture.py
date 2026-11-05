@@ -17,7 +17,7 @@ panel and searches: reads, never a play, add or remove.
 --scratch-mpd starts a throwaway mpd of its own (a temporary database, playlist
 directory and socket; its only output is mpd's "null" output, which plays to
 nowhere) over MUSIC_DIR, e.g. one artist's folder, and runs the playlist
-scenario against real mpd behaviour: it makes, plays, edits and deletes stored
+scenario against real mpd behavior: it makes, plays, edits and deletes stored
 playlists there. Your mpd, its playlists and its config are not touched.
 
 The approach follows crmne.mpris's tools/capture (MIT).
@@ -294,7 +294,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     search_covers_scenario(host, failures)
     history_scenario(host, output, socket_path, failures)
     scrolling_scenario(host, output, socket_path, failures)
-    favourite_follow_scenario(host, output, failures)
+    favorite_follow_scenario(host, output, failures)
     list_exit_scenario(host, output, failures)
     apple_idle_scenario(host, socket_path, failures)
     heard_scenario(host, socket_path, failures)
@@ -364,7 +364,7 @@ def bar_scenario(host, output, socket_path, failures):
 
 
 def to_source(host, name):
-    """Press m until the panel's source is `name`: m goes round the sources,
+    """Press m until the panel's source is `name`: m goes around the sources,
     on past one that fails (switched on, not set up)."""
     for _ in range(2 * len(host.state()["sources"]) + 1):
         before = host.state()["source"]
@@ -1417,8 +1417,8 @@ def sxm_requests(prefix=""):
 
 def sxm_scenario(host, output, socket_path, failures):
     """SiriusXM against the fake omarock-sxm: m tunes the last or first
-    favourite channel, the list is channels with what's on, n and p change
-    channel (replacing the stream in mpd), search, A favourites, Space stops,
+    favorite channel, the list is channels with what's on, n and p change
+    channel (replacing the stream in mpd), search, A favorites, Space stops,
     mpd's pause becomes a stop, and m back to local where it was."""
     base = BRIDGE["sxm"]
     host.call("open")
@@ -1435,24 +1435,24 @@ def sxm_scenario(host, output, socket_path, failures):
     s = host.state()
     files = mpd_files(socket_path)
     check(files == local_files[:local_song + 1] + [base + "/stream/ch-8"] + local_files[local_song + 1:],
-          "m tunes the first favourite (80s on 8) after the local song", failures)
+          "m tunes the first favorite (80s on 8) after the local song", failures)
     st = mpd_state(socket_path)
     check(st["repeat"] == "1" and st["single"] == "1", "a live source plays in mpd's repeat-one mode (a drop reconnects)", failures)
     check(s["stateText"] == "SiriusXM · Playing" and s["nowPlaying"] == "Take It On The Run · REO Speedwagon",
           "the panel shows what's on: " + s["nowPlaying"] + " | " + s["stateText"], failures)
     check(s["rows"][:3] == ["channel:80s on 8", "channel:E Street Radio", "channel:SiriusXM Hits 1"]
-          and s["sections"][:3] == ["FAVORITES", "", "ALL CHANNELS"], "the list: favourites, then all channels: "
+          and s["sections"][:3] == ["FAVORITES", "", "ALL CHANNELS"], "the list: favorites, then all channels: "
           + ", ".join(s["rows"][:4]), failures)
     check(s["subtitles"][0] == "REO Speedwagon – Take It On The Run", "each channel says what's on", failures)
     check(s["bar"]["text"] == "REO Speedwagon — Take It On The Run" and "/art/888888/" in s["bar"]["cover"],
           "the bar shows the song and its art", failures)
     host.grab(output / "compact-sxm.png")
 
-    # n: the next favourite, replacing the stream.
+    # n: the next favorite, replacing the stream.
     host.call("press", "n")
-    wait_for(lambda: host.state()["nowPlaying"].startswith("Badlands"), "next favourite")
+    wait_for(lambda: host.state()["nowPlaying"].startswith("Badlands"), "next favorite")
     check(mpd_files(socket_path) == local_files[:local_song + 1] + [base + "/stream/ch-20"] + local_files[local_song + 1:],
-          "n tunes the next favourite in place of the last", failures)
+          "n tunes the next favorite in place of the last", failures)
     # A quick run of channel changes still leaves one channel in mpd's queue.
     for _ in range(3):
         host.call("press", "n")
@@ -1473,14 +1473,14 @@ def sxm_scenario(host, output, socket_path, failures):
     wait_for(lambda: host.state()["nowPlaying"].startswith("So What"), "tuned from search")
     check(host.state()["query"] == "" and base + "/stream/ch-67" in mpd_files(socket_path), "Enter tunes it", failures)
 
-    # A: a favourite.
+    # A: a favorite.
     host.call("press", "Down")
     host.call("press", "Down")
     host.settle(.2)
     row = host.state()["rows"][host.state()["cursor"]]
     host.call("press", "A")
-    wait_for(lambda: any(m in ("POST", "DELETE") for m, _ in sxm_requests("/v1/favorites")), "favourite")
-    check(True, "A toggles a favourite (" + row + "): " + str(sxm_requests("/v1/favorites")[-1]), failures)
+    wait_for(lambda: any(m in ("POST", "DELETE") for m, _ in sxm_requests("/v1/favorites")), "favorite")
+    check(True, "A toggles a favorite (" + row + "): " + str(sxm_requests("/v1/favorites")[-1]), failures)
 
     # Space stops (live radio), and plays again.
     host.call("press", "Escape")
@@ -1514,7 +1514,7 @@ def sxm_scenario(host, output, socket_path, failures):
 def real_sxm_scenario(host, output, socket_path, failures):
     """The panel against the real omarock-sxm on 127.0.0.1:8720, with the fake
     mpd (which never fetches the stream, so nothing plays). Read-only: it
-    tunes in the fake mpd only, and doesn't touch favourites."""
+    tunes in the fake mpd only, and doesn't touch favorites."""
     real = "http://127.0.0.1:8720"
     try:
         host.call("settings", json.dumps({"sxmService": real}))
@@ -1555,7 +1555,7 @@ def radio_scenario(host, output, socket_path, failures):
     """Internet radio against the fake Radio Browser: m round to the radio
     tunes the most listened local station, iHeart-style titles become the
     song and its art, search and Enter tune, HLS-only stations can't, A keeps
-    a favourite in the mpd playlist "Radio", and back to local where it was."""
+    a favorite in the mpd playlist "Radio", and back to local where it was."""
     host.call("open")
     wait_for(lambda: "radio" in host.state()["sources"], "radio source")
     host.settle(.5)
@@ -1599,8 +1599,8 @@ def radio_scenario(host, output, socket_path, failures):
     host.call("press", "Down")
     wait_for(lambda: host.state()["cursor"] == 0, "cursor on it")
     host.call("press", "A")
-    wait_for(lambda: stored(socket_path, "Radio") == ["http://radio.example/st-wxpn#omarock-radio=st-wxpn"], "favourite")
-    wait_for(lambda: host.state()["sections"][:1] == ["FAVORITES"], "favourites first")
+    wait_for(lambda: stored(socket_path, "Radio") == ["http://radio.example/st-wxpn#omarock-radio=st-wxpn"], "favorite")
+    wait_for(lambda: host.state()["sections"][:1] == ["FAVORITES"], "favorites first")
     check(host.state()["rows"][0] == "station:WXPN 88.5", "A keeps it in the mpd playlist Radio, first in the list", failures)
 
     # HLS only: dimmed, and Enter says why instead of tuning.
@@ -1660,7 +1660,7 @@ def radio_tuning_scenario(host, socket_path, failures):
 
     # Two stations in quick succession: the second wins.
     mpd_client(socket_path, *[f'playlistadd Radio "{marked(u)}"' for u in ("st-kexp", "st-wjrr")])
-    wait_for(lambda: {"station:KEXP 90.3 FM", "station:101.1 WJRR Orlando's Rock Station"} <= set(host.state()["rows"]), "favourites")
+    wait_for(lambda: {"station:KEXP 90.3 FM", "station:101.1 WJRR Orlando's Rock Station"} <= set(host.state()["rows"]), "favorites")
     rows = host.state()["rows"]
     host.call("activate", rows.index("station:KEXP 90.3 FM"), "open")
     host.call("activate", rows.index("station:101.1 WJRR Orlando's Rock Station"), "open")
@@ -2071,7 +2071,7 @@ def card_keys_scenario(host, output, socket_path, failures):
 
     # Tab: the next panel in this part of the bar, Shift+Tab the one before,
     # as in Omarchy's own panels, asked of the bar as omarock's widget. In
-    # the settings it goes round their tabs instead.
+    # the settings it goes around their tabs instead.
     before = len(host.state()["panelSwitches"])
     host.call("press", "Tab")
     host.call("press", "Shift+Tab")
@@ -3103,7 +3103,7 @@ def playlists_scenario(host, output, socket_path, failures):
     host.settle()
     s = host.state()
     check(s["rows"] == ["playplaylist:Play the playlist", "track:Fernweh", "track:Glasswork", "track:01 Missing Song",
-                        "track:Schnee"] and s["subtitles"][3] == "Not in the library any more"
+                        "track:Schnee"] and s["subtitles"][3] == "Not in the library anymore"
           and s["browseInfo"]["subtitle"] == "Playlist · 4 songs · 10 min",
           "the playlist view: " + ", ".join(s["rows"]), failures)
     check(s["levelButtons"]["current"] == ["Play", "Add to queue", "Add to playlist"]
@@ -3498,7 +3498,7 @@ def info_scenario(host, output, socket_path, failures):
     host.call("type", "")
     host.settle(.3)
 
-    # A SiriusXM channel: favourite or not, what's on.
+    # A SiriusXM channel: favorite or not, what's on.
     to_source(host, "sxm")
     wait_for(lambda: host.state()["sxmMode"] and host.state()["nowPlaying"] != "", "SiriusXM")
     host.call("press", "Down")
@@ -3507,13 +3507,13 @@ def info_scenario(host, output, socket_path, failures):
     host.call("press", "i")
     card = info_card(host, "a channel's card")
     check(card["service"] == "SiriusXM" and card["kind"] == "Channel" and "channel:" + card["title"] == row
-          and card["status"] in ("In your favourites", "Not in your favourites")
+          and card["status"] in ("In your favorites", "Not in your favorites")
           and any(f.startswith("CHANNEL: Number = ") for f in card["fields"]),
           "the channel's card: " + card["title"] + " · " + card["status"], failures)
     host.grab(output / "info-sxm.png")
     host.call("press", "i")
 
-    # A station: favourite or not, its stream.
+    # A station: favorite or not, its stream.
     to_source(host, "radio")
     wait_for(lambda: host.state()["radioMode"] and host.state()["nowPlaying"] != "", "the radio")
     host.call("press", "Down")
@@ -4681,10 +4681,10 @@ def scrolling_scenario(host, output, socket_path, failures):
     host.call("close")
 
 
-def favourite_follow_scenario(host, output, failures):
-    """A on a station used to move it to the favourites while the list stayed
+def favorite_follow_scenario(host, output, failures):
+    """A on a station used to move it to the favorites while the list stayed
     put. A in the list: the cursor follows the station or channel
-    up into the favourites, and A again takes it back to its place, each time
+    up into the favorites, and A again takes it back to its place, each time
     with the list scrolled to show it."""
     host.call("open")
     wait_for(lambda: host.state()["opened"], "open")
@@ -4703,17 +4703,17 @@ def favourite_follow_scenario(host, output, failures):
         before = host.state()
         check(before["listY"] > 0, f"{source}: {name} is down the list (y {before['listY']})", failures)
         host.call("press", "A")
-        def followed(favourite):
+        def followed(favorite):
             s = host.state()
             if s["cursor"] < 0 or s["rows"][s["cursor"]] != name: return False
             start = s["sections"].index(rest) if rest in s["sections"] else len(s["rows"])
-            return (s["cursor"] < start) == favourite
-        wait_for(lambda: followed(True), f"{source}: the cursor follows {name} into the favourites", timeout=10)
+            return (s["cursor"] < start) == favorite
+        wait_for(lambda: followed(True), f"{source}: the cursor follows {name} into the favorites", timeout=10)
         host.settle(.4)
         s = host.state()
-        check(in_view(s), f"{source}: A, and the cursor follows {name} up to the favourites, in view "
+        check(in_view(s), f"{source}: A, and the cursor follows {name} up to the favorites, in view "
               f"(row {s['cursor']}, y {s['listY']})", failures)
-        host.grab(output / f"favourite-follow-{source}.png")
+        host.grab(output / f"favorite-follow-{source}.png")
         host.call("press", "A")
         wait_for(lambda: followed(False), f"{source}: the cursor follows {name} back", timeout=10)
         host.settle(.4)
@@ -4725,12 +4725,12 @@ def favourite_follow_scenario(host, output, failures):
 
 
 def list_exit_scenario(host, output, failures):
-    """Marc, 11-02: on SiriusXM, A favourites the channel under the cursor,
+    """Marc, 11-02: on SiriusXM, A favorites the channel under the cursor,
     and the cursor stayed where the pointer left the list, so making the
-    channel playing a favourite meant finding it first. A cursor the pointer
+    channel playing a favorite meant finding it first. A cursor the pointer
     put on a row now leaves the list with it, as does ↑ from the top (into
     the card, or off the list); with no cursor, A makes the channel or
-    station playing a favourite or takes it out, and ↓ brings the cursor
+    station playing a favorite or takes it out, and ↓ brings the cursor
     back where it was. The expanded panel's columns are one area: moving to
     the preview keeps the cursor it follows."""
     host.call("open")
@@ -4754,7 +4754,7 @@ def list_exit_scenario(host, output, failures):
         flipped = soon(lambda: (host.state()["playingStation"] or {}).get("favorite") == (not before["favorite"]), 10)
         s = host.state()
         check(flipped and s["cursor"] < 0,
-              f"{source}: {how}, A {'unfavourites' if before['favorite'] else 'favourites'} {before['name']}, "
+              f"{source}: {how}, A {'unfavorites' if before['favorite'] else 'favorites'} {before['name']}, "
               f"the one playing, and no cursor comes back ({s['cursor']})", failures)
         host.call("press", "A")
         soon(lambda: (host.state()["playingStation"] or {}).get("favorite") == before["favorite"], 10)
@@ -4773,7 +4773,7 @@ def list_exit_scenario(host, output, failures):
         host.hover(4, 4)
         left = soon(lambda: host.state()["cursor"] < 0)
         s = host.state()
-        want = "A unfavourite" if playing["favorite"] else "A favourite"
+        want = "A unfavorite" if playing["favorite"] else "A favorite"
         check(left and want in s["hint"], f"{source}: the pointer off the list, and so is the cursor; "
               f"the hints offer {want} for {playing['name']}: {s['hint']}", failures)
         flip(source, "the pointer off the list")
@@ -5261,7 +5261,7 @@ def settings_scenario(host, output, failures):
     check(all(k in s["settingsAllRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
                                                   "spotifyLogin", "bridgePair", "spotifyRemove", "sxmRemove", "appleRemove")),
           "each source set up here has its account and keys, and Remove", failures)
-    # Tab goes round the tabs, each from its top; Shift+Tab goes back.
+    # Tab goes around the tabs, each from its top; Shift+Tab goes back.
     shown = []
     for _ in range(5):
         host.call("press", "Down")
@@ -5269,7 +5269,7 @@ def settings_scenario(host, output, failures):
         shown.append((host.state()["settingsTab"], host.state()["settingsRows"][0], host.state()["settingsCursor"]))
     check(shown == [("Apple Music", "appleMusic", 0), ("SiriusXM", "siriusXM", 0), ("Spotify", "spotify", 0), ("Sound", "sound", 0),
                     ("omarock", "musicFolder", 0)],
-          "Tab goes round the tabs, each from its top: " + str(shown), failures)
+          "Tab goes around the tabs, each from its top: " + str(shown), failures)
     host.call("press", "Shift+Tab")
     check(host.state()["settingsTab"] == "Sound", "Shift+Tab goes back, round to Sound: " + host.state()["settingsTab"], failures)
     check(host.call("clickPanel", "settingsTab:Spotify") == "ok", "a tab is a button", failures)
@@ -5602,12 +5602,12 @@ def setup_scenario(host, output, failures):
     wait_for(lambda: "siriusXM:action:Set up…" in host.state()["settingKinds"], "SiriusXM removed")
     result_file.write_text("failed")
     open_window("siriusXM", "siriusxm")
-    check(window()["blocker"] == "Needs a tick that you understand the risk" and not window()["canStart"],
-          "SiriusXM's window: its risk has to be ticked first", failures)
-    # The tick by the keys: Tab brings it, Space flips it.
+    check(window()["blocker"] == "Needs you to accept the risk" and not window()["canStart"],
+          "SiriusXM's window: its risk has to be accepted first", failures)
+    # The switch by the keys: Tab brings it, Space flips it.
     host.call("setupFocus", "setupCheck:sxmTerms")
     host.call("press", "Space")
-    check(window()["values"]["sxmTerms"] is True, "Space flips the tick", failures)
+    check(window()["values"]["sxmTerms"] is True, "Space flips the switch", failures)
     host.call("setupFocus", "sxmUser")
     host.call("typeKeys", "me@example.com")
     host.call("press", "Return")
@@ -5619,17 +5619,17 @@ def setup_scenario(host, output, failures):
     login = config / "siriusxm.json"
     check(json.loads(login.read_text()) == {"username": "me@example.com", "password": "pass word"}
           and login.stat().st_mode & 0o777 == 0o600,
-          "the login saved (mode 600, the password's space kept), then ./install siriusxm --yes terms: the tick", failures)
+          "the login saved (mode 600, the password's space kept), then ./install siriusxm --yes terms: the switch", failures)
     open_settings()
     finished()
     note = host.state()["settingNotes"]["siriusXM"]
     check(note["kind"] == "bad" and "didn't finish" in note["text"] and "siriusXM:action:Set up…" in host.state()["settingKinds"],
           "a setup that fails leaves Set up…, which says it didn't finish: " + note["text"], failures)
     result_file.unlink()
-    # Again: the login is there already, so only the tick.
+    # Again: the login is there already, so only the switch.
     open_window("siriusXM", "siriusxm")
     wait_for(lambda: window()["values"]["sxmUser"] == "me@example.com", "the login filled in")
-    check(window()["values"]["sxmPassword"] == "" and window()["blocker"] == "Needs a tick that you understand the risk",
+    check(window()["values"]["sxmPassword"] == "" and window()["blocker"] == "Needs you to accept the risk",
           "set up again: the window has the login already (the password set, not shown)", failures)
     host.call("setupClick", "setupCheck:sxmTerms")
     saved = login.stat().st_mtime_ns
@@ -5643,18 +5643,18 @@ def setup_scenario(host, output, failures):
 
     # The sound output: picked in its window, then a line saying where it
     # plays, then removed again. Hyprland tiles its window this time (as it
-    # did once on the laptop): a moment later it's floated and centred.
+    # did once on the laptop): a moment later it's floated and centered.
     tiled, hyprctl_log = home / ".fake-hypr-tiled", home / "hyprctl.log"
     tiled.write_text("omarock: Set up omarock's sound output")
     open_window("sound", "sound")
     wait_for(lambda: hyprctl_log.exists() and 'hl.dsp.window.center({ window = "address:0xfake" })' in hyprctl_log.read_text(),
              "the window floated")
     check('dispatch hl.dsp.window.float({ action = "on", window = "address:0xfake" })' in hyprctl_log.read_text(),
-          "a setup window Hyprland tiled is floated and centred", failures)
+          "a setup window Hyprland tiled is floated and centered", failures)
     tiled.unlink()
     rule = next((l for l in hyprctl_log.read_text().splitlines() if l.startswith("eval ")), "")
     check("hl.window_rule({ match = { class = \"^org.quickshell$\", title = \"^omarock(: Set up .*| keys)$\" }, float = true, center = true })" in rule,
-          "before a setup window shows, Hyprland is given a rule that floats it, centred", failures)
+          "before a setup window shows, Hyprland is given a rule that floats it, centered", failures)
     wait_for(lambda: window()["outputs"], "the outputs")
     w = window()
     check(w["outputs"] == ["alsa_output.test-speakers", "alsa_output.test-headphones"]
@@ -5768,7 +5768,7 @@ def setup_scenario(host, output, failures):
     host.call("setupFocus", "pairCode")
     host.call("typeKeys", "300400")
     wait_for(lambda: window()["notes"]["pairCode"] == "Paired with the bridge", "paired again")
-    # The smooth-playback fix starts ticked (recommended); unticked here.
+    # The smooth-playback fix starts on (recommended); off here.
     host.call("setupClick", "setupCheck:mpris")
     host.call("grabSetupWindow", str(output / "setup-apple-music.png"))
     host.call("setupClick", "setupStart")
@@ -5851,7 +5851,7 @@ def setup_scenario(host, output, failures):
     wait_for(lambda: window()["outputs"], "the outputs")
     host.call("setupClick", "setupOutput:alsa_output.test-headphones")
     host.call("setupClick", "setupCancel")
-    wait_for(lambda: not window()["open"], "cancelled")
+    wait_for(lambda: not window()["open"], "canceled")
     open_window("sound", "sound")
     wait_for(lambda: window()["values"]["output"] == "alsa_output.test-speakers", "the default again")
     check(launched() == runs, "Cancel closes the window and runs nothing; opened again, it starts afresh", failures)
@@ -6449,7 +6449,7 @@ def main():
                             elif name == "search-covers": search_covers_scenario(host, failures)
                             elif name == "history": history_scenario(host, output, socket_path, failures)
                             elif name == "time-machine": time_machine_scenario(host, output, socket_path, failures)
-                            elif name == "favourite-follow": favourite_follow_scenario(host, output, failures)
+                            elif name == "favorite-follow": favorite_follow_scenario(host, output, failures)
                             elif name == "list-exit": list_exit_scenario(host, output, failures)
                             elif name == "bus-volume": bus_volume_scenario(host, socket_path, failures)
                             elif name == "real-apple-info": real_apple_info_scenario(host, output, socket_path, failures)

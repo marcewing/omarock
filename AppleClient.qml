@@ -275,7 +275,7 @@ Item {
       data = Object.assign({}, data, { current: false })
       Qt.callLater(root.sendRelease)
     } else if (root.releasePending && !root.releasing) {
-      root.releasePending = false  // it isn't the source any more anyway (mpd played)
+      root.releasePending = false  // it isn't the source anymore anyway (mpd played)
     }
     root.bridgeStatus = data
     root.addHeard(data)

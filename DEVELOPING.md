@@ -16,13 +16,13 @@
 | `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`, over the panel or in its own window), the info card (`i`), the playlist picker (`A`) |
 | `Hints.js` | Pure helpers: the hint line's keys, fitted to its fixed number of lines |
 | `Paging.js` | Pure helpers: where PgUp and PgDn take the cursor (the first or last row in full view, then a page on), for the panel's lists, the settings and the playlist picker |
-| `Wave.js`, `WavyOutline.qml` | The search box's wavy outline while Time Machine keeps search to its year: the path (pure, tested), and the shape drawing it in the field's own colours |
+| `Wave.js`, `WavyOutline.qml` | The search box's wavy outline while Time Machine keeps search to its year: the path (pure, tested), and the shape drawing it in the field's own colors |
 | `SettingsView.qml` | The settings (`,` or the gear): Settings.js as a form, each source with its service's state; settings go into settings.json, accounts, keys and the music folder through `tools/omarock-account` |
 | `Setup.js`, `SetupView.qml` | A piece's setup window (Set up…): how it works, what it needs, links, and its fields (checked live against the bridge for Apple Music); Start setup saves them through `tools/omarock-account`, then runs `./install PIECE` in a terminal with the window's choices (`--yes terms`, `--output NAME`) |
 | `Info.js` | Pure helpers: the info card's contents for each source |
 | `AppleClient.qml`, `Apple.js` | A client for the bridge API (apple-bridge/API.md), shaped like MpdClient; Apple Music's and Spotify's rows and views |
 | `SxmClient.qml`, `Sxm.js` | SiriusXM, through omarock-sxm |
-| `RadioClient.qml`, `Radio.js` | Radio Browser: search, local stations, favourites (the mpd playlist "Radio"), ICY titles |
+| `RadioClient.qml`, `Radio.js` | Radio Browser: search, local stations, favorites (the mpd playlist "Radio"), ICY titles |
 | `ScrollingText.qml` | One line that scrolls when it doesn't fit: the bar's song (a setting) and the now playing card's song, artist and album |
 | `Places.js`, `places.tsv` | Where "Your area" is, and the regions near it, from GeoNames' cities of 15,000 people or more (`tools/build-places` makes the file) |
 | `TimeMachine.js`, `ChartClient.qml`, `YearPicker.qml`, `Keeper.js` | Time Machine: the year filter for Apple Music and Spotify (mpd's is `Mpd.yearPattern`), Billboard's year-end chart read from Wikipedia's wikitext, its songs found on Apple Music or Spotify (cached in `~/.cache/omarock/charts`), and the box that asks for the year (`t`); the panel keeps the queue to the year (`Panel.keepQueueInYear`, `MpdClient.removeAfterYear`); with a panel on each bar, one keeps the queue (`Keeper.js`, shared by them all) |
@@ -132,7 +132,7 @@ popup. Under Hyprland the open panel keeps them, as a run in the test VM showed.
 
 - **`--scratch-mpd DIR`** starts a throwaway mpd over DIR. Its only output is mpd's
   `null` output, which plays to nowhere. It runs the playlist scenario against
-  real mpd behaviour.
+  real mpd behavior.
 - **`--real-mpd`** only reads.
 - **The `real-*` scenarios** read from a real Apple Music bridge through a proxy
   that refuses anything but GETs. They need `OMAROCK_REAL_BRIDGE` and
@@ -257,7 +257,7 @@ form).
   - From bridge 0.7.0 libFLAC encodes the stream, with `limit_min_bitrate`
     (xiph/flac#90's answer): silence still sends about 6 KB/s. A stock libFLAC
     joining a paused stream stays about 1.7 s behind, against 1.2 s with the reader
-    patched (xiph/flac#939, closed in favour of the encoder option). Health's
+    patched (xiph/flac#939, closed in favor of the encoder option). Health's
     `minBitrate` says the stream is that one.
   - For an older bridge, omarock reconnects mpd to the stream 2 s after each
     change (`appleRejoin`), at the cost of a short stutter.
@@ -285,7 +285,7 @@ form).
 - A property whose name starts with `on` and a capital is taken for a signal
   handler's name, and silently never works.
 - Hyprland floats a Quickshell `FloatingWindow` whose minimum and maximum
-  sizes are the same, and centres it. Without a fixed size it tiles. It decides
+  sizes are the same, and centers it. Without a fixed size it tiles. It decides
   as the window maps, so the keys window maps at a fixed size, then lets go of
   it after its first frame, and can be resized. (Seen on Hyprland 0.56.2.)
 - A reply that lands while a plugin reload tears a client down can find the
@@ -299,7 +299,7 @@ form).
 - **Qt 6.12's QtQuick has a `Color` singleton of its own** (`rgba`, `hsla`,
   `fromString`). It takes the name from Omarchy's `Color` in `qs.Commons`: a
   bare `Color.popups` reads as undefined. In the harness it happened partway
-  through the run, after which every colour came out undefined. So omarock
+  through the run, after which every color came out undefined. So omarock
   imports `qs.Commons as Commons` and writes `Commons.Color`, as Omarchy's own
   files do since 4.5. `Style`, `Util` and `Border` don't clash.
 

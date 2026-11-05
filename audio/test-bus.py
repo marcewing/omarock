@@ -211,7 +211,7 @@ try:
                                     env=dict(g.env, OMAROCK_GUARD_DEBUG=os.environ.get("OMAROCK_BUS_DEBUG", "")),
                                     stdout=subprocess.DEVNULL, stderr=(g.work / "guard.log").open("w")))
     settle()
-    g.procs.append(subprocess.Popen(["pw-record", "--target", "omarock", "-P", '{ stream.capture.sink = true node.name = "visualiser" }',
+    g.procs.append(subprocess.Popen(["pw-record", "--target", "omarock", "-P", '{ stream.capture.sink = true node.name = "visualizer" }',
                                      str(g.work / "rec.wav")], env=g.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     for out_port in ("omarock.output:output_FL", "omarock:monitor_FL", "spotify:output_FL"):
         g.pw("pw-link", out_port, RADIO + ":playback_FL")
@@ -222,7 +222,7 @@ try:
           + ", ".join(l.split(": ", 1)[1] for l in cuts.splitlines() if "cut link" in l))
     check(g.linked_from("omarock.output") == [CARD] and all(g.linked_from(n) == ["omarock"] for n in PLAYERS),
           "and left the bus's and players' own links alone")
-    check("visualiser" in {b for a, b in g.dump()[1] if a == "omarock"}, "a recorder may still listen to the bus")
+    check("visualizer" in {b for a, b in g.dump()[1] if a == "omarock"}, "a recorder may still listen to the bus")
     # The Spotify desktop app (a "spotify" stream not aimed at the bus) isn't omarock's.
     desktop = subprocess.Popen(["pw-play", "--target", CARD, "-P", '{ node.name = "spotify" }', str(g.silence)],
                                env=g.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

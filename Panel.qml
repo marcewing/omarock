@@ -117,7 +117,7 @@ Panel {
   readonly property string radioBrowser: root.setting("radioBrowser", "")
   // The station to come back to when switching to the radio.
   property string lastStation: ""
-  // The source playing, and the ones set up: m goes round them. The modes
+  // The source playing, and the ones set up: m goes around them. The modes
   // above all follow from it, so they never disagree, even for a moment (the
   // list took a mode caught halfway through a change for another list).
   readonly property string source: spotifyMode ? "spotify" : mpdOnApple ? "apple" : mpdOnSxm ? "sxm" : mpdOnRadio ? "radio" : "local"
@@ -205,7 +205,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.16.1"
+  readonly property string version: "0.16.2"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -499,7 +499,7 @@ Panel {
 
   readonly property string queueSummary: {
     if (root.sxmMode) return root.countText(sxm.channels.length, "channel")
-    if (root.radioMode) return root.countText(radio.favorites.length, "favourite")
+    if (root.radioMode) return root.countText(radio.favorites.length, "favorite")
     var n = root.player.status.queueLength
     if (n === 0) return "Empty"
     return root.countText(n, "song") + (root.queueComplete ? " · " + Mpd.formatTotal(root.queueSeconds) : "")
@@ -566,8 +566,8 @@ Panel {
     var row = root.playingStation
     if (!row) return []
     var what = row.kind === "channel" ? "channel" : "station"
-    return [Hints.hint("A", row.favorite ? "unfavourite" : "favourite", row.favorite
-      ? "Take the " + what + " playing out of your favourites" : "Add the " + what + " playing to your favourites")]
+    return [Hints.hint("A", row.favorite ? "unfavorite" : "favorite", row.favorite
+      ? "Take the " + what + " playing out of your favorites" : "Add the " + what + " playing to your favorites")]
   }
 
   function listHintParts() {
@@ -595,10 +595,10 @@ Panel {
       return parts.concat([root.browsing ? hint("Esc", "back", "Back a level", true) : hint("Esc", "clear", "Clear the search", true)])
     }
     if (!root.searchMode && !root.browsing && (root.sxmMode || root.radioMode)) {
-      var steps = root.sxmMode ? hint("n p", "channel", "Next or previous channel") : hint("n p", "favourite", "Next or previous favourite")
+      var steps = root.sxmMode ? hint("n p", "channel", "Next or previous channel") : hint("n p", "favorite", "Next or previous favorite")
       parts = root.cursorActive && row
-        ? [hint("Enter", "tune", "Tune it", true), hint("A", row.favorite ? "unfavourite" : "favourite",
-          row.favorite ? "Take it out of your favourites" : "Add it to your favourites"), info, steps]
+        ? [hint("Enter", "tune", "Tune it", true), hint("A", row.favorite ? "unfavorite" : "favorite",
+          row.favorite ? "Take it out of your favorites" : "Add it to your favorites"), info, steps]
         : root.playingFavoriteHint().concat(
           [hint("/", root.sxmMode ? "find a channel" : "find a station", root.sxmMode ? "Search the channels" : "Search for a station"), steps])
       return parts.concat(root.cursorActive && row ? [] : time, source, [hint("H", "history", "What you've played here")], [keys])
@@ -618,7 +618,7 @@ Panel {
     if (root.rowQueues(row)) parts.push(hint("a", "add to queue", "Add it to the end of the queue"))
     if (root.playlistItem(root.browseTop, row)) parts.push(hint("A", "add to playlist", "Add it to a playlist"))
     if (kind === "channel" || kind === "station")
-      parts.push(hint("A", row.favorite ? "unfavourite" : "favourite", row.favorite ? "Take it out of your favourites" : "Add it to your favourites"))
+      parts.push(hint("A", row.favorite ? "unfavorite" : "favorite", row.favorite ? "Take it out of your favorites" : "Add it to your favorites"))
     if (row && row.removable)
       parts.push(kind === "playlist" ? hint("x", "delete", "Delete the playlist (asks first)") : hint("x", "remove", "Take it out of the playlist"))
     if (root.infoRequest(root.browseTop, row)) parts.push(info)
@@ -666,7 +666,7 @@ Panel {
     else root.switchToLocal(fromSpotify)
   }
 
-  // m goes round the sources from the one it last tried, while that switch
+  // m goes around the sources from the one it last tried, while that switch
   // didn't happen (its service down, or not set up yet), so it moves on past
   // a source that fails instead of asking it again.
   property string triedSource: ""
@@ -693,7 +693,7 @@ Panel {
     root.localResume = s.state !== "stop" && s.songId !== "" ? { id: s.songId, elapsed: client.elapsed } : null
   }
 
-  // SiriusXM: tune a channel (the last one, else the first favourite).
+  // SiriusXM: tune a channel (the last one, else the first favorite).
   function switchToSxm(channelId) {
     root.say("Connecting to SiriusXM…")
     sxm.checkHealth(function(ok, error) {
@@ -745,7 +745,7 @@ Panel {
     })
   }
 
-  // The radio: tune a station (the last one, else the first favourite, else
+  // The radio: tune a station (the last one, else the first favorite, else
   // the most listened local station, else the most listened in the US).
   function switchToRadio(uuid) {
     var pick = function(station) {
@@ -791,7 +791,7 @@ Panel {
         root.favoriteFollow = null
         root.say(error)
       } else {
-        root.say(adding ? row.name + " is a favourite" : row.name + " is no longer a favourite")
+        root.say(adding ? row.name + " is a favorite" : row.name + " is no longer a favorite")
       }
     }
     if (row.kind === "station") radio.toggleFavorite(row.stationUuid, done)
@@ -799,10 +799,10 @@ Panel {
   }
 
   // After A, the cursor follows the station or channel, rather than the list
-  // staying put while it moves to the favourites. Once the list shows the
-  // change (the radio's favourites come back from mpd's "Radio" playlist a
+  // staying put while it moves to the favorites. Once the list shows the
+  // change (the radio's favorites come back from mpd's "Radio" playlist a
   // moment later), the cursor moves to the station or channel's first row: up
-  // in the favourites, or back in its place. That row comes to the middle of
+  // in the favorites, or back in its place. That row comes to the middle of
   // the list.
   property var favoriteFollow: null
   onQueueRowsChanged: root.followFavorite()
@@ -1321,7 +1321,7 @@ Panel {
   // P or the Playlists button: the Playlists view, opened from the queue.
   function openPlaylists() {
     if (root.sxmMode || root.radioMode) {
-      root.say(root.sxmMode ? "Your favourite channels are at the top of the list" : "Your favourite stations are at the top of the list")
+      root.say(root.sxmMode ? "Your favorite channels are at the top of the list" : "Your favorite stations are at the top of the list")
       return
     }
     if (root.browseRoot === "queue" && root.browseStack.length === 1 && root.browseTop.kind === "playlists") return
@@ -1380,7 +1380,7 @@ Panel {
   // Where the Top 100 plays changed (the lookup setting, the source, a
   // service switched on or off): the year's songs are looked up there
   // instead, the other service's lookups stopped, and an open Top 100
-  // follows (Marc, 10-28). A moment later, so m going round the sources
+  // follows (Marc, 10-28). A moment later, so m going around the sources
   // doesn't start one at each.
   onChartServiceChanged: chartFollow.restart()
 
@@ -1889,7 +1889,7 @@ Panel {
   readonly property string playingLibraryHover: root.playingLibrary === "yes" && root.bridge.canUnsave ? "󰅖 Remove from library" : ""
   readonly property bool canAddPlayingToPlaylist: !root.live && root.player.ready && !!root.player.currentSong.file
   // The channel or station playing, as its row in the list, or null: with no
-  // cursor, A makes it a favourite or takes it out.
+  // cursor, A makes it a favorite or takes it out.
   readonly property var playingStation: {
     if (root.sxmMode) {
       var id = sxm.currentId
@@ -2689,7 +2689,7 @@ Panel {
         // position: in the playlist; queuePosition: in the queue after load,
         // which skips missing songs.
         position: i, queuePosition: present, removable: true, missing: missing,
-        subtitle: missing ? "Not in the library any more" : parts.join(" · "),
+        subtitle: missing ? "Not in the library anymore" : parts.join(" · "),
         detail: missing ? "" : Mpd.formatTime(Mpd.songSeconds(song)) }
       if (!missing) {
         row.coverFile = song.file
@@ -2906,7 +2906,7 @@ Panel {
       return
     }
     if (row.missing) {
-      root.say(row.title + " isn't in the library any more")
+      root.say(row.title + " isn't in the library anymore")
       return
     }
     if (mode === "open") {
@@ -3559,7 +3559,7 @@ Panel {
       show(Info.localSong({ file: request.file, title: request.title }, {}), { coverFile: request.file }, true)
       client.songInfo(request.file, function(song, extra) {
         if (song) show(Info.localSong(song, extra), { coverFile: request.file }, false)
-        else root.closeInfo(sequence, "mpd doesn't know this song any more")
+        else root.closeInfo(sequence, "mpd doesn't know this song anymore")
       })
     } else if (request.type === "localAlbum") {
       var placeholder = Info.localAlbum([], {})
@@ -3657,7 +3657,7 @@ Panel {
     }
     onLastErrorChanged: if (client.ready && client.lastError !== "") root.say(client.lastError)
     onPlaylistsEdited: root.refreshPlaylistViews()
-    // The radio's favourites are the "Radio" playlist: follow the list.
+    // The radio's favorites are the "Radio" playlist: follow the list.
     onPlaylistsChanged: radio.refreshFavorites()
     onStatusChanged: root.followMpd()
     onQueueChanged: root.recheckQueue()
@@ -4570,7 +4570,7 @@ Panel {
         || (root.browseInfo.failed ? "mpd couldn't list this. Esc goes back." : "Nothing here."))
       : root.searchMode ? (root.searching ? "Searching…" : "Nothing matches “" + root.query.trim() + "”.")
       : root.sxmMode ? "No SiriusXM channels yet."
-      : root.radioMode ? "No favourite stations yet. Press / to find one, then A to keep it here."
+      : root.radioMode ? "No favorite stations yet. Press / to find one, then A to keep it here."
       : root.bridgeMode ? "Nothing queued on " + root.bridge.service + ". Search for an artist, album or song, then press Enter to play it."
       : "The queue is empty. Search for an artist, album or song, then press Enter to play it."
 
@@ -4971,7 +4971,7 @@ Panel {
       objectName: "hints"
       anchors.left: parent.left
       anchors.right: parent.right
-      // One line high, the line's own height: as centred, and a notice's
+      // One line high, the line's own height: as centered, and a notice's
       // second line goes up from it.
       anchors.bottom: parent.bottom
       textFormat: Text.PlainText
@@ -5002,7 +5002,7 @@ Panel {
 
   // The keys in a window of their own (the keys page's Window, or w), to
   // keep beside the panel; RIGHT NOW follows the panel. Hyprland floats a
-  // window whose size is fixed as it maps, centred, rather than tile it. So
+  // window whose size is fixed as it maps, centered, rather than tile it. So
   // it maps at a fixed size, then lets go of it after its first frame: it
   // can be resized, and opens again at the size it was.
   readonly property alias keysWindow: keysFloat
@@ -5099,7 +5099,7 @@ Panel {
       setupView.Window.window.requestActivate()
     }
   }
-  // Closed or cancelled: what was typed goes, secrets first, and a Start
+  // Closed or canceled: what was typed goes, secrets first, and a Start
   // setup still saving runs nothing.
   function closeSetupWindow() {
     root.floatingNext = root.floatingNext.filter(function(w) { return w !== setupFloat })
@@ -5177,12 +5177,12 @@ Panel {
     }
   }
 
-  // omarock's own windows (the setup windows, the keys) float, centred, from
+  // omarock's own windows (the setup windows, the keys) float, centered, from
   // their first frame: a rule of their own, added to the running Hyprland
   // just before one shows, as Omarchy adds its About window's (a config
   // reload drops it). Their size is fixed as they map too, which Hyprland
   // also floats. Should one tile anyway, a moment after it opens it's
-  // floated and centred, as Omarchy's own scripts do it: the Lua
+  // floated and centered, as Omarchy's own scripts do it: the Lua
   // dispatcher, else the old one.
   readonly property string windowRule: 'if omarock_window_rule then omarock_window_rule:set_enabled(false) end; '
     + 'omarock_window_rule = hl.window_rule({ match = { class = "^org.quickshell$", title = "^omarock(: Set up .*| keys)$" }, '

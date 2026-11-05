@@ -18,7 +18,7 @@ test("stream URLs carry the channel id", () => {
   assert.equal(Sxm.channelIdOf("iTunes Music/x.mp3", base), "")
 })
 
-test("channelRows: favourites first, then every channel, with what's on", () => {
+test("channelRows: favorites first, then every channel, with what's on", () => {
   const rows = Sxm.channelRows(channels, now, "b")
   assert.deepEqual(rows.map(r => [r.section, r.title, r.playing]), [
     ["FAVORITES", "80s on 8", true], ["", "E Street Radio", false],
@@ -36,7 +36,7 @@ test("searchRows: a number, then names, then genre and what's playing", () => {
   assert.deepEqual(Sxm.searchRows(channels, now, "kahan", Mpd.fold).map(r => [r.section, r.title]), [["PLAYING NOW", "SiriusXM Hits 1"]])
 })
 
-test("stepChannel moves through favourites from a favourite, else by number", () => {
+test("stepChannel moves through favorites from a favorite, else by number", () => {
   assert.equal(Sxm.stepChannel(channels, "b", 1).id, "c")
   assert.equal(Sxm.stepChannel(channels, "c", 1).id, "b")
   assert.equal(Sxm.stepChannel(channels, "a", 1).id, "b")

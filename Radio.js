@@ -5,7 +5,7 @@
 //
 // A station queued by omarock is its stream URL with "#omarock-radio=<uuid>"
 // after it. The server never sees what follows "#", and mpd keeps it, so the
-// queue and the "Radio" playlist (the favourites) say which station it is.
+// queue and the "Radio" playlist (the favorites) say which station it is.
 
 var MARKER = "#omarock-radio="
 var FAVORITE = "󰋑"
@@ -48,8 +48,8 @@ function stationRow(station, section, playingUuid, favoriteUuids) {
     noQueue: true, missing: !ok, playing: station.stationuuid === playingUuid }
 }
 
-// The list: the station playing when it's neither a favourite nor local
-// (one found by search, so A can keep it), the favourites, then the most
+// The list: the station playing when it's neither a favorite nor local
+// (one found by search, so A can keep it), the favorites, then the most
 // listened stations near you. place: the local section's name ("near
 // Portland"), or "" when no area is set.
 function listRows(favorites, local, playingUuid, place, playing) {
@@ -252,7 +252,7 @@ function songAsMpd(mpdSong, station) {
     genre: station ? String(station.tags || "").split(",")[0] : "" }
 }
 
-// n and p: the next or previous favourite, wrapping round.
+// n and p: the next or previous favorite, wrapping around.
 function stepStation(favorites, currentUuid, delta) {
   var ring = favorites.filter(playable)
   if (ring.length === 0) return null

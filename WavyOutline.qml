@@ -4,7 +4,7 @@ import "Wave.js" as Wave
 
 // A box with wavy top and bottom edges (Wave.js): the search box's
 // background while Time Machine is on, in the field's own fill and border
-// colours.
+// colors.
 Item {
   id: root
 

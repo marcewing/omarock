@@ -53,11 +53,11 @@ asking for the login itself. By hand:
    It should say `"account": true` and `"loggedIn": true`. (omarock-sxm answers
    only requests with that header, so a web page can't use it.)
 4. **Switch SiriusXM on** in omarock's settings (`,` in the panel). A SiriusXM
-   button appears in the panel, and `m` goes round to it. The login can be
+   button appears in the panel, and `m` goes around to it. The login can be
    changed there later too.
 
-In SiriusXM, the list is your favourite channels, then all of them, each with
-what's on. `A` adds or removes a favourite: your account's, so the SiriusXM app
+In SiriusXM, the list is your favorite channels, then all of them, each with
+what's on. `A` adds or removes a favorite: your account's, so the SiriusXM app
 sees the change too.
 
 ## When it doesn't work
@@ -90,7 +90,7 @@ rm -rf ~/.local/share/omarock/sxm ~/.local/share/omarock/sxm-venv ~/.config/omar
 | `GET /v1/health` | `{ ok, version, account, loggedIn, error, playing }` |
 | `GET /v1/channels` | Live channels by number: `{ id, number, name, shortName, genre, description, logo, stream, favorite, available }` |
 | `GET /v1/nowplaying` | `{ channelId: { artist, title, show, isAd, startedAt, art } }` for every channel |
-| `POST`, `DELETE /v1/favorites/{id}` | Add a channel to the account's favourites, or remove it |
+| `POST`, `DELETE /v1/favorites/{id}` | Add a channel to the account's favorites, or remove it |
 | `GET /art/{key}/{w}x{h}` | A redirect to SiriusXM's artwork at that size. `logo` and `art` are templates with `{w}` and `{h}`. |
 
 It stops fetching a channel 20 s after its last listener leaves. The now-playing

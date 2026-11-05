@@ -259,7 +259,7 @@ test("a library genre: Shuffle, its artists in the bridge's order, then its comp
     ["shuffleall:Shuffle all songs", "artist:Bob Mould", "artist:Hüsker Dü", "compilations:Compilations"])
   assert.deepEqual(view.rows[0].items, [{ kind: "song", id: "s1", source: "library" }, { kind: "song", id: "s2", source: "library" }])
   assert.equal(view.rows[0].subtitle, "2 songs · 4 min")
-  // The same artist spelt without accents is one; an artist with no id is a compilation.
+  // The same artist spelled without accents is one; an artist with no id is a compilation.
   assert.equal(view.rows[2].subtitle, "2 albums")
   assert.deepEqual(view.rows[2].apple, { kind: "artist", id: "ar2", source: "library" })
   assert.equal(view.rows[3].subtitle, "3 albums")

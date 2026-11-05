@@ -369,7 +369,7 @@ step_appid() {
     return
   fi
 
-  explain "MusicKit works only for an app whose bundle ID is registered to you, with MusicKit switched on. At developer.apple.com: Certificates, Identifiers & Profiles, Identifiers, then + and App IDs (type App). Give it a description and an explicit bundle ID of your own, such as com.yourname.omarock.bridge, and register it. Then open it again (the Identifiers list shows your bundle ID in its Identifier column), tick MusicKit on the App Services tab, and Save. A new bundle ID can take a few minutes to work."
+  explain "MusicKit works only for an app whose bundle ID is registered to you, with MusicKit switched on. At developer.apple.com: Certificates, Identifiers & Profiles, Identifiers, then + and App IDs (type App). Give it a description and an explicit bundle ID of your own, such as com.yourname.omarock.bridge, and register it. Then open it again (the Identifiers list shows your bundle ID in its Identifier column), check MusicKit on the App Services tab, and Save. A new bundle ID can take a few minutes to work."
   if [[ -z $answers ]] && confirm "Open the Identifiers page?"; then
     run open https://developer.apple.com/account/resources/identifiers/list
   fi
@@ -507,7 +507,7 @@ step_health() {
   if health_true authorized; then ok "it may use Apple Music"; else bad "it may not use Apple Music yet"; fi
 
   if health_true authorized && ! health_true canPlayCatalog && ! wait_until "Checking the subscription…" 10 catalog_now; then
-    explain "MusicKit says this Mac can't play Apple Music's catalog. Check that the Music app is signed in to an Apple ID with an Apple Music subscription, and that MusicKit is ticked for $label (Identifiers, on developer.apple.com). A new bundle ID can take a few minutes."
+    explain "MusicKit says this Mac can't play Apple Music's catalog. Check that the Music app is signed in to an Apple ID with an Apple Music subscription, and that MusicKit is checked for $label (Identifiers, on developer.apple.com). A new bundle ID can take a few minutes."
     wait_until "Checking again every few seconds… (Ctrl-C to skip)" 600 catalog_now
   fi
   if health_true canPlayCatalog; then ok "it can play Apple Music's catalog"

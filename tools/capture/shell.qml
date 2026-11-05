@@ -368,7 +368,7 @@ ShellRoot {
         playlists: p.picker.playlists.map(function(pl) { return pl.name }),
         pointerArmed: p.pointerArmed, listY: p.listView ? Math.round(p.listView.contentY) : -1, listIndex: p.listView ? p.listView.currentIndex : -2, appleMode: p.appleMode, appleConfigured: p.appleConfigured, appleStream: p.appleStream,
         sxmMode: p.sxmMode, radioMode: p.radioMode, source: p.source, sources: p.sources,
-        // The radio's local stations (favourites among them), in radio mode.
+        // The radio's local stations (favorites among them), in radio mode.
         radioLocal: p.radioMode && p.player.local ? p.player.local.map(function(st) { return String(st.name).trim() }) : [],
         spotifyMode: p.spotifyMode, spotifyError: p.spotifyMode ? p.player.lastError : "",
         settingsOpen: p.settingsOpen, settingsEditing: p.settingsOpen ? host.settingsView().editing : "",
@@ -495,7 +495,7 @@ ShellRoot {
       return "ok"
     }
     // A field of the setup window takes the keys, as when it's clicked (or
-    // a button or tick, by its objectName, as Tab would bring it).
+    // a button or switch, by its objectName, as Tab would bring it).
     function setupFocus(key: string): string {
       var v = host.setupView()
       var field = v ? host.findNamed(v, "setupField:" + key) || host.findNamed(v, key) : null
@@ -504,7 +504,7 @@ ShellRoot {
       field.forceActiveFocus()
       return "ok"
     }
-    // A click on a button or a tick in the setup window, by its objectName;
+    // A click on a button or a switch in the setup window, by its objectName;
     // one that's switched off takes no click.
     function setupClick(name: string): string {
       var v = host.setupView()

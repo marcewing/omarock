@@ -37,9 +37,9 @@ from fake_mpd import png  # noqa: E402
 PORT = 0
 
 
-def art(colour):
-    return {"url": f"http://127.0.0.1:{PORT}/art/{colour}/{{w}}x{{h}}bb.png", "width": 1200, "height": 1200,
-            "bgColor": colour, "textColor": "f2f2f2"}
+def art(color):
+    return {"url": f"http://127.0.0.1:{PORT}/art/{color}/{{w}}x{{h}}bb.png", "width": 1200, "height": 1200,
+            "bgColor": color, "textColor": "f2f2f2"}
 
 
 def fold(text):
@@ -55,7 +55,7 @@ ARTISTS = [
     {"kind": "artist", "id": "c-ar-3", "source": "catalog", "name": "REO Speedwagon", "genres": ["Rock"]},
 ]
 ALBUMS = {
-    # id: (title, artist id, artist, year, colour, extra, [(title, seconds, disc)])
+    # id: (title, artist id, artist, year, color, extra, [(title, seconds, disc)])
     "c-al-1": ("Zen Arcade", "c-ar-1", "Hüsker Dü", 1984, "8a3324", {"recordLabel": "SST Records"},
                [("Something I Learned Today", 124, 1), ("Broken Home, Broken Heart", 121, 1),
                 ("Chartered Trips", 213, 2), ("Turn On the News", 263, 2)]),
@@ -73,11 +73,11 @@ ALBUMS = {
 def make_catalog():
     songs, albums = {}, {}
     n = 0
-    for album_id, (title, artist_id, artist, year, colour, extra, tracks) in ALBUMS.items():
+    for album_id, (title, artist_id, artist, year, color, extra, tracks) in ALBUMS.items():
         album = {"kind": "album", "id": album_id, "source": "catalog", "catalogId": album_id, "title": title,
                  "artist": artist, "artistId": artist_id, "genres": ["Punk"], "year": year,
                  "releaseDate": f"{year}-07-01", "trackCount": len(tracks), "isCompilation": False,
-                 "isSingle": False, "explicit": False, "audioTraits": ["lossless"], "artwork": art(colour),
+                 "isSingle": False, "explicit": False, "audioTraits": ["lossless"], "artwork": art(color),
                  "editorialNotes": f"{title}, from {year}.", "copyright": f"℗ {year}", "tracks": []}
         album.update(extra)
         number = {}
@@ -88,7 +88,7 @@ def make_catalog():
                     "artist": artist, "album": title, "albumId": album_id, "artistId": artist_id, "genres": ["Punk"],
                     "year": year, "releaseDate": album["releaseDate"], "duration": float(seconds),
                     "trackNumber": number[disc], "discNumber": disc, "explicit": name == "Turn On the News",
-                    "audioTraits": ["lossless"], "artwork": art(colour), "playable": True}
+                    "audioTraits": ["lossless"], "artwork": art(color), "playable": True}
             songs[song["id"]] = song
             album["tracks"].append(song["id"])
         albums[album_id] = album
@@ -528,8 +528,8 @@ class Handler(BaseHTTPRequestHandler):
         parts = [p for p in url.path.split("/") if p]
         if parts[:1] == ["art"]:
             size = int(parts[2].split("x")[0])
-            colour = parts[1]
-            top = tuple(int(colour[i:i + 2], 16) for i in (0, 2, 4))
+            color = parts[1]
+            top = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
             with tempfile.NamedTemporaryFile(suffix=".png") as f:
                 png(Path(f.name), top, tuple(c // 3 for c in top), min(size, 512))
                 return self.reply(200, Path(f.name).read_bytes(), "image/png")

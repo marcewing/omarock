@@ -397,7 +397,7 @@ Item {
     }
 
     // Compact: transport and volume share a row. Expanded: the transport is
-    // centred and volume gets its own row underneath.
+    // centered and volume gets its own row underneath.
     Item {
       width: parent.width
       implicitHeight: root.large

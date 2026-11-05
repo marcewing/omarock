@@ -20,7 +20,7 @@ from fake_mpd import png  # noqa: E402
 
 PORT = 0
 STATIONS = [
-    # uuid, name, state, tags, codec, bitrate, hls, clicks, colour
+    # uuid, name, state, tags, codec, bitrate, hls, clicks, color
     ("st-kexp", "KEXP 90.3 FM", "Washington", "indie,alternative", "AAC+", 64, 0, 900, "e0a020"),
     ("st-kuow", "KUOW 94.9", "Washington", "news,public radio", "MP3", 128, 0, 400, "3060c0"),
     ("st-wxpn", "WXPN 88.5", "Pennsylvania", "aaa,rock", "MP3", 128, 0, 700, "c03030"),
@@ -53,10 +53,10 @@ def km(a, b, c, d):
 
 
 def station(row):
-    uuid, name, state, tags, codec, bitrate, hls, clicks, colour = row
+    uuid, name, state, tags, codec, bitrate, hls, clicks, color = row
     return dict({"stationuuid": uuid, "name": name, "url": f"http://radio.example/{uuid}",
                  "url_resolved": f"http://radio.example/{uuid}" + ("/hls.m3u8" if hls else ""),
-                 "homepage": "", "favicon": f"http://127.0.0.1:{PORT}/logo/{colour}.png", "tags": tags,
+                 "homepage": "", "favicon": f"http://127.0.0.1:{PORT}/logo/{color}.png", "tags": tags,
                  "country": "The United States Of America", "countrycode": "US", "state": state, "codec": codec,
                  "bitrate": bitrate, "hls": hls, "lastcheckok": 1, "clickcount": clicks, "votes": clicks // 10,
                  "geo_lat": None, "geo_long": None, "iso_3166_2": None}, **EXTRA.get(uuid, {}))
@@ -83,8 +83,8 @@ class Handler(BaseHTTPRequestHandler):
             log.write(json.dumps({"path": url.path, "query": query}) + "\n")
         parts = [p for p in url.path.split("/") if p]
         if parts[:1] == ["logo"]:
-            colour = parts[1].split(".")[0]
-            top = tuple(int(colour[i:i + 2], 16) for i in (0, 2, 4))
+            color = parts[1].split(".")[0]
+            top = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
             with tempfile.NamedTemporaryFile(suffix=".png") as f:
                 png(Path(f.name), top, tuple(c // 3 for c in top), 128)
                 return self.reply(200, Path(f.name).read_bytes(), "image/png")
@@ -98,9 +98,9 @@ class Handler(BaseHTTPRequestHandler):
                 else: found = [s for s in found if query["state"].lower() in s["state"].lower()]
             if query.get("countrycode"): found = [s for s in found if s["countrycode"] == query["countrycode"].upper()]
             if query.get("geo_lat"):
-                lat, lon, metres = float(query["geo_lat"]), float(query["geo_long"]), float(query.get("geo_distance", 0))
+                lat, lon, meters = float(query["geo_lat"]), float(query["geo_long"]), float(query.get("geo_distance", 0))
                 found = [s for s in found if s["geo_lat"] is not None
-                         and km(lat, lon, s["geo_lat"], s["geo_long"]) * 1000 <= metres]
+                         and km(lat, lon, s["geo_lat"], s["geo_long"]) * 1000 <= meters]
             found.sort(key=lambda s: -s["clickcount"])
             return self.reply(200, found[:int(query.get("limit", 100))])
         if url.path == "/json/stations/byuuid":

@@ -125,7 +125,7 @@ Item {
   function setRepeat(on) {}
   function setVolume(value) { if (root.mpd) root.mpd.setVolume(value) }
 
-  // A channel in or out of the account's favourites (the SiriusXM app's too).
+  // A channel in or out of the account's favorites (the SiriusXM app's too).
   function toggleFavorite(channelId, callback) {
     var channel = root.channels.filter(function(c) { return c.id === channelId })[0]
     if (!channel) return

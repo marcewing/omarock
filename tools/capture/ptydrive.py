@@ -26,7 +26,7 @@ while time.time() < deadline:
         if not chunk:
             break
         raw += chunk
-        # Answer terminal queries as a terminal would: cursor position, background colour.
+        # Answer terminal queries as a terminal would: cursor position, background color.
         if b"\x1b[6n" in chunk:
             os.write(fd, b"\x1b[1;1R")
         if b"\x1b]11;?" in chunk:

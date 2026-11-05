@@ -353,7 +353,7 @@ function appleItem(item, extra, service) {
     field("Last played", formatDate(lib.lastPlayed, true)),
     field("Rating", stars(lib.rating)),
     // In the Music app's Favorite Songs playlist (once Loved Songs), per the bridge.
-    field("Favourite", yesNo(lib.loved)),
+    field("Favorite", yesNo(lib.loved)),
     field("File", lib.fileKind),
     field("Bitrate", lib.bitrate > 0 ? lib.bitrate + " kbps" : ""),
     field("Sample rate", formatRate(lib.sampleRate)),
@@ -373,7 +373,7 @@ function appleItem(item, extra, service) {
 }
 
 function favoriteStatus(favorite) {
-  return favorite ? ["In your favourites", "yes"] : ["Not in your favourites", "no"]
+  return favorite ? ["In your favorites", "yes"] : ["Not in your favorites", "no"]
 }
 
 // A station from Radio Browser. extra: { favorite, now: { artist, title }

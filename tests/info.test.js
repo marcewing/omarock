@@ -113,7 +113,7 @@ test("appleItem: the bridge's library details, and an album's", () => {
   for (const want of ["APPLE MUSIC: Link = https://music.apple.com/x", "YOUR LIBRARY: Added = 2 Apr 2019",
     "YOUR LIBRARY: Plays = 12", "YOUR LIBRARY: Rating = ★★★★☆", "YOUR LIBRARY: File = Matched AAC audio file",
     "YOUR LIBRARY: Bitrate = 256 kbps", "YOUR LIBRARY: Sample rate = 44.1 kHz", "YOUR LIBRARY: Size = 7.0 MB",
-    "YOUR LIBRARY: In iCloud = Yes", "YOUR LIBRARY: Protected (DRM) = No", "YOUR LIBRARY: Favourite = No",
+    "YOUR LIBRARY: In iCloud = Yes", "YOUR LIBRARY: Protected (DRM) = No", "YOUR LIBRARY: Favorite = No",
     "YOUR LIBRARY: Library id = 39206"])
     assert.ok(all.includes(want), want)
   const album = Info.appleItem({ kind: "album", id: "9", source: "catalog", title: "Zen Arcade", artist: "Hüsker Dü",
@@ -135,25 +135,25 @@ test("foundInLibrary: by catalog id, else by title and artist, accents aside", (
   assert.equal(Info.foundInLibrary(diane, {}, Apple.foldKey), false)
 })
 
-test("station: favourite status, what's on, the stream", () => {
+test("station: favorite status, what's on, the stream", () => {
   const out = Info.station({ name: "KXYZ", stationuuid: "u-1", state: "Oregon", country: "The United States Of America", countrycode: "US",
     tags: "community, college", codec: "MP3", bitrate: 128, url_resolved: "http://x/stream", lastcheckok: 1,
     votes: 40, hls: 0 }, { favorite: true, now: { artist: "Low", title: "Words" } })
   assert.equal(out.serviceName, "Radio")
-  assert.equal(out.status, "In your favourites")
+  assert.equal(out.status, "In your favorites")
   assert.deepEqual(out.lines, ["Oregon, US", "Low – Words"])
   assert.deepEqual(lines(out).slice(0, 3), ["ON NOW: Artist = Low", "ON NOW: Title = Words", "STATION: Place = Oregon, US"])
   assert.equal(Info.station({ name: "Y", country: "Canada" }, {}).lines[0], "Canada")
   assert.ok(lines(out).includes("STREAM: Format = MP3 · 128 kbps"))
   assert.ok(lines(out).includes("STREAM: Last check = Working"))
-  assert.equal(Info.station({ name: "X" }, {}).status, "Not in your favourites")
+  assert.equal(Info.station({ name: "X" }, {}).status, "Not in your favorites")
 })
 
 test("channel: number and genre, what's on, the description", () => {
   const out = Info.channel({ id: "c1", number: "70", name: "Real Jazz", genre: "Jazz", description: "Classic jazz.",
     favorite: true, available: true }, { artist: "Miles Davis", title: "So What", show: "" })
   assert.equal(out.serviceName, "SiriusXM")
-  assert.equal(out.status, "In your favourites")
+  assert.equal(out.status, "In your favorites")
   assert.deepEqual(out.lines, ["Channel 70 · Jazz", "Miles Davis – So What"])
   assert.equal(out.notes, "Classic jazz.")
   assert.ok(lines(out).includes("CHANNEL: Channel id = c1"))

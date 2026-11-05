@@ -31,7 +31,7 @@ function channelRow(channel, now, section, playingId) {
     playing: channel.id === playingId, missing: channel.available === false }
 }
 
-// The channel list: favourites first, then every channel by number.
+// The channel list: favorites first, then every channel by number.
 function channelRows(channels, nowPlaying, playingId) {
   var rows = []
   var favorites = channels.filter(function(c) { return c.favorite })
@@ -65,7 +65,7 @@ function numberOf(channel) {
   return isNaN(n) ? 1e6 : n
 }
 
-// n and p: the next or previous favourite when the channel playing is one,
+// n and p: the next or previous favorite when the channel playing is one,
 // else the next or previous channel by number. Wraps around.
 function stepChannel(channels, currentId, delta) {
   var current = channels.filter(function(c) { return c.id === currentId })[0]

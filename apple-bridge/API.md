@@ -363,7 +363,7 @@ offers a code at its end, and `./install pair` there opens a new one any time.
 - The bridge logs opening, wrong tries (with the machine and the tries left), the
   pairing (with the machine) and closing, never the code or the token.
 
-## Behaviour
+## Behavior
 
 - **Nobody listening, nothing playing.** When the Icecast mount has had no
   listener for 30 seconds while the bridge is playing, the bridge pauses. So

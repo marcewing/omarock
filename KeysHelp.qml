@@ -73,7 +73,7 @@ Rectangle {
     { title: "PLAYLISTS", keys: [
       ["P", "Your playlists; saving the queue as one, and History, are at the top"],
       ["A", "Add the song, album, artist or genre to a playlist, or start a new one (with no cursor, the song playing)"],
-      ["A", "On SiriusXM or the radio: make the channel or station a favourite, or take it out (with no cursor, the one playing)"],
+      ["A", "On SiriusXM or the radio: make the channel or station a favorite, or take it out (with no cursor, the one playing)"],
       ["x", "In a playlist, remove the song; on a playlist, delete it (asks first)"]
     ] },
     { title: "HISTORY", keys: [
@@ -100,7 +100,7 @@ Rectangle {
     ] }
   ]
 
-  // Opaque, in the card's own colour, so the panel underneath doesn't show.
+  // Opaque, in the card's own color, so the panel underneath doesn't show.
   color: Commons.Color.popups.background
 
   MouseArea {

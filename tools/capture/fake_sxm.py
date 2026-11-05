@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """A fake omarock-sxm service (sxm/README.md), for testing the panel's
-SiriusXM mode: a few channels, what's playing on them, favourites, and
+SiriusXM mode: a few channels, what's playing on them, favorites, and
 artwork it draws itself. It serves no audio (the fake mpd never fetches the
 streams). Every request is logged (method, path) for the tests.
 
@@ -19,7 +19,7 @@ from fake_mpd import png  # noqa: E402
 
 PORT = 0
 CHANNELS = [
-    # id, number, name, genre, favourite, colour
+    # id, number, name, genre, favorite, color
     ("ch-2", "2", "SiriusXM Hits 1", "Pop", False, "c0306a"),
     ("ch-8", "8", "80s on 8", "Rock", True, "e0a020"),
     ("ch-20", "20", "E Street Radio", "Rock", True, "4060c0"),
@@ -43,8 +43,8 @@ class State:
         self.closed_until = 0.0
 
 
-def art(colour):
-    return f"http://127.0.0.1:{PORT}/art/{colour}/{{w}}x{{h}}"
+def art(color):
+    return f"http://127.0.0.1:{PORT}/art/{color}/{{w}}x{{h}}"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -74,8 +74,8 @@ class Handler(BaseHTTPRequestHandler):
         if parts[:1] == ["v1"] and self.headers.get("X-Omarock") != "1":
             return self.reply(403, {"error": "Only omarock asks here (X-Omarock: 1)."})
         if parts[:1] == ["art"]:
-            colour, size = parts[1], int(parts[2].split("x")[0])
-            top = tuple(int(colour[i:i + 2], 16) for i in (0, 2, 4))
+            color, size = parts[1], int(parts[2].split("x")[0])
+            top = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
             with tempfile.NamedTemporaryFile(suffix=".png") as f:
                 png(Path(f.name), top, tuple(c // 3 for c in top), min(size, 512))
                 return self.reply(200, Path(f.name).read_bytes(), "image/png")
@@ -88,9 +88,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True, "version": "fake", "account": True, "loggedIn": True, "error": "", "playing": []})
         if path == "v1/channels":
             return self.reply(200, [{"id": cid, "number": num, "name": name, "shortName": "", "genre": genre,
-                                     "description": "", "logo": art(colour), "stream": f"http://127.0.0.1:{PORT}/stream/{cid}",
+                                     "description": "", "logo": art(color), "stream": f"http://127.0.0.1:{PORT}/stream/{cid}",
                                      "favorite": cid in state.favorites, "available": True}
-                                    for cid, num, name, genre, _, colour in CHANNELS])
+                                    for cid, num, name, genre, _, color in CHANNELS])
         if path == "v1/nowplaying":
             return self.reply(200, {cid: {"artist": a, "title": t, "show": show, "isAd": not a and not t,
                                           "startedAt": "2026-10-19T20:00:00Z", "art": art("888888") if a else None}

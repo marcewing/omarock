@@ -1,7 +1,7 @@
 import QtQuick
 
 // One line of text that scrolls when it doesn't fit: it rests a moment, moves
-// left until a second copy (after a gap) has come round to where it started,
+// left until a second copy (after a gap) has come around to where it started,
 // and rests again. With scroll off, or while it isn't active (its panel
 // closed), it's cut short with … instead. Plain text.
 Item {

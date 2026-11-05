@@ -40,7 +40,7 @@ By hand, run the tools from your omarock clone: the plugin's folder,
 
 1. **omarock's sound output** is optional ([audio/README.md](../audio/README.md)).
 2. **The developer app.** In the dashboard, create an app. Give it the redirect
-   URI `http://127.0.0.1:8730/callback`, and tick the Web API. Then save its
+   URI `http://127.0.0.1:8730/callback`, and check Web API. Then save its
    Client ID for omarock:
    ```bash
    mkdir -p ~/.config/omarock
@@ -68,7 +68,7 @@ By hand, run the tools from your omarock clone: the plugin's folder,
 6. **Sign in to the Web API:** `tools/omarock-sp login`. It opens Spotify's
    sign-in page; afterwards `tools/omarock-sp health` says `"authorized": true`.
 7. **Switch Spotify on** in omarock's settings (`,` in the panel). A Spotify
-   button appears in the panel, and `m` goes round to it. The settings also
+   button appears in the panel, and `m` goes around to it. The settings also
    change the Client ID and the Soloist key later, and sign you in again.
 
 ## How it behaves

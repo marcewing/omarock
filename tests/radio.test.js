@@ -15,7 +15,7 @@ test("a queued station carries its uuid after #, which the server never sees", (
   assert.equal(Radio.isRadio("iTunes Music/x.mp3"), false)
 })
 
-test("listRows: favourites, then local stations not already favourites", () => {
+test("listRows: favorites, then local stations not already favorites", () => {
   const rows = Radio.listRows([kexp], [wjrr, kexp, hlsOnly], "u2", "Florida")
   assert.deepEqual(rows.map(r => [r.section, r.title, r.favorite, r.playing, r.missing === true]), [
     ["FAVORITES", "KEXP 90.3", true, true, false],
@@ -50,7 +50,7 @@ test("songAsMpd: the song when sent, else the station; the station as the album"
     { file: "f", title: "Some Stream", artist: "", album: "", genre: "" })
 })
 
-test("stepStation goes round the playable favourites", () => {
+test("stepStation goes around the playable favorites", () => {
   assert.equal(Radio.stepStation([kexp, hlsOnly, wjrr], "u2", 1).stationuuid, "u1")
   assert.equal(Radio.stepStation([kexp, wjrr], "u1", 1).stationuuid, "u2")
   assert.equal(Radio.stepStation([kexp, wjrr], "nope", -1).stationuuid, "u2")

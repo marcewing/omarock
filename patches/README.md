@@ -15,7 +15,7 @@ the upstream request. mpd can find cover art for music files served over HTTP,
 and that commit gives that up. Leave it out (apply only the first commit) if you
 queue such files.
 
-## libFLAC: no patch any more
+## libFLAC: no patch anymore
 
 libFLAC's Ogg reader fills each 8 KiB read before returning any audio. On a
 paused Mac's stream, that once meant mpd waited tens of seconds, then played

@@ -16,7 +16,7 @@
 // account, arg }:
 //   "text": a line, filled in with what's set already;
 //   "secret": a key or a password, never shown; empty keeps one that's set;
-//   "check": a tick (ticked to start with if `defaultValue` is true), which
+//   "check": a switch (on to start with if `defaultValue` is true), which
 //     goes to ./install as --yes ARG or --no ARG;
 //   "mac": the Mac running the bridge, from the tailnet's Macs or typed,
 //     checked live: it has to answer;
@@ -43,7 +43,7 @@ var pages = {
     ],
     steps: [
       { title: "Your developer app",
-        text: ["In Spotify's developer dashboard, create an app. Give it this redirect URI, and tick Web API:"],
+        text: ["In Spotify's developer dashboard, create an app. Give it this redirect URI, and check Web API:"],
         copies: [REDIRECT],
         links: [{ label: "Spotify's developer dashboard", url: "https://developer.spotify.com/dashboard" }],
         fields: [{ key: "spotifyClient", type: "text", lead: "From the developer dashboard, copy the app's Client ID and paste it here:",
@@ -76,7 +76,7 @@ var pages = {
         text: ["omarock-sxm signs in as SiriusXM's web player does. SiriusXM's terms forbid that, so your account could be limited or closed, and it may stop working whenever SiriusXM changes its player."],
         links: [{ label: "More in sxm/README.md", url: GUIDES + "sxm/README.md" }],
         fields: [{ key: "sxmTerms", type: "check", label: "I understand: set it up anyway", required: true,
-          needs: "a tick that you understand the risk", arg: "terms" }] },
+          needs: "you to accept the risk", arg: "terms" }] },
       { title: "Your SiriusXM login",
         text: ["Kept in a file only you can read. The password is never shown."],
         fields: [
@@ -163,7 +163,7 @@ function bridgeUrl(address) {
 }
 
 // What the fields start with: what's set already (known: tools/omarock-account
-// show), for a line or the Mac; nothing typed for a secret; a tick as its
+// show), for a line or the Mac; nothing typed for a secret; a switch as its
 // default; the default output.
 function initial(piece, known, defaultOutput) {
   known = known || {}
@@ -253,7 +253,7 @@ function writes(piece, values, known) {
   return out
 }
 
-// ./install's words after the piece: --yes or --no for each tick, the output.
+// ./install's words after the piece: --yes or --no for each switch, the output.
 function args(piece, values) {
   values = values || {}
   var out = []

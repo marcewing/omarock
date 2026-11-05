@@ -6,7 +6,7 @@ import "Places.js" as Places
 import "Radio.js" as Radio
 
 // Internet radio: stations from Radio Browser (radio-browser.info, free and
-// keyless), played by mpd straight from the station's stream. Favourites are
+// keyless), played by mpd straight from the station's stream. Favorites are
 // the mpd stored playlist "Radio", so mpc sees them too; local stations are
 // those of the radioArea setting (a city, region or country, found in
 // places.tsv on this machine, Places.js), else of the US state the older
@@ -26,7 +26,7 @@ Item {
 
   property string server: ""
   property string lastError: ""
-  // Every station seen, by uuid; the favourites in the playlist's order; the
+  // Every station seen, by uuid; the favorites in the playlist's order; the
   // area's stations (Radio.localStations).
   property var stations: ({})
   property var favorites: []
@@ -330,10 +330,10 @@ Item {
     cacheReader.running = true
   }
 
-  // The favourites: the "Radio" playlist's stations, looked up by uuid.
+  // The favorites: the "Radio" playlist's stations, looked up by uuid.
   function refreshFavorites(callback) {
     if (!root.mpd) return
-    // No "Radio" playlist yet: no favourites (and no error from mpd to show).
+    // No "Radio" playlist yet: no favorites (and no error from mpd to show).
     if (!root.mpd.playlists.some(function(p) { return p.name === root.playlist })) {
       root.favorites = []
       if (callback) callback()

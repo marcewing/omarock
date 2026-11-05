@@ -31,7 +31,7 @@ OUTPUT_COMMANDS = {"enableoutput", "disableoutput", "toggleoutput", "outputset"}
 
 ALBUMS = [
     # albumartist (None: no tag, filed under Compilations), album, year,
-    # cover colours (or None), [(title, artist, seconds[, disc])]. Genres are
+    # cover colors (or None), [(title, artist, seconds[, disc])]. Genres are
     # in GENRES.
     ("Glass Harbor", "Low Tide Signals", "2019", ((246, 178, 107), (58, 31, 61)), [
         ("Glasswork", None, 214), ("Paper Lanterns", None, 248), ("Undertow", None, 191),
@@ -70,8 +70,8 @@ def png(path, top, bottom, size=240):
     rows = bytearray()
     for y in range(size):
         t = y / (size - 1)
-        colour = bytes(round(a + (b - a) * t) for a, b in zip(top, bottom))
-        rows += b"\x00" + colour * size
+        color = bytes(round(a + (b - a) * t) for a, b in zip(top, bottom))
+        rows += b"\x00" + color * size
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)

@@ -41,7 +41,7 @@ Rectangle {
 
   onInfoChanged: if (!root.loading) flick.contentY = 0
 
-  // Opaque, in the card's own colour, so the panel underneath doesn't show.
+  // Opaque, in the card's own color, so the panel underneath doesn't show.
   color: Commons.Color.popups.background
 
   MouseArea {
@@ -110,7 +110,7 @@ Rectangle {
 
       }
 
-      // In your library or not (Apple Music); in your favourites (SiriusXM,
+      // In your library or not (Apple Music); in your favorites (SiriusXM,
       // radio). Then, for Apple Music and Spotify, adding it (or taking it out).
       Row {
         spacing: Style.space(14)

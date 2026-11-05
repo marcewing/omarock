@@ -112,7 +112,7 @@ Rectangle {
     flick.contentY = 0
   }
 
-  // Tab and Shift+Tab: the next or previous tab, going round.
+  // Tab and Shift+Tab: the next or previous tab, going around.
   function nextTab(dx) {
     var at = root.tabs.indexOf(root.tab)
     root.showTab(root.tabs[((at + dx) % root.tabs.length + root.tabs.length) % root.tabs.length])
@@ -188,7 +188,7 @@ Rectangle {
     else if (row.type !== "info") root.startEdit(row.key)
   }
 
-  // A choice: the next or previous of its options, going round.
+  // A choice: the next or previous of its options, going around.
   function choose(row, dx) {
     var options = row.options || []
     if (options.length === 0) return
@@ -426,7 +426,7 @@ Rectangle {
                 width: parent.width
                 visible: !!rowItem.note && rowItem.note.text !== ""
                 textFormat: Text.PlainText
-                // ✓ and ✗ as well as the colour, which some themes make hard to tell apart.
+                // ✓ and ✗ as well as the color, which some themes make hard to tell apart.
                 text: !rowItem.note ? "" : (rowItem.note.kind === "ok" ? "✓ " : rowItem.note.kind === "bad" ? "✗ " : "") + rowItem.note.text
                 color: rowItem.note && rowItem.note.kind === "bad" ? Commons.Color.urgent
                   : rowItem.note && rowItem.note.kind === "ok" ? Commons.Color.accent : root.dim

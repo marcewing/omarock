@@ -53,9 +53,9 @@ test("the values saved first: what was typed, a line only if it changed", () => 
     { appleBridge: "http://100.64.0.10:8710" }), [])
 })
 
-test("SiriusXM: the risk is ticked, and the login filled in", () => {
+test("SiriusXM: the risk is accepted, and the login filled in", () => {
   assert.equal(Setup.blocker("siriusxm", { sxmTerms: false, sxmUser: "me", sxmPassword: "p" }, {}),
-    "Needs a tick that you understand the risk")
+    "Needs you to accept the risk")
   assert.equal(Setup.blocker("siriusxm", { sxmTerms: true, sxmUser: "", sxmPassword: "p" }, {}),
     "Needs your SiriusXM email or username")
   assert.equal(Setup.blocker("siriusxm", { sxmTerms: true, sxmUser: "me", sxmPassword: "p" }, {}), "")
@@ -172,7 +172,7 @@ test("the windows as Marc laid them out: no Tailscale link, no list of what the 
   assert.ok(!all.some(p => p.steps.some(s => (s.links || []).some(l => /tailscale/i.test(l.label + l.url)))))
   const apple = Setup.pages["apple-music"]
   assert.equal(apple.steps[4].title, "Smooth playback (optional, recommended)")
-  // The recommended fix starts ticked; the libFLAC one is gone (bridge 0.7.0's stream needs none).
+  // The recommended fix starts on; the libFLAC one is gone (bridge 0.7.0's stream needs none).
   assert.deepEqual(Setup.args("apple-music", Setup.initial("apple-music", {})), ["--yes", "mpris"])
   assert.ok(!apple.steps[4].fields.some(f => f.key === "flac"))
   // What's done on the Mac is shown to type there, not to copy (this clipboard doesn't reach it), and
