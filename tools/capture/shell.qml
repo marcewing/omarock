@@ -259,7 +259,7 @@ ShellRoot {
       p.clearSearch()
       p.closeInfo()
       p.keysOpen = false
-      p.settingsOpen = false
+      if (p.settingsOpen) p.closeSettings()
       p.yearPickerOpen = false
       p.cursorActive = false
       p.cardFocus = ""

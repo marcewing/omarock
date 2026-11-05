@@ -205,7 +205,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.16.0"
+  readonly property string version: "0.16.1"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -599,14 +599,14 @@ Panel {
       parts = root.cursorActive && row
         ? [hint("Enter", "tune", "Tune it", true), hint("A", row.favorite ? "unfavourite" : "favourite",
           row.favorite ? "Take it out of your favourites" : "Add it to your favourites"), info, steps]
-        : [hint("Space", "play/stop", "Play or stop", true)].concat(root.playingFavoriteHint(),
+        : root.playingFavoriteHint().concat(
           [hint("/", root.sxmMode ? "find a channel" : "find a station", root.sxmMode ? "Search the channels" : "Search for a station"), steps])
       return parts.concat(root.cursorActive && row ? [] : time, source, [hint("H", "history", "What you've played here")], [keys])
     }
     if (!root.searchMode && !root.browsing) {
       if (!root.cursorActive || !row)
-        return [hint("Space", "play/pause", "Play or pause", true), hint("/", "search", "Search"),
-          hint("P", "playlists", "Your playlists")].concat(time, source, [hint("H", "history", "What you've played here"), keys])
+        return [hint("/", "search", "Search", true), hint("P", "playlists", "Your playlists")]
+          .concat(time, source, [hint("H", "history", "What you've played here"), keys])
       parts = [hint("Enter", "play", "Play from this song", true), hint("A", "add to playlist", "Add the song to a playlist")]
       if (!root.bridgeMode || root.bridge.canRemove) parts.push(hint("x", "remove", "Take the song out of the queue"))
       parts.push(info)
@@ -3117,7 +3117,12 @@ Panel {
     }
   }
 
+  // The settings show in the expanded panel: opened from the compact one,
+  // it goes back to compact when they close.
+  property bool settingsFromCompact: false
   function openSettings() {
+    if (!root.settingsOpen) root.settingsFromCompact = !root.expanded
+    root.expanded = true
     root.pairNote = { text: "", kind: "" }
     root.keysOpen = false
     root.closeInfo()
@@ -3133,6 +3138,8 @@ Panel {
 
   function closeSettings() {
     root.settingsOpen = false
+    if (root.settingsFromCompact) root.expanded = false
+    root.settingsFromCompact = false
     keyCatcher.forceActiveFocus()
   }
 
@@ -3996,7 +4003,7 @@ Panel {
     open: root.opened
     centerOnBar: false
     focusTarget: focusReturn
-    contentWidth: panel.fittedContentWidth(Style.space(root.expanded ? 1120 : 430))
+    contentWidth: panel.fittedContentWidth(Style.space(root.expanded ? 1120 : 464))
     contentHeight: root.expanded
       ? panel.fittedContentHeight(Style.space(740))
       : panel.fittedContentHeight(layout.item ? layout.item.implicitHeight : Style.space(400))
@@ -4939,19 +4946,34 @@ Panel {
 
   // The key hints, or the latest notice, in a fixed number of lines, so the
   // panel never changes height: hints that don't fit are left out (the keys
-  // page has them all), and a notice too long is cut short.
+  // page has them all), and a notice too long is cut short. A notice may
+  // have more lines (noticeLines) than the hints: the extra ones are drawn
+  // over what's above, on the panel's own background, while it shows, so
+  // nothing moves.
   component HintLine: Item {
     id: hintLine
     property int lines: 1
+    property int noticeLines: lines
     property alias horizontalAlignment: hintText.horizontalAlignment
     implicitHeight: root.captionLine * lines
+
+    Rectangle {
+      visible: hintText.lineCount > hintLine.lines
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      height: hintText.height + Style.space(14)
+      color: Commons.Color.popups.background
+    }
 
     Text {
       id: hintText
       objectName: "hints"
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
+      // One line high, the line's own height: as centred, and a notice's
+      // second line goes up from it.
+      anchors.bottom: parent.bottom
       textFormat: Text.PlainText
       text: root.notice !== "" ? root.notice
         : hintLine.width > 0 && root.captionLine > 0 ? Hints.fit(root.hintParts, hintLine.width - 1, hintLine.lines, root.captionWidth) : ""
@@ -4960,7 +4982,7 @@ Panel {
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap
       elide: Text.ElideRight
-      maximumLineCount: hintLine.lines
+      maximumLineCount: root.notice !== "" ? hintLine.noticeLines : hintLine.lines
     }
   }
 
@@ -5292,7 +5314,7 @@ Panel {
           brief: true
           anchors.left: compactIcon.right
           anchors.leftMargin: Style.space(14)
-          anchors.right: compactChip.visible ? compactChip.left : compactSource.visible ? compactSource.left : expandButton.left
+          anchors.right: compactChip.visible ? compactChip.left : compactSource.visible ? compactSource.left : compactSettings.left
           anchors.rightMargin: Style.space(10)
           anchors.verticalCenter: parent.verticalCenter
         }
@@ -5300,7 +5322,7 @@ Panel {
         TimeMachineChip {
           id: compactChip
           brief: true
-          anchors.right: compactSource.visible ? compactSource.left : expandButton.left
+          anchors.right: compactSource.visible ? compactSource.left : compactSettings.left
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
         }
@@ -5308,17 +5330,35 @@ Panel {
         SourceSwitch {
           id: compactSource
           iconsOnly: true
-          anchors.right: expandButton.left
+          anchors.right: compactSettings.left
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
         }
 
+        // The settings show in the expanded panel, which goes back to this
+        // one when they close.
+        Button {
+          id: compactSettings
+          objectName: "settingsButton"
+          anchors.right: expandButton.left
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: "󰒓"
+          iconSize: fontSize
+          implicitHeight: expandButton.implicitHeight
+          bordered: true
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          fontSize: Style.font.caption
+          tooltipText: "Settings (,)"
+          onClicked: root.openSettings()
+        }
+
         Button {
           id: expandButton
+          objectName: "expandButton"
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          // Its icon alone beside Time Machine's chip, so omarock's name fits.
-          text: compactChip.visible ? "" : "Expand"
           iconText: "󰊓"
           bordered: true
           foreground: root.foreground
@@ -5378,9 +5418,8 @@ Panel {
       TrackList {
         width: parent.width
         // What the heading above takes comes out of the list, so the panel
-        // is the same height on the queue, in search and browsing; and so
-        // does the hints' second line, so it's as tall as it was with one.
-        height: Style.space(310) - root.captionLine
+        // is the same height on the queue, in search and browsing.
+        height: Style.space(310)
           - (compactQueueHeading.visible ? compactQueueHeading.height + parent.spacing : 0)
           - (compactBrowseHeading.visible ? compactBrowseHeading.height + parent.spacing : 0)
       }
@@ -5389,7 +5428,7 @@ Panel {
 
       HintLine {
         width: parent.width
-        lines: 2
+        noticeLines: 2
       }
     }
   }

@@ -2515,12 +2515,13 @@ def keep_state_scenario(host, output, failures):
     host.call("typeKeys", "Nevad")
     reopen()
     s = host.state()
-    check(s["settingsOpen"] and s["settingsEditing"] == "" and s["settingValues"].get("radioArea") == was
+    check(s["settingsOpen"] and s["expanded"] and s["settingsEditing"] == "" and s["settingValues"].get("radioArea") == was
           and settings_file().get("radioArea") in (None, was),
-          "settings still open; the half-typed state wasn't saved: " + json.dumps([s["settingsOpen"], s["settingsEditing"], was,
-          s["settingValues"].get("radioArea"), settings_file().get("radioArea")]), failures)
+          "settings still open (expanded, as they opened); the half-typed state wasn't saved: " + json.dumps([s["settingsOpen"],
+          s["settingsEditing"], was, s["settingValues"].get("radioArea"), settings_file().get("radioArea")]), failures)
     host.call("press", ",")
     wait_for(lambda: not host.state()["settingsOpen"], "settings closed")
+    wait_for(lambda: not host.state()["expanded"], "back to compact, after a close and reopen too")
 
     # The harness's own close starts the next scenario fresh.
     host.call("close")
@@ -2533,7 +2534,9 @@ def keep_state_scenario(host, output, failures):
 def hints_scenario(host, output, failures):
     """The line of key hints keeps its height whatever it says, so the panel
     doesn't grow: hints that don't fit are left out, and a long notice is cut
-    short. The keys page's RIGHT NOW lists the keys that do something where
+    short (Marc, 11-05: no "Space play/pause", so the compact panel's hints are
+    one line too; a notice there may take a second, drawn over the list's
+    foot). The keys page's RIGHT NOW lists the keys that do something where
     the panel is, all of them. w, or its Window button, keeps the keys open in
     a window of their own: fixed in size as it maps, so Hyprland floats it,
     then free to resize, and RIGHT NOW there follows the panel. The expanded
@@ -2567,12 +2570,14 @@ def hints_scenario(host, output, failures):
 
     for expanded in (False, True):
         mode = "expanded" if expanded else "compact"
-        lines = 1 if expanded else 2
+        lines = 1
         host.call("expand", "true" if expanded else "false")
         host.settle(.8)
         s, h = line(mode + ": the queue")
         height, card = h.get("height"), s["cardHeight"]
         check(height and height > 0, mode + ": the hint line is there", failures)
+        check(h.get("lines") == 1 and not h.get("truncated") and "Space" not in s["hint"] and h.get("text") == s["hint"],
+              mode + ": the queue's hints, all of them on one line, with no Space: " + str(h.get("text")), failures)
         if expanded:
             # ? and t are keys, and on the hint line; the header doesn't repeat them.
             buttons = s["headerButtons"] or []
@@ -2605,15 +2610,16 @@ def hints_scenario(host, output, failures):
             cursor_to(host, "track:Orbit Song", failures)
             host.settle(.3)
             s = steady(mode + ": a song in an album", lines, height, card)
-            check(s["hintLine"]["text"] == s["hint"] or expanded is False and s["hintLine"]["lines"] == 2,
+            check(s["hintLine"]["text"] == s["hint"] or not expanded,
                   mode + ": the album song's hints: " + s["hintLine"]["text"], failures)
             if not expanded: host.grab(output / "hints-compact.png")
         host.call("say", long_notice)
         host.settle(.3)
-        s = steady(mode + ": a long notice", lines, height, card)
-        check(s["hintLine"]["text"] == long_notice and s["hintLine"]["truncated"],
-              mode + ": the notice is cut short, not wrapped onto more lines", failures)
-        if expanded: host.grab(output / "hints-expanded.png")
+        s = steady(mode + ": a long notice", 1 if expanded else 2, height, card)
+        check(s["hintLine"]["text"] == long_notice and s["hintLine"]["truncated"]
+              and s["hintLine"]["lines"] == (1 if expanded else 2),
+              mode + ": the notice is cut short (compact: on a second line, over the list's foot), and nothing moves", failures)
+        host.grab(output / ("hints-expanded.png" if expanded else "hints-compact-notice.png"))
         wait_for(lambda: host.state()["notice"] == "", "the notice goes")
         host.call("close")
         host.call("open")
@@ -2825,9 +2831,10 @@ def browse_scenario(host, output, command_log, failures):
     check(s["browseInfo"]["subtitle"] == "Glass Harbor · 2021", "album heading: " + s["browseInfo"]["subtitle"], failures)
     # Play, Add to queue and Add to playlist are buttons under the heading,
     # and the list is the songs.
-    # (What Play stands for doesn't fit beside them here: it's on the heading's line.)
-    check(s["levelButtons"]["current"] == ["Play", "Add to queue", "Add to playlist"]
-          and s["headingLine"] == "Glass Harbor · 2021 · " + s["subtitles"][0]
+    # What Play stands for fits beside them in the compact panel (464 wide
+    # since 0.16.1; at 430 it went on the heading's line).
+    check(s["levelButtons"]["current"] == ["Play", "Add to queue", "Add to playlist", "(" + s["subtitles"][0] + ")"]
+          and s["headingLine"] == "Glass Harbor · 2021"
           and host.call("clickRow", 0, "false") == "not shown",
           "the album's buttons, and only its songs in the list: " + str(s["levelButtons"]["current"])
           + " | " + s["headingLine"], failures)
@@ -4562,9 +4569,11 @@ def paging_scenario(host, output, failures):
     host.call("press", "Escape")
     wait_for(lambda: host.state()["info"] is None, "the info card closed")
 
-    # The settings: a page at a time, and e.
+    # The settings: a page at a time, and e. From the compact panel they open
+    # in the expanded one (Marc, 11-05), which goes back to compact as they close.
     host.call("press", ",")
     wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "the settings")
+    wait_for(lambda: host.state()["expanded"], "the settings, expanded")
     host.settle(.3)
     the_settings = lambda s: (s["settingsCursor"], s["paging"]["settings"], s["paging"]["settingsY"], len(s["settingsRows"]),
                               s["paging"]["settingsY"] <= 1)
@@ -4574,22 +4583,24 @@ def paging_scenario(host, output, failures):
     host.settle(.2)
     before = host.state()
     host.call("press", "e")
-    wait_for(lambda: host.state()["expanded"], "e in the settings expands")
+    wait_for(lambda: not host.state()["expanded"], "e in the settings compacts")
     after = host.state()
     check(after["settingsOpen"] and after["settingsTab"] == before["settingsTab"] and after["settingsCursor"] == before["settingsCursor"],
-          f"e in the settings expands them, on the same tab and row ({before['settingsCursor']} -> {after['settingsCursor']})", failures)
-    host.grab(output / "expanded-settings-e.png")
+          f"e in the settings compacts them, on the same tab and row ({before['settingsCursor']} -> {after['settingsCursor']})", failures)
+    host.grab(output / "compact-settings-e.png")
     host.call("press", "PageDown")
     host.settle(.3)
     s = host.state()
     shown = s["paging"]["settings"]
     check(shown is not None and s["settingsCursor"] in (shown["last"], len(s["settingsRows"]) - 1),
-          f"PgDn in the expanded settings: to the last row in view ({s['settingsCursor']}, {shown})", failures)
+          f"PgDn in the compact settings: to the last row in view ({s['settingsCursor']}, {shown})", failures)
     host.call("press", "e")
-    wait_for(lambda: not host.state()["expanded"], "e in the settings compacts")
-    check(host.state()["settingsOpen"], "and compacts them, still open", failures)
+    wait_for(lambda: host.state()["expanded"], "e in the settings expands")
+    check(host.state()["settingsOpen"], "and expands them again, still open", failures)
     host.call("press", ",")
     wait_for(lambda: not host.state()["settingsOpen"], "the settings closed")
+    wait_for(lambda: not host.state()["expanded"], "back to compact")
+    check(True, "the settings closed: back to the compact panel they were opened from", failures)
 
     # The expanded panel: its list, then the results' column.
     host.call("press", "e")
@@ -5231,9 +5242,12 @@ def settings_scenario(host, output, failures):
     host.call("press", "Tab")
     host.settle(.3)
     check(host.state()["opened"] and not host.state()["settingsOpen"], "Tab outside the settings does nothing", failures)
+    check(not host.state()["expanded"], "the panel starts compact", failures)
     host.call("press", ",")
     wait_for(lambda: host.state()["settingsOpen"] and host.state()["settingsRows"], "settings open")
     wait_for(lambda: host.state()["sourcesState"], "what's set up, read")
+    # Marc, 11-05: the settings in the expanded panel, back to compact when they close.
+    check(host.state()["expanded"], ", in the compact panel: the settings open in the expanded one", failures)
     s = host.state()
     # Marc, 10-26: "split the settings panel into a few tabs, "omarock",
     # apple, xm, spotify, and sound. In omarock we put the your music, radio,
@@ -5397,10 +5411,18 @@ def settings_scenario(host, output, failures):
     check(host.state()["settingValues"]["musicFolder"] == folder and host.state()["settingsOpen"],
           "Esc keeps the folder as it was: " + folder, failures)
 
-    # Esc closes; the gear in the expanded panel opens it again.
+    # Esc closes, back to the compact panel; the gear there opens them again,
+    # expanded, and so does the expanded panel's.
     host.call("press", "Escape")
     wait_for(lambda: not host.state()["settingsOpen"], "closed")
-    check(host.state()["opened"], "Esc closes the settings, not the panel", failures)
+    wait_for(lambda: not host.state()["expanded"], "compact again")
+    check(host.state()["opened"], "Esc closes the settings, not the panel, and it's compact again", failures)
+    host.settle(.5)
+    host.grab(output / "compact-header.png")
+    check(host.call("clickPanel", "settingsButton") == "ok", "the compact panel has a gear", failures)
+    wait_for(lambda: host.state()["settingsOpen"] and host.state()["expanded"], "the compact gear opens them, expanded")
+    host.call("press", ",")
+    wait_for(lambda: not host.state()["settingsOpen"] and not host.state()["expanded"], ", closes them, back to compact")
     host.call("expand", "true")
     host.settle(1)
     check(host.call("clickPanel", "settingsButton") == "ok", "the expanded panel has a gear", failures)
@@ -5410,6 +5432,7 @@ def settings_scenario(host, output, failures):
     host.grab(output / "expanded-settings.png")
     host.call("press", ",")
     wait_for(lambda: not host.state()["settingsOpen"], ", closes them")
+    check(host.state()["expanded"], "opened from the expanded panel, it stays expanded", failures)
     host.call("expand", "false")
     host.call("settings", "{}")
     host.call("close")
@@ -5773,13 +5796,15 @@ def setup_scenario(host, output, failures):
           "a refused token: the tab's dot (its hover says why), Fix…, and the pairing field says to pair again: "
           + str(s["settingsTabTips"]), failures)
     settings_cursor_to(host, "bridgePair")
-    host.grab(output / "compact-settings-pair.png")
-    host.call("press", "e")
-    wait_for(lambda: host.state()["expanded"], "expanded settings")
+    wait_for(lambda: host.state()["expanded"], "the settings, expanded")
     host.settle(.5)
     host.grab(output / "expanded-settings-pair.png")
     host.call("press", "e")
     wait_for(lambda: not host.state()["expanded"], "compact settings")
+    host.settle(.5)
+    host.grab(output / "compact-settings-pair.png")
+    host.call("press", "e")
+    wait_for(lambda: host.state()["expanded"], "expanded settings")
     host.settle(.5)
     # Half a code, then Esc: nothing sent (each try counts).
     posts = len(pair_posts())
