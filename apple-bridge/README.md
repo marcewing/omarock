@@ -32,21 +32,58 @@ Linux: omarock ◀──── bridge API :8710 (JSON, bearer token) ───�
 You build it yourself, because it has to be signed with your own Apple Developer
 account for MusicKit to work.
 
-## Requirements
+## Before you start
 
-- **An Apple silicon Mac with macOS 15 or later.** The bridge itself needs macOS 14.2
-  (Core Audio process taps), but Homebrew, which the installer uses, supports only
-  Apple silicon on macOS 15 and later: since September 2026 Intel Macs and macOS 14
-  are its Tier 3, "not supported" ([docs.brew.sh/Support-Tiers](https://docs.brew.sh/Support-Tiers)).
-  Developed on macOS 27.
-- **Xcode** from the App Store, and [Homebrew](https://brew.sh) for `xcodegen`
-  and `icecast`.
-- **A paid Apple Developer Program membership** ($99 a year). MusicKit needs it, and a
-  bundle ID registered with MusicKit switched on (below).
-- **An Apple Music subscription** on the Apple ID the Mac's Music app uses.
-- **The Mac and the Linux machine on one network:** your home network, or both on
-  Tailscale. Omarchy finds the bridge on your network by itself (Bonjour).
-- **On Linux:** omarock with mpd, as in the [main README](../README.md).
+Most of the work is on Apple's side, and it goes best done before you run the installer.
+Set aside an hour the first time: Xcode is a large download, and a new developer
+membership can take a day or two to be approved. With all of this in place, `./install`
+takes about 15 minutes.
+
+In the order to do them:
+
+1. **An Apple silicon Mac with macOS 15 or later.** The bridge itself needs macOS 14.2
+   (Core Audio process taps), but Homebrew, which the installer uses, supports only
+   Apple silicon on macOS 15 and later: since September 2026 Intel Macs and macOS 14
+   are its Tier 3, "not supported" ([docs.brew.sh/Support-Tiers](https://docs.brew.sh/Support-Tiers)).
+   Developed on macOS 27.
+2. **A paid Apple Developer Program membership** ($99 a year), approved. Enrol at
+   [developer.apple.com/programs](https://developer.apple.com/programs/). A free Apple
+   developer account isn't enough: MusicKit needs the paid membership.
+3. **Xcode**, from the App Store, opened once: it asks you to agree to its license, and
+   installs its components. Apple's command-line tools alone aren't enough. Xcode also
+   gives you `git`, for the clone.
+4. **Your developer Apple ID in Xcode:** Xcode → Settings → Accounts → **+** → Apple ID.
+   You make a signing certificate there (step 1, below).
+5. **[Homebrew](https://brew.sh)**, installed as its page says. The installer gets
+   `gum`, `xcodegen` and `icecast` from it.
+6. **An Apple Music subscription** on the Apple ID the Mac's Music app uses.
+7. **The Mac and the Linux machine on one network:** your home network, or both on
+   Tailscale. Omarchy finds the bridge on your network by itself (Bonjour).
+8. **Remote Login on the Mac (optional):** System Settings → General → Sharing. Then setup
+   on Linux can copy the bridge's token itself. Without it you paste the token, and the
+   Mac's clipboard doesn't reach Linux.
+9. **On Linux:** omarock with mpd, as in the [main README](../README.md).
+
+### What Apple's steps are for
+
+Apple lets an app use MusicKit only when it can tell which paid developer the app
+belongs to. So you set up three things with Apple, and they must all belong to the
+same team:
+
+- **Your team.** A membership is a team, with a **Team ID**: 10 letters and digits,
+  under Membership details on developer.apple.com. Xcode also lists a "(Personal
+  Team)" for any Apple ID. That's the free kind, and MusicKit doesn't work with it.
+- **An Apple Development certificate:** your signing identity. Xcode makes it, and it's
+  kept in your login keychain. macOS trusts it through a chain: Apple's Worldwide
+  Developer Relations certificate signed yours, and Apple's root certificate signed
+  that one. Xcode usually adds that middle certificate. When it hasn't, yours is
+  there but not trusted, and nothing can be signed with it.
+- **A bundle ID:** the app's name to Apple, such as `com.yourname.omarock.bridge`. You
+  register it on developer.apple.com and switch MusicKit on for it there (step 1). The
+  bridge is built with it, and MusicKit works only for a bundle ID that has it on.
+
+After the build, the Mac itself asks a few questions (below, "The Mac's questions").
+Those are between you and macOS.
 
 ## 1. A bundle ID with MusicKit
 
@@ -62,8 +99,14 @@ account for MusicKit to work.
 Apple can take a few minutes before MusicKit answers for a new bundle ID; until then
 catalog requests come back empty.
 
-You also need an **Apple Development** signing certificate: Xcode → Settings → Accounts →
-add your Apple ID → your team → Manage Certificates → + → Apple Development.
+You also need an **Apple Development** signing certificate. In Xcode:
+
+1. Settings → **Accounts**, and your developer Apple ID (**+** adds it if it isn't there).
+2. On the right, pick your team: your name, or your company's. Not the one marked
+   "(Personal Team)".
+3. **Manage Certificates…**, then **+** → **Apple Development**, and **Done**.
+
+`./install` waits for the certificate, so you can also make it while it waits.
 
 ## 2. Build and install
 
@@ -106,6 +149,57 @@ incoming connections" on, nothing gets through: switch that off first.
 
 If macOS says the login item needs approval, allow OmarockBridge in System Settings →
 General → Login Items.
+
+### If the installer stops
+
+At each step the installer waits until what it needs is there, checking every few
+seconds, so you can fix things while it waits. If you stop it (Ctrl-C), run `./install`
+again: what's done is skipped. What it says, in the order you'd meet it, and what to do:
+
+- **"The installer needs Homebrew"** or **"Homebrew isn't here":** install Homebrew as
+  [brew.sh](https://brew.sh) says, then run `./install` again. On an Intel Mac, or
+  macOS 14 or older, the installer stops and says why: Homebrew doesn't support them.
+- **"Xcode is here, but the command-line tools are selected instead":** Homebrew's
+  installer adds Apple's command-line tools, and they can end up selected instead of
+  Xcode. Say yes, and it selects Xcode (`sudo xcode-select`).
+- **"Waiting for Xcode…":** Xcode hasn't been opened since it was installed. Open it,
+  agree to its license, and let it install its components.
+- **"Waiting for the certificate…":** make your Apple Development certificate in Xcode
+  (step 1, above). It doesn't matter whether you make it before or while it waits.
+- **"your Apple Development certificate is there, but macOS doesn't trust it":** Apple's
+  middle certificate is missing from your keychain (above, "What Apple's steps are
+  for"). Here `security find-identity -p codesigning` lists your certificate, but with
+  `-v` it finds 0 valid identities. Say yes, and the installer fetches the right one
+  from Apple and adds it to your login keychain. By hand:
+  1. In Keychain Access, open login → My Certificates → your Apple Development
+     certificate. Its issuer's Organizational Unit says which one signed it: G3 to G6.
+  2. Download that Worldwide Developer Relations certificate from
+     [apple.com/certificateauthority](https://www.apple.com/certificateauthority/)
+     (`AppleWWDRCAG3.cer`, say).
+  3. In Keychain Access, choose File → Import Items, into the login keychain.
+     Double-clicking the file can fail with error -25294, which means it went to a
+     keychain that can't take it.
+
+  Don't set your own certificate to Always Trust: that hides the problem, and doesn't
+  fix it.
+- **"Your Team ID":** the installer suggests your certificate's team. It must be the
+  team your bundle ID is registered to.
+- **"Your bundle ID":** type it exactly as the Identifiers list's **Identifier** column
+  shows it.
+- **"the build didn't finish":** the installer shows Xcode's errors, and the whole build
+  is in `apple-bridge/app/build/build.log`. For a signing error, check your Team ID and
+  bundle ID. They're in `apple-bridge/app/Local.xcconfig`; delete that file, and
+  `./install` asks for both again.
+- **"Waiting for the bridge…"**, then **"the bridge doesn't answer":** `bridge.log` says
+  why (below, "What it keeps where"), and see Troubleshooting.
+- **"Waiting for the login item…"**, **"Waiting for Apple Music access…"**, **"Waiting
+  for audio capture…"** or **"Waiting for Local Network access…":** there's a question
+  on the Mac's screen, maybe behind the terminal (above, "The Mac's questions"). Ctrl-C
+  skips one, and the next run checks it again.
+- **"MusicKit says this Mac can't play Apple Music's catalog":** check that the Music
+  app is signed in to an Apple ID with an Apple Music subscription, and that MusicKit is
+  ticked for your bundle ID on developer.apple.com. A new bundle ID can take a few
+  minutes.
 
 ### Keep the Mac awake
 
@@ -245,17 +339,13 @@ whether the bridge is new enough.
 
 ## Troubleshooting
 
-- **The build fails:** `build.sh` shows the errors from its log; the whole build is in
-  `apple-bridge/app/build/build.log`.
-- **`./install` waits for a certificate you've already made, or signing fails:** if
-  `security find-identity -p codesigning` lists your Apple Development certificate but
-  `security find-identity -v -p codesigning` finds 0 valid identities, Apple's
-  intermediate certificate is missing from the keychain. `./install` offers to fetch it
-  and add it to your login keychain. By hand: the certificate's issuer has an OU, G3 to
-  G6 (Keychain Access shows it). Download that one, Worldwide Developer Relations, from
-  [apple.com/certificateauthority](https://www.apple.com/certificateauthority/)
-  (`AppleWWDRCAG3.cer`, say). Then in Keychain Access, choose File → Import Items, into
-  the login keychain. Double-clicking the file can fail with error -25294.
+For what `./install` says while it sets the bridge up, see
+[If the installer stops](#if-the-installer-stops).
+
+- **The build fails** (`build.sh`, or an update): it shows the errors from its log; the
+  whole build is in `apple-bridge/app/build/build.log`. A signing error after the
+  certificate worked before: check it in Xcode → Settings → Accounts → Manage
+  Certificates (they expire after a year).
 - **`authorized: false`:** allow the bridge in System Settings → Privacy & Security →
   Media & Apple Music, or ask again with
   `curl -X POST -H "Authorization: Bearer $(cat ~/.config/omarock/bridge-token)" http://…:8710/v1/authorize`

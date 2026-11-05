@@ -110,22 +110,25 @@ when they're signed by a developer, so you build the bridge yourself, with your
 own Apple Developer membership.
 
 
-What you need before you start:
+What you need before you start (set aside an hour the first time, mostly for Xcode's
+download):
 
-- **[Homebrew](https://brew.sh)**, which the installer uses to add the tools it
-  needs. Homebrew supports only Apple silicon Macs with macOS 15 or later.
+- **An Apple silicon Mac with macOS 15 or later**, which Homebrew needs.
+- **An Apple Developer Program membership** ($99 a year), approved: that can take a day or two.
 - **Xcode**, from the App Store, opened once. It also gives you `git`.
-- **An Apple Developer Program membership** ($99 a year), for MusicKit.
+- **Your developer Apple ID signed in to Xcode** (Settings → Accounts).
+- **[Homebrew](https://brew.sh)**, which the installer uses to add the tools it needs.
 - **An Apple Music subscription** on the Apple ID that the Mac's Music app uses.
-- **The Mac and your Omarchy machine on the same network**, your home network, say,
-  or both on [Tailscale](https://tailscale.com), which also works away from home.
-  Nothing between them is encrypted, so securing that network is up to you:
-  Tailscale is one way.
+- **The Mac and your Omarchy machine on one network**, or both on [Tailscale](https://tailscale.com).
+- **Remote Login on the Mac** (optional), so setup can copy the bridge's token across.
 - **omarock installed on your Omarchy machine**, as above.
 
+Nothing between the Mac and your Omarchy machine is encrypted, so securing that network
+is up to you: Tailscale is one way, and it also works away from home.
 
 On the Mac, clone omarock and run `./install` and it walks you through the rest.
-[apple-bridge/README.md](apple-bridge/README.md) has the details.
+[apple-bridge/README.md](apple-bridge/README.md) has the details: what each of Apple's
+steps is for, and what to do if the installer stops.
 
 
 ## Install by hand (not recommended)
