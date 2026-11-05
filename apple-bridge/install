@@ -8,6 +8,7 @@
 # rebuilt only when this checkout's has changed since the installed build.
 #
 #   ./install            from a clone of omarock, in Terminal on the Mac
+#   ./install pair       show a pairing code, which gives your Omarchy machine the token
 #   ./install --uninstall   remove the bridge: each part asks first
 #   ./install --help
 #
@@ -248,7 +249,7 @@ pane() {  # NAME URL: offer to open a System Settings pane
 brew=""
 preflight() {
   if [[ ${1:-} == (-h|--help) ]]; then
-    sed -n '2,/^setopt/p' "$0" | sed '$d; s/^# \{0,1\}//'
+    sed -n '2,/^setopt/p' "$repo/apple-bridge/install" | sed '$d; s/^# \{0,1\}//'
     exit 0
   fi
   [[ $(uname) == Darwin ]] || { print "apple-bridge/install sets up the Mac; on Linux, run ./install."; exit 1; }
@@ -262,7 +263,7 @@ preflight() {
   [[ -n $brew ]] && path=(${brew:h} $path)
   # Without Homebrew, check it can go on this Mac: since September 2026 it
   # supports only Apple silicon with macOS 15 or later (docs.brew.sh/Support-Tiers).
-  if [[ -z $brew && ${1:-} != --uninstall ]]; then
+  if [[ -z $brew && ${1:-} != (--uninstall|pair) ]]; then
     local mac=$(sw_vers -productVersion) kind="Apple silicon"
     [[ $(sysctl -n hw.optional.arm64 2>/dev/null) == 1 ]] || kind=Intel
     if [[ $kind == Intel ]] || (( ${mac%%.*} < 15 )); then
@@ -272,7 +273,7 @@ preflight() {
   fi
   if [[ -z $answers ]]; then
     [[ -t 0 && -t 1 ]] || { print "Run ./install in a terminal: it asks questions."; exit 1; }
-    if [[ ${1:-} != --uninstall ]] && (( ! $+commands[gum] )); then
+    if [[ ${1:-} != (--uninstall|pair) ]] && (( ! $+commands[gum] )); then
       if [[ -z $brew ]]; then
         print "The installer needs Homebrew (https://brew.sh): install it as brew.sh says, then run ./install again."
         exit 1
@@ -596,23 +597,106 @@ step_handoff() {
     ok "the token: ${token/#$HOME/~} (only you can read it)"
   else
     bad "the token isn't there, or others can read it: ${token/#$HOME/~}"
-    return
+    return 1
   fi
   echo
+  local there="On your Omarchy machine, open omarock's settings (press , in its panel) and use Set up… on the Apple Music tab, or run ./install apple-music in the omarock clone there."
   if [[ -n $host ]]; then
-    explain "Now run ./install on your Omarchy machine and pick Apple Music. Give it this Mac as $host, then the bridge's token: paste it, or let it copy the token with scp."
+    explain "$there Give it this Mac as $host, then it asks for a pairing code."
   else
-    explain "Now run ./install on your Omarchy machine and pick Apple Music. It finds this Mac on your network as $name${ts:+, or on Tailscale as $ts}, then asks for the bridge's token: paste it, or let it copy the token with scp."
+    explain "$there It finds this Mac on your network as $name${ts:+ (or on Tailscale as $ts)}, then asks for a pairing code."
   fi
-  if nc -z -G 2 127.0.0.1 22 >/dev/null 2>&1; then
-    ok "Remote Login is on, so scp can fetch the token"
+}
+
+# ---- 7. Pairing ----
+
+# The bridge's pairing endpoint, /v1/pair/PATH, from loopback (it only opens codes
+# there). The token goes to curl on stdin, not on its command line.
+pair_api() {  # METHOD [PATH]
+  print -r -- "header = \"Authorization: Bearer $(<"$support/token")\"" \
+    | curl -s -m 5 -X $1 -K - "$(bridge_url)/v1/pair${2:-}" 2>/dev/null
+}
+pair_state="" pair_left="" pair_tries=5
+pair_value() { plutil -extract "$1" raw -o - - <<<"$pair_state" 2>/dev/null; }
+# While waiting: the code's state, and a note when a wrong code was tried (on fd 3,
+# since wait_until silences the check). Done once the code is closed.
+pair_closed() {
+  pair_state=$(pair_api GET) && [[ -n $pair_state ]] || return 1
+  local left=$(pair_value triesLeft)
+  if [[ -n $left && $left != $pair_left ]]; then
+    pair_left=$left
+    print -u3 -r -- $'\r\e[K'"  ${yellow}–${reset} a wrong code was tried: $left $( (( left == 1 )) && print try || print tries) left"
+  fi
+  [[ $(pair_value open) == false ]]
+}
+
+step_pair() {
+  step "Pairing"
+  local code shown secs client
+  pair_state=$(pair_api POST /open)
+  code=$(pair_value code)
+  if [[ $code != <-> || ${#code} != 6 ]]; then
+    bad "the bridge didn't open a pairing code${pair_state:+: $(pair_value error)}"
+    return 1
+  fi
+  pair_tries=$(pair_value tries) pair_left=$(pair_value tries) secs=$(pair_value expiresIn)
+  shown="${code[1,3]} ${code[4,6]}"
+  echo
+  if [[ -z $answers ]] && (( $+commands[gum] )); then
+    gum style --bold --border rounded --padding "1 6" --margin "0 2" "$shown"
   else
-    note "scp needs Remote Login (System Settings, General, Sharing); pasting doesn't"
+    print -r -- "      ${bold}${shown}${reset}"
   fi
-  if confirm "Copy the token to the clipboard now, to paste there?" "$($changed && print yes || print no)"; then
-    show "pbcopy < ${${token/#$HOME/~}// /\\ }"
-    pbcopy <"$token" && ok "copied (paste it once, then copy something else over it)"
+  echo
+  explain "Type it into omarock's Apple Music setup on your Omarchy machine. It works once, within $(( ${secs:-600} / 60 )) minutes."
+  echo
+  exec 3>&1
+  wait_until "Waiting for your Omarchy machine… (Ctrl-C to stop)" $(( ${secs:-600} + 5 )) pair_closed
+  exec 3>&-
+  [[ -n $pair_state ]] || pair_state=$(pair_api GET)
+  if [[ $(pair_value open) == true ]]; then
+    # Stopped while waiting (or the wait ran out first): close it, so the code can't be used later.
+    pair_state=$(pair_api POST /close)
+    note "the code is closed: ./install pair opens a new one"
+    return 1
   fi
+  case $(pair_value closed) in
+    paired)
+      client=$(pair_value client)
+      ok "paired with ${client:-your Omarchy machine}" ;;
+    expired) bad "the code expired: ./install pair opens a new one"; return 1 ;;
+    tries) bad "the code was closed after $pair_tries wrong tries: ./install pair opens a new one"; return 1 ;;
+    *) note "the code was closed: ./install pair opens a new one"; return 1 ;;
+  esac
+}
+
+# At the end of a run: a code for the Omarchy machine, if the bridge can pair.
+offer_pair() {
+  health_true pairing || return 0
+  echo
+  confirm "Show a pairing code for your Omarchy machine?" "$($changed && print yes || print no)" || return 0
+  step_pair || true
+}
+
+# ./install pair: only the pairing, with the installed bridge.
+pair_only() {
+  print -r -- $'\n'"${bold}omarock's Apple Music bridge: pairing${reset}"
+  if [[ ! -d $app ]]; then
+    bad "the bridge isn't installed on this Mac: run ./install to set it up first"
+    exit 1
+  fi
+  if ! health_ok; then
+    bad "the bridge doesn't answer at $(bridge_url)"
+    explain "Its log says why: $support/log/bridge.log"
+    exit 1
+  fi
+  if ! health_true pairing; then
+    bad "the bridge here ($(health_value version)) is too old to pair: run ./install to update the bridge first"
+    exit 1
+  fi
+  private_ok "$support/token" || { bad "the token isn't there, or others can read it: ${support/#$HOME/~}/token"; exit 1; }
+  step_pair || exit 1
+  echo
 }
 
 # ---- ./install --uninstall ----
@@ -759,6 +843,7 @@ main() {
   preflight "$@"
   case ${1:-} in
     --uninstall) uninstall; return ;;
+    pair) pair_only; return ;;
     "") ;;
     *) print -r -- "Unknown option: $1 (see ./install --help)"; exit 2 ;;
   esac
@@ -768,7 +853,7 @@ main() {
   step_build
   step_health
   step_network
-  step_handoff
+  step_handoff && offer_pair
   echo
 }
 

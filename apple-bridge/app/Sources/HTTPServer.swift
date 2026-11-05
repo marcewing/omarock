@@ -11,6 +11,8 @@ struct HTTPRequest {
     /// How the client reached the bridge, "host:port": its Host header, or else the address
     /// it connected to. URLs the bridge hands out are built from it (apple-bridge/API.md).
     let authority: String
+    /// Whether the connection comes from this Mac's loopback (by its address, not by Host).
+    let fromLoopback: Bool
 
     /// The authority's host, with an IPv6 address's brackets.
     var host: String {
@@ -135,7 +137,8 @@ final class HTTPServer {
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
             _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-            HTTPConnection(fd: fd, local: Self.localAuthority(fd), queue: queue, handler: handler).start()
+            HTTPConnection(fd: fd, local: Self.localAuthority(fd), fromLoopback: Self.peerIsLoopback(fd), queue: queue,
+                           handler: handler).start()
         }
     }
 
@@ -159,6 +162,28 @@ final class HTTPServer {
         if address.contains(":") { address = "[\(address.replacingOccurrences(of: "%", with: "%25"))]" }
         return "\(address):\(String(cString: service))"
     }
+
+    /// Whether the connection's other end is 127.0.0.0/8 or ::1 (or 127.x as IPv4-mapped).
+    private static func peerIsLoopback(_ fd: Int32) -> Bool {
+        var storage = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let found = withUnsafeMutablePointer(to: &storage) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getpeername(fd, $0, &length) == 0 }
+        }
+        guard found else { return false }
+        switch Int32(storage.ss_family) {
+        case AF_INET:
+            let address = withUnsafeBytes(of: &storage) { $0.load(as: sockaddr_in.self) }
+            return UInt32(bigEndian: address.sin_addr.s_addr) >> 24 == 127
+        case AF_INET6:
+            let address = withUnsafeBytes(of: &storage) { $0.load(as: sockaddr_in6.self) }
+            let bytes = withUnsafeBytes(of: address.sin6_addr) { Array($0) }
+            if bytes == [UInt8](repeating: 0, count: 15) + [1] { return true }
+            return bytes[0..<10].allSatisfy { $0 == 0 } && bytes[10] == 0xff && bytes[11] == 0xff && bytes[12] == 127
+        default:
+            return false
+        }
+    }
 }
 
 private final class HTTPConnection {
@@ -167,6 +192,7 @@ private final class HTTPConnection {
 
     private let fd: Int32
     private let local: String
+    private let fromLoopback: Bool
     private let queue: DispatchQueue
     private let handler: HTTPServer.Handler
     private var readSource: DispatchSourceRead?
@@ -175,9 +201,10 @@ private final class HTTPConnection {
     private var answered = false
     private var closed = false
 
-    init(fd: Int32, local: String, queue: DispatchQueue, handler: @escaping HTTPServer.Handler) {
+    init(fd: Int32, local: String, fromLoopback: Bool, queue: DispatchQueue, handler: @escaping HTTPServer.Handler) {
         self.fd = fd
         self.local = local
+        self.fromLoopback = fromLoopback
         self.queue = queue
         self.handler = handler
     }
@@ -253,7 +280,7 @@ private final class HTTPConnection {
         return .request(HTTPRequest(method: String(parts[0]), path: components?.percentEncodedPath ?? target,
                                     query: query, headers: headers,
                                     body: buffer.subdata(in: bodyStart..<bodyStart + length),
-                                    authority: Self.authority(headers["host"], local: local)))
+                                    authority: Self.authority(headers["host"], local: local), fromLoopback: fromLoopback))
     }
 
     /// The Host header if it's a plain name or address (it ends up in JSON and URLs), else `local`.

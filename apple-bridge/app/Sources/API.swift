@@ -15,10 +15,12 @@ final class API {
     private let stream: StreamService
     private let player: Player
     private let artwork: ArtworkServer
+    private let pairing: Pairing
 
     init(token: String, config: Config, mount: String, bonjour: Bonjour, music: MusicStatus, library: MusicService,
          stream: StreamService, player: Player, artwork: ArtworkServer) {
         self.token = Data(token.utf8)
+        pairing = Pairing(token: token)
         self.mount = mount
         self.bonjour = bonjour
         self.artwork = artwork
@@ -88,6 +90,10 @@ final class API {
             }
             return respond(try await artwork.handle(source: source, kind: route[2], id: route[3],
                                                     query: request.query, library: library))
+        }
+        if route.first == "pair", let response = pairing.respond(to: request, route: Array(route.dropFirst()),
+                                                                 authorized: authorized(request), client: Self.client(request)) {
+            return respond(response)
         }
         guard authorized(request) else { throw APIError(status: 401, message: "Missing or wrong bearer token.") }
         let client = Self.client(request)
@@ -257,6 +263,8 @@ final class API {
             "minBitrate": true,
             // Seconds from a status's position to its audio reaching Icecast (StreamService).
             "streamDelay": (stream.delay * 1000).rounded() / 1000,
+            // Pairing codes (POST /pair) from 0.10.0.
+            "pairing": true,
         ]
         if let storefront = music.storefront { health["storefront"] = storefront }
         if authorized(request) { health["stream"] = config.streamURL ?? "http://\(request.host):8000\(mount)" }
