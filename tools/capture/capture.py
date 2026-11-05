@@ -5419,14 +5419,34 @@ def settings_scenario(host, output, failures):
     check(host.state()["opened"], "Esc closes the settings, not the panel, and it's compact again", failures)
     host.settle(.5)
     host.grab(output / "compact-header.png")
+    compact_width = host.card()["width"]
     check(host.call("clickPanel", "settingsButton") == "ok", "the compact panel has a gear", failures)
     wait_for(lambda: host.state()["settingsOpen"] and host.state()["expanded"], "the compact gear opens them, expanded")
+    # Marc, 11-05: opened from the compact panel, the settings are only as
+    # wide as they need; from the expanded one, the panel keeps its width.
+    host.settle(.5)
+    from_compact = host.card()["width"]
+    host.grab(output / "compact-gear-settings.png")
+    host.call("press", "e")
+    wait_for(lambda: not host.state()["expanded"], "e compacts the settings")
+    host.call("press", "e")
+    wait_for(lambda: host.state()["expanded"], "e widens them again")
+    host.settle(.5)
+    check(compact_width < from_compact < 1000 and host.card()["width"] == from_compact,
+          f"from the compact panel, the settings are only as wide as they need ({compact_width} -> {from_compact}), "
+          f"after e twice too ({host.card()['width']})", failures)
     host.call("press", ",")
     wait_for(lambda: not host.state()["settingsOpen"] and not host.state()["expanded"], ", closes them, back to compact")
+    host.settle(.5)
+    check(host.card()["width"] == compact_width, f"and back to the compact width ({host.card()['width']})", failures)
     host.call("expand", "true")
     host.settle(1)
+    expanded_width = host.card()["width"]
     check(host.call("clickPanel", "settingsButton") == "ok", "the expanded panel has a gear", failures)
     wait_for(lambda: host.state()["settingsOpen"], "gear opens settings")
+    host.settle(.5)
+    check(host.card()["width"] == expanded_width and expanded_width > from_compact,
+          f"opened from the expanded panel, the settings keep its width ({expanded_width} -> {host.card()['width']})", failures)
     check(host.state()["settingsCursor"] == 0 and host.state()["settingsTab"] == "omarock",
           "and they open at the top of the omarock tab, whatever was chosen last time", failures)
     host.grab(output / "expanded-settings.png")

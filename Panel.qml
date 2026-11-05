@@ -205,7 +205,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.16.2"
+  readonly property string version: "0.16.3"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -3118,8 +3118,12 @@ Panel {
   }
 
   // The settings show in the expanded panel: opened from the compact one,
-  // it goes back to compact when they close.
+  // it goes back to compact when they close, and meanwhile is only as wide
+  // as the settings (settingsWidth), as the panel changes size anyway. Opened
+  // from the expanded panel, the panel keeps its width.
   property bool settingsFromCompact: false
+  // SettingsView's widest column (820), and its margins.
+  readonly property int settingsWidth: 828
   function openSettings() {
     if (!root.settingsOpen) root.settingsFromCompact = !root.expanded
     root.expanded = true
@@ -4003,7 +4007,8 @@ Panel {
     open: root.opened
     centerOnBar: false
     focusTarget: focusReturn
-    contentWidth: panel.fittedContentWidth(Style.space(root.expanded ? 1120 : 464))
+    contentWidth: panel.fittedContentWidth(Style.space(!root.expanded ? 464
+      : root.settingsOpen && root.settingsFromCompact ? root.settingsWidth : 1120))
     contentHeight: root.expanded
       ? panel.fittedContentHeight(Style.space(740))
       : panel.fittedContentHeight(layout.item ? layout.item.implicitHeight : Style.space(400))

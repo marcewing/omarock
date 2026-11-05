@@ -427,9 +427,9 @@ stay until you remove them too.
 
 ## Settings
 
-Press `,` in the panel, or the gear in its header, for the settings screen. It
-opens in the expanded view, and if you opened it from the compact one, closing it
-goes back there.
+Press `,` in the panel, or the gear in its header, for the settings screen. From
+the compact panel it opens only as wide as the settings need, and closing it goes
+back to the compact panel; from the expanded view it keeps that view's width.
 Everything is there, on tabs: **omarock** (your music folder, the
 radio, Time Machine, the panel and the bar), then **Apple Music**,
 **SiriusXM**, **Spotify** and **Sound**, each with its switch and how its
