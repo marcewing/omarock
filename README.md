@@ -270,7 +270,8 @@ stay until you remove them too.
 - **The panel:** now playing, with the cover (a song, artist or album too
   long for its line scrolls), a seek bar, transport (shuffle, previous,
   play/pause, next, repeat) and volume, then search and the queue.
-  **Expand** (`e`) makes it a bigger, two-column view in the same popup. It
+  Its header has the sources, the gear for the settings, and Expand (`e`, the
+  corner icon), which makes it a bigger, two-column view in the same popup. It
   closes 3 seconds after the pointer leaves it, unless it comes back (the `closeOnLeave` setting).
   Open it again and it's as you left it: the search, where you'd browsed to, the
   cursor, an info card or the playlist picker, and the keys where they were (a
@@ -424,8 +425,9 @@ stay until you remove them too.
 
 ## Settings
 
-Press `,` in the panel, or the gear in the expanded view, for the settings
-screen. Everything is there, on tabs: **omarock** (your music folder, the
+Press `,` in the panel, or the gear in its header, for the settings screen. It
+opens in the expanded view; opened from the compact one, closing it goes back to it.
+Everything is there, on tabs: **omarock** (your music folder, the
 radio, Time Machine, the panel and the bar), then **Apple Music**,
 **SiriusXM**, **Spotify** and **Sound**, each with its switch and how its
 service is doing, its account and keys, and Remove. Tab and Shift+Tab go
