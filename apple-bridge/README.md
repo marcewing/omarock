@@ -36,19 +36,19 @@ account for MusicKit to work.
 
 ## Before you start
 
-Most of the work is on Apple's side, and it goes best done before you run the installer.
+Most of the work is on Apple's side, and it is best done before you run the installer.
 Set aside an hour the first time: Xcode is a large download, and a new developer
 membership can take a day or two to be approved. With all of this in place, `./install`
 takes about 15 minutes.
 
-In the order to do them:
+Do them in this order:
 
 1. **An Apple silicon Mac with macOS 15 or later.** The bridge itself needs macOS 14.2
    (Core Audio process taps), but Homebrew, which the installer uses, supports only
    Apple silicon on macOS 15 and later: since September 2026 Intel Macs and macOS 14
    are its Tier 3, "not supported" ([docs.brew.sh/Support-Tiers](https://docs.brew.sh/Support-Tiers)).
    Developed on macOS 27.
-2. **A paid Apple Developer Program membership** ($99 a year), approved. Enrol at
+2. **A paid Apple Developer Program membership** ($99 a year), approved. Enroll at
    [developer.apple.com/programs](https://developer.apple.com/programs/). A free Apple
    developer account isn't enough: MusicKit needs the paid membership.
 3. **Xcode**, from the App Store, opened once: it asks you to agree to its license, and
@@ -92,7 +92,7 @@ Those are between you and macOS.
 2. Give it a description and an explicit **bundle ID** of your own, such as
    `com.example.omarock.bridge`.
 3. Register it, open it again (the Identifiers list shows your bundle ID in its
-   **Identifier** column), and on the **App Services** tab tick **MusicKit**. Save.
+   **Identifier** column), and on the **App Services** tab check **MusicKit**. Save.
 4. Note your **Team ID** (Account → Membership details: 10 letters and digits).
 
 Apple can take a few minutes before MusicKit answers for a new bundle ID; until then
@@ -138,8 +138,8 @@ for them, and offers to open System Settings):
   Audio Recording Only" list).
 - **Local Network access** (omarock bridge, "find devices on local networks"), so the
   bridge can announce itself and your Omarchy machine finds it by itself. Without it
-  the bridge still works, but omarock needs the Mac's name typed in. Turned down: switch
-  omarock bridge on in System Settings → Privacy & Security → Local Network.
+  the bridge still works, but omarock needs the Mac's name typed in. If you turned it
+  down, switch omarock bridge on in System Settings → Privacy & Security → Local Network.
 
 **The firewall.** If macOS's firewall is on, `./install` offers to let the bridge (port
 8710) and Icecast (port 8000) through (`sudo socketfilterfw`). Homebrew's Icecast changes
@@ -212,7 +212,7 @@ again: what's done is skipped. What it says, in the order you'd meet it, and wha
   skips one, and the next run checks it again.
 - **"MusicKit says this Mac can't play Apple Music's catalog":** check that the Music
   app is signed in to an Apple ID with an Apple Music subscription, and that MusicKit is
-  ticked for your bundle ID on developer.apple.com. A new bundle ID can take a few
+  checked for your bundle ID on developer.apple.com. A new bundle ID can take a few
   minutes.
 - **"Waiting for your Omarchy machine…":** type the code into omarock's Apple Music
   setup there (above, "Pairing"). Ctrl-C closes the code.
@@ -300,7 +300,7 @@ git pull && ./install
 
 or `git pull && apple-bridge/app/build.sh --run`. Both wait until nothing is listening to the
 stream, because restarting the bridge under mpd gives mpd errors until it's back.
-`build.sh --run-now` restarts straight away.
+`build.sh --run-now` restarts right away.
 
 ## 3. The Linux side
 
@@ -350,7 +350,7 @@ says it holds (`streamDelay`), so the card and the bar show the song and time yo
 not the Mac's: a song that starts by itself shows when you hear it, and one you pick
 shows at once, its time cycling dots until its sound arrives.
 
-For smooth playback, the setup window's tick (on to start) builds a patched mpd-mpris
+For smooth playback, the setup window's switch (on to start) builds a patched mpd-mpris
 on the Linux side; [patches/README.md](../patches/README.md) says what it fixes. Arch's own
 libFLAC keeps up with the stream from bridge 0.7.0; a patched libFLAC built for an older
 bridge can go (`./install apple-music` offers to remove it). `tools/omarock-doctor`
@@ -371,11 +371,11 @@ For what `./install` says while it sets the bridge up, see
   `curl -X POST -H "Authorization: Bearer $(cat ~/.config/omarock/bridge-token)" http://…:8710/v1/authorize`
   (the dialog shows on the Mac).
 - **`canPlayCatalog: false`, or catalog searches fail:** check the Apple Music
-  subscription, that MusicKit is ticked for the bundle ID in `Local.xcconfig`
+  subscription, that MusicKit is checked for the bundle ID in `Local.xcconfig`
   (Identifiers, on developer.apple.com), and give a new bundle ID a few minutes.
 - **`capturing: false`, or the stream is silent:** the audio capture permission (above).
   It belongs to the app's code signature, so building with another identity or bundle
-  id asks again.
+  ID asks again.
 - **Nothing answers on :8710:** is the Mac asleep? A sleeping Mac may still answer
   `ping`, slowly, while the bridge doesn't (above, "Keep the Mac awake"). From Linux,
   `avahi-browse -rt _omarock._tcp` lists the bridges on your network. A bridge older

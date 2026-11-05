@@ -5,8 +5,8 @@
 **A music player that lives in your Omarchy bar.** omarock has all the usual music player
 features: search, browse, build playlists, cover art, etc.  Unlike many music players,
 in addition to your local music library, omarock can also play internet radio stations, **Spotify**,
-**Apple Music**, and **SiriusXM** all integrated in the same panel.  Note that these last three
-require subscriptions, and omarock's Apple Music bridge requires a developer account.
+**Apple Music**, and **SiriusXM**, all integrated in the same panel.  Note that these last three
+require subscriptions, and omarock's Apple Music bridge requires a paid Apple Developer membership.
 
 omarock works as a client for [mpd](https://www.musicpd.org), the Music Player Daemon.
 The music queue, playlists and playback live in mpd, not in omarock, so `mpc`, your
@@ -16,7 +16,7 @@ media keys and any other mpd client are always in sync.
 
 - **Keyboard or Mouse**: You can drive omarock either way. `Super+Ctrl+M` opens omarock. `?` shows all the keys used for navigation and control.
 - **Compact or expanded:** Expanded view allows browsing in a two-column view.
-- **Search that forgives:** Use `/` to search ignoring case and accents
+- **Search that forgives:** Use `/` to search, ignoring case and accents
   ("husker" finds Hüsker Dü).
 - **Browse like a file manager:** `→` opens an artist, then one of their albums;
   `←` goes back. A genre opens to its artists. Album covers are displayed throughout.
@@ -24,10 +24,10 @@ media keys and any other mpd client are always in sync.
   genre, to open them.
 - **Build Playlists:** `A` adds any song, album, artist or genre to
   a playlist (mpd's playlists).
-- **Find Heard Songs:** Click the song or artist displayed on FM or SiriusXM to find that song on Spotify or Apple Music.
-- **Song and Album Info:** `i` show tags, format, bitrate and
+- **Find Heard Songs:** Click the song or artist displayed on internet radio or SiriusXM to find that song on Spotify or Apple Music.
+- **Song and Album Info:** `i` shows tags, format, bitrate and
   size, and, on a streaming service, whether it's in your library.
-- **Time Machine:** Enter a year to pretend you are listening in that year.  Only music released prior shows or
+- **Time Machine:** Enter a year to pretend you are listening in that year.  Only music released that year or earlier shows or
   plays, and there's a Billboard Top 100 from that year to play on Apple Music or Spotify. Fun.
 - **History:** `H` shows you what you've played this past week, from every source,
   radio songs included.
@@ -41,19 +41,19 @@ omarock's settings (each has its own switch). Only enabled services get a button
 in the panel. Internet radio
 has a switch too if you don't want to see that either.
 
-The table below shows the details, but don't worry, the setup process in settings will walk you through it all.
+The table below shows the details, but don't worry: the setup process in settings will walk you through it all.
 
 | Source | What you need |
 | --- | --- |
 | **Local music** | mpd and your music folder. |
-| **Internet radio** | Nothing more: stations come from [Radio Browser](https://www.radio-browser.info), a free community directory, and mpd plays them. Your favourites are an mpd playlist. |
+| **Internet radio** | Nothing more: stations come from [Radio Browser](https://www.radio-browser.info), a free community directory, and mpd plays them. Your favorites are an mpd playlist. |
 | **Spotify** | Spotify Premium, your own (free) Spotify developer app, Soloist (Spotify's own player) and the `omarock-spotify` service, which drives it ([spotify/README.md](spotify/README.md)). |
 | **Apple Music** | An Apple Music subscription and a Mac running the `omarock-bridge`. The bridge is built with your own Apple Developer membership (for MusicKit), and the Mac must be reachable from your Omarchy machine (I use Tailscale). Advanced.  ([apple-bridge/README.md](apple-bridge/README.md))|
 | **SiriusXM** | A SiriusXM subscription that includes streaming, and the `omarock-sxm` service. It's unofficial: it signs in as SiriusXM's web player does, which their terms may not allow.  ([sxm/README.md](sxm/README.md))|
 
 ## Requirements
 
-- **Omarchy 4** (tested on 4.0.4). omarock is a plugin for its bar.
+- **Omarchy 4** (tested on 4.0.4 through 4.5). omarock is a plugin for its bar.
 - **mpd 0.24 or later**, with a unix socket at `$XDG_RUNTIME_DIR/mpd/socket`
   (or set omarock's `socket` setting to yours). Quickshell, which runs Omarchy's
   bar, can only open unix sockets, not mpd's usual TCP port.
@@ -71,14 +71,14 @@ cd omarock
 ./install
 ```
 
-The install sets up mpd (asking where your music is), and puts omarock on the bar.
+The installer sets up mpd (asking where your music is), and puts omarock on the bar.
 It first checks what's already installed, shows each command before running it, and
 asks before changing anything: packages (with sudo), your mpd config, systemd
 drop-ins, and your key bindings. It starts mpd and mpd-mpris (the media keys) and
 has them start at each login. Run it again any time.
 
 **Spotify, SiriusXM and Apple Music** are set up from omarock's settings, one at a time.
-Each has a **Set up…** button in their tab which will walk you through each step,
+Each has a **Set up…** button in its tab, which will walk you through each step,
 and the actual install and setup procedure executes in a terminal.
 Once set up, each source has a
 switch (off stops its services and keeps your accounts and keys), its settings,
@@ -98,7 +98,7 @@ settings offer **Update…**, and its tab is marked with a •.
 
 ## Get Rocking
 
-If you accepted the keybinding at install, `Super+Ctrl+M` will open up omarock and the rest I'm sure you can figure out.  If you like, you can read the entirely claude-generated **Using Omarock** and **Settings** sections below, but I doubt you need to.
+If you accepted the key binding at install, `Super+Ctrl+M` will open up omarock, and the rest I'm sure you can figure out.  If you like, you can read the entirely Claude-generated **Using omarock** and **Settings** sections below, but I doubt you need to.
 
 
 ## Apple Music: Building the Bridge on a Mac
@@ -125,16 +125,18 @@ download):
 Nothing between the Mac and your Omarchy machine is encrypted, so securing that network
 is up to you: Tailscale is one way, and it also works away from home.
 
-On the Mac, clone omarock and run `./install` and it walks you through the rest. It
-ends by showing a pairing code: type it into **Set up…** on omarock's Apple Music tab.
-[apple-bridge/README.md](apple-bridge/README.md) has the details: what each of Apple's
-steps is for, and what to do if the installer stops.
+On the Mac, clone omarock and run `./install`: it walks you through the rest.
+
+When finished, it will show a pairing code.  On your running omarock, go to Settings → Apple Music and enter the pairing code as part of the setup.
+
+[apple-bridge/README.md](apple-bridge/README.md) has all the details about building the bridge, what each of Apple's
+steps is for, and what to do if the installer runs into a problem.
 
 
 ## Install by hand (not recommended)
 
 
-**Using Claude Code?** Run claude in the clone directory and ask it to set omarock up. Its
+**Using Claude Code?** Run `claude` in the clone directory and ask it to set omarock up. Its
 `omarock-setup` skill knows the steps and the usual snags, and checks before it
 changes anything.
 
@@ -160,7 +162,7 @@ restore_paused      "yes"
 
 and make the folders: `mkdir -p ~/.local/share/mpd/playlists ~/.local/state/mpd`.
 Without `playlist_directory`, mpd turns stored playlists off, and omarock's
-playlists and radio favourites with them. `restore_paused` makes mpd start
+playlists and radio favorites with them. `restore_paused` makes mpd start
 paused, at login or after a crash, rather than playing on from its last saved
 state, which can be minutes old.
 
@@ -223,7 +225,7 @@ omarchy plugin add https://github.com/marcewing/omarock --enable
 --section center`, or `right`, for elsewhere). Click it, and press `?` for the keys.
 
 A key to open it is a line in `~/.config/hypr/bindings.lua` (Omarchy's shell
-opens the omarock on the screen you're using):
+opens omarock on the screen you're using):
 
 ```lua
 o.bind("SUPER + CTRL + M", "omarock", "omarchy-shell shell toggle marcewing.omarock")
@@ -250,7 +252,7 @@ omarchy restart shell        # the shell's own reload keeps running the old code
 The services (Spotify's, SiriusXM's, the sound output) update from the plugin:
 after an update, a source with a newer service waiting says so in the settings,
 with **Update…**. From your clone, `git pull` and then `./install spotify` (and
-so on) does the same.
+so on) do the same.
 
 **Remove…** in the settings, or `./install --remove spotify` (`siriusxm`,
 `apple-music`, `sound`), takes one source off, with its accounts and keys.
@@ -272,7 +274,7 @@ stay until you remove them too.
   play/pause, next, repeat) and volume, then search and the queue.
   Its header has the sources, the gear for the settings, and Expand (`e`, the
   corner icon), which makes it a bigger, two-column view in the same popup. It
-  closes 3 seconds after the pointer leaves it, unless it comes back (the `closeOnLeave` setting).
+  closes 3 seconds after the pointer leaves it, unless the pointer comes back (the `closeOnLeave` setting).
   Open it again and it's as you left it: the search, where you'd browsed to, the
   cursor, an info card or the playlist picker, and the keys where they were (a
   setting you were typing is dropped, not saved).
@@ -302,10 +304,10 @@ stay until you remove them too.
   song playing, ↑ ↓ (and ← → between the two Add links) move, Enter does what a
   click would, and ↓ from the last line or Esc goes back to the list. `A` with
   no cursor in the list adds the song playing to a playlist (on SiriusXM and
-  the radio, it makes the channel or station playing a favourite, or takes it
-  out). A cursor the pointer put on a row goes when the pointer leaves the
-  list, as does ↑ from the top when there's nothing above to go to; the keys
-  then act on what's playing, and ↑ or ↓ brings the cursor back where it was.
+  the radio, it makes the channel or station playing a favorite, or takes it
+  out). A cursor the pointer put on a row goes away when the pointer leaves the
+  list, and ↑ from the top takes the cursor away when there's nothing above to
+  go to; the keys then act on what's playing, and ↑ or ↓ brings the cursor back where it was.
 - **Your library (`L`):** on Apple Music or Spotify, `L` adds the song, album
   or (Apple Music) playlist under the cursor to your library, or, with no
   cursor, the song playing. In the info card it adds what the card shows. A
@@ -315,7 +317,7 @@ stay until you remove them too.
 - **An album's place in your library:** an Apple Music or Spotify album says,
   beside its name, **In your library**, **4 of 12 in your library** (with a ✓ by
   each song you have), or **Add to library**. A click adds the whole album; on
-  Spotify, where saving an album is apart from liking its songs, a click on In
+  Spotify, where saving an album is separate from liking its songs, a click on In
   your library takes the album out again.
 - **Heard it on the radio?** On SiriusXM or the radio, click the song's title or
   the artist (or `o`, `O`) to look it up in Apple Music or Spotify (the
@@ -374,7 +376,7 @@ stay until you remove them too.
     are left out.
   - **The keys page (`?`)** starts with RIGHT NOW: all of those keys, in full.
     Its **Window** button (or `w`) keeps the keys open in a window of their own,
-    beside the panel. Right now there follows the panel as you move, and Esc
+    beside the panel. RIGHT NOW there follows the panel as you move, and Esc
     or `q` closes the window. Hyprland floats it, and you can resize it (on
     Omarchy, Super and a right-drag); it opens again at the size you left it.
 - **From a key binding:** `qs ipc -p /usr/share/omarchy/shell call marcewing.omarock toggle`
@@ -382,18 +384,18 @@ stay until you remove them too.
 
 ### The other sources
 
-- **Internet radio:** the station playing, your favourites, then your local
+- **Internet radio:** the station playing, your favorites, then your local
   stations: set **Your area** in the settings to your city, or your state,
   region or country ("Portland, Maine", "Manchester, UK", "Bayern"). Stations
   within 80 km (50 miles) come first, the next state's or country's too
-  (Kansas City has Kansas's, Detroit Windsor's), then the rest of those
-  states, the most listened first. omarock finds the place on your machine,
+  (Kansas City gets Kansas's, and Detroit gets Windsor's), then the rest of
+  those states, the most listened to first. omarock finds the place on your machine,
   in `places.tsv` (from [GeoNames](https://www.geonames.org)). Radio Browser
   sees the searches made from it (your area's names and its coordinates), and
   which station you tune to (it counts plays, as its directory asks of
   players); the station's own server sees you listening. `/` finds stations by name, call sign, frequency
-  or genre; Enter tunes; `A` keeps a favourite, the station under the cursor or
-  else the one playing (in the mpd playlist "Radio", so `mpc load Radio` plays them); `n`/`p` step through the favourites. Stations that
+  or genre; Enter tunes; `A` keeps a favorite, the station under the cursor or
+  else the one playing (in the mpd playlist "Radio", so `mpc load Radio` plays them); `n`/`p` step through the favorites. Stations that
   send their song show it. HLS-only stations are dimmed: mpd can't play them.
 - **Spotify:** search your library, then Spotify's catalog; browse artists,
   albums and playlists; its queue, **P** for your Spotify playlists, **A** to add
@@ -411,9 +413,9 @@ stay until you remove them too.
   stream that mpd plays, so `mpc` and the media keys follow it too. Once the Mac
   has been paused for a minute (`appleIdleStop`), mpd lets go of the stream, and
   Play reconnects.
-- **SiriusXM:** your favourite channels, then all of them, each with its logo
-  and what's on. Enter tunes, `n`/`p` step through the favourites, `A` adds or
-  removes a favourite, the channel under the cursor or else the one playing
+- **SiriusXM:** your favorite channels, then all of them, each with its logo
+  and what's on. Enter tunes, `n`/`p` step through the favorites, `A` adds or
+  removes a favorite, the channel under the cursor or else the one playing
   (your account's, as in the SiriusXM app). Space stops and
   starts: it's live.
 - **On more than one machine:** local music, the radio and SiriusXM play on
@@ -426,7 +428,8 @@ stay until you remove them too.
 ## Settings
 
 Press `,` in the panel, or the gear in its header, for the settings screen. It
-opens in the expanded view; opened from the compact one, closing it goes back to it.
+opens in the expanded view, and if you opened it from the compact one, closing it
+goes back there.
 Everything is there, on tabs: **omarock** (your music folder, the
 radio, Time Machine, the panel and the bar), then **Apple Music**,
 **SiriusXM**, **Spotify** and **Sound**, each with its switch and how its
@@ -513,7 +516,7 @@ A few are in the file only, for when you know you need them:
 
 [DEVELOPING.md](DEVELOPING.md) has the layout, the tests and how omarock works
 inside. Work happens on the `dev` branch, and pull requests go there; `main`
-holds the releases, which is what Omarchy installs and updates. omarock is under the MIT License ([LICENSE](LICENSE)). `places.tsv` is
+holds the releases, and Omarchy installs and updates from it. omarock is under the MIT License ([LICENSE](LICENSE)). `places.tsv` is
 GeoNames' data ([geonames.org](https://www.geonames.org)), under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with regions' local
 names from Wikidata (CC0); `tools/build-places` makes it again.
