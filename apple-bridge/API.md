@@ -31,7 +31,8 @@ name, works the same.
 - Every request carries `Authorization: Bearer <token>`. The token is a random
   string kept in `~/Library/Application Support/omarock-bridge/token` on the Mac
   and in `~/.config/omarock/bridge-token` on the Linux machine. A wrong or missing
-  token gets 401.
+  token gets 401. From 0.10.0 the Linux machine gets it by **pairing** (below): the
+  Mac shows a 6-digit code, and omarock trades it for the token.
 - Every request also carries `X-Omarock-Client: <machine name>`, the contents of
   `/etc/hostname` (`framework`, `dellxps`), so the bridge knows which machine it plays
   for (see **One machine at a time**). Letters, digits, `-`, `.` and `_`, at most 64;
@@ -120,7 +121,7 @@ All paths start with `/v1`.
 
 | Method and path | What it does |
 | --- | --- |
-| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`), `"minBitrate": true` from 0.7.0, and from 0.8.0 `"streamDelay"`: seconds from a status's `position` to that audio reaching Icecast. In 0.8.0 it's the encoder's hold alone (0.041); from 0.8.1 it also takes off the Mac's output latency, since MusicKit's position is what the output device plays and the tap gets the audio before it, so it's near 0 and can be slightly negative (-0.006 on the built-in speakers; see the stream, above). No auth needed, and without the token it reveals nothing private: from 0.9.0 `stream` is there only when the request carries the right token (built from the request's `Host`, see Transport; config.json's `streamURL` replaces it, for token holders too). Also from 0.9.0, the diagnostic `"bonjour"`: `advertised`, `waiting` (no answer from mDNSResponder yet), `denied` (macOS's Local Network privacy: System Settings → Privacy & Security → Local Network), `failed` (retrying) or `off` (a `listenHost`). |
+| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`), `"minBitrate": true` from 0.7.0, and from 0.8.0 `"streamDelay"`: seconds from a status's `position` to that audio reaching Icecast. In 0.8.0 it's the encoder's hold alone (0.041); from 0.8.1 it also takes off the Mac's output latency, since MusicKit's position is what the output device plays and the tap gets the audio before it, so it's near 0 and can be slightly negative (-0.006 on the built-in speakers; see the stream, above). No auth needed, and without the token it reveals nothing private: from 0.9.0 `stream` is there only when the request carries the right token (built from the request's `Host`, see Transport; config.json's `streamURL` replaces it, for token holders too). Also from 0.9.0, the diagnostic `"bonjour"`: `advertised`, `waiting` (no answer from mDNSResponder yet), `denied` (macOS's Local Network privacy: System Settings → Privacy & Security → Local Network), `failed` (retrying) or `off` (a `listenHost`). From 0.10.0, `"pairing": true` (see **Pairing**). |
 | `POST /authorize` | Asks for MusicKit access (`MusicAuthorization.request()`), which puts a dialog on the Mac's screen; returns health. For someone at the Mac (the bridge also asks at its first launch). |
 | `GET /status?since=SEQ` | Now playing. Returns at once if the state's `seq` differs from `SEQ` (or there is no `since`); otherwise waits up to 25 s for a change, then returns the same state (long poll). |
 | `POST /play` | `{ "items": [ {kind, id, source}, … ], "start": 0, "mode": "play" }`. `mode` is `play` (replace the queue and start at song `start`), `next` (insert after the current song) or `add` (append). Items are expanded to songs, in order (see **Items** below). `start` is the index into the tracks as the detail route lists them (`/albums|/playlists/{source}/{id}`), counted before unplayable songs are skipped; if that song is unplayable, play starts at the next playable one. A single song that can't be played answers 409 with the reason. Returns the new status. |
@@ -145,6 +146,8 @@ All paths start with `/v1`.
 | `POST /library/playlists/{id}/tracks` | `{ "items": [ … ] }`: append, the items expanded to songs. Returns the Playlist. Apple's API can't remove tracks or delete playlists; those come later through AppleScript on the Mac. |
 | `POST /library/add` | `{ "items": [ {kind, id, source} ] }`: adds catalog songs, albums and playlists to the library. Returns `{ "ok": true, "added": 2 }` (the catalog items sent to Apple). See **Adding to the library** below. |
 | `GET /info/{source}/{kind}/{id}` | Everything known about one song or album (`kind` is `song` or `album`), for omarock's info card (`i`). See **Info** below. |
+| `POST /pair/open`, `GET /pair`, `POST /pair/close` | From the Mac itself only: open a pairing code, see how it went, close it. See **Pairing** below. |
+| `POST /pair` | `{ "code": "048213" }`, no token: trades an open pairing code for the token. See **Pairing** below. |
 
 ### Info
 
@@ -319,6 +322,42 @@ While the Mac is paused or stopped, nobody gets `elsewhere` or a 409. Requests w
 the header never do. When the owner changes, `seq` goes up, so every waiting long poll
 returns, each answered for its own machine. Everything else (shuffle, repeat, adding to
 the queue, the library, playlists, `/info`) works the same from any machine.
+
+### Pairing
+
+From 0.10.0. Pairing gives an Omarchy machine the token without copying it from
+the Mac: the Mac's installer opens a code and shows it, and the person types it
+into omarock's setup, which trades it for the token. `./install` on the Mac
+offers a code at its end, and `./install pair` there opens a new one any time.
+
+- **A code** is 6 digits, from a cryptographic random source, leading zeros kept
+  (`048213`). It works once, for 10 minutes, and for 5 wrong tries. Opening a new
+  one replaces any code still open. Codes are compared in constant time.
+- `POST /v1/pair/open`, `GET /v1/pair` and `POST /v1/pair/close` need the token
+  **and** a request from the Mac itself (127.0.0.1 or ::1); from anywhere else, 403
+  `{"error": "Pairing codes are opened on the Mac: run ./install pair there."}`.
+  - `POST /v1/pair/open` → `{ "code": "048213", "expiresIn": 600, "tries": 5 }`.
+  - `GET /v1/pair` → while a code is open, `{ "open": true, "expiresIn": 431,
+    "triesLeft": 4 }`; once it's closed, `{ "open": false, "closed": "paired",
+    "client": "framework" }`. `closed` is `paired` (then `client` is the machine's
+    `X-Omarock-Client`, if it sent one), `expired`, `tries` (5 wrong codes) or
+    `cancelled`. With no code opened since the bridge started, `{ "open": false }`.
+  - `POST /v1/pair/close` closes an open code (`cancelled`) and answers as
+    `GET /v1/pair` does. The installer sends it when it's stopped while waiting.
+- `POST /v1/pair` needs no token, from any address. Only the digits in `code`
+  count, so `"048 213"` works.
+  - 200 `{ "token": "…" }`: the code is used up (`closed: "paired"`).
+  - 403 `{ "error": "That isn't the code the Mac shows.", "triesLeft": 3 }`. At the
+    fifth, the code closes (`tries`), `triesLeft` is 0, and the error says to run
+    `./install pair` on the Mac for a new one.
+  - 409 `{ "error": "No pairing code is open on the Mac: run ./install pair there." }`:
+    none was opened, or it expired, was used or was closed.
+  - 400 `{ "error": "A pairing code is 6 digits." }` for anything else in `code`.
+    It doesn't count as a try.
+  - The errors are sentences omarock shows as they are. An older bridge answers 404
+    (`No such endpoint.`).
+- The bridge logs opening, wrong tries (with the machine and the tries left), the
+  pairing (with the machine) and closing, never the code or the token.
 
 ## Behaviour
 
