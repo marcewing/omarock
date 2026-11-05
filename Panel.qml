@@ -205,7 +205,7 @@ Panel {
   property string lastMpdState: ""
   // Matches manifest.json (tests/mpd.test.js checks). Logged on load and shown
   // in the key list, to tell which code the shell is running.
-  readonly property string version: "0.15.2"
+  readonly property string version: "0.16.0"
 
   property bool expanded: false
   property bool keysOpen: false
@@ -390,9 +390,11 @@ Panel {
           .toLocaleDateString(Qt.locale(), "MMMM d, yyyy") + ", when Spotify asks again", "ok")
         : note("Signed in", "ok"),
       musicFolder: note(client.musicDirectory === "" ? "mpd doesn't say: it tells only clients on its unix socket" : ""),
-      // How Copy with ssh went, else whether the bridge takes it.
-      bridgeToken: root.tokenCopyNote.text !== "" ? note(root.tokenCopyNote.text, root.tokenCopyNote.kind)
-        : root.appleEnabled && apple.tokenRefused ? note("The bridge refused it: a new bridge has a new one", "bad") : note("")
+      // How pairing went, else whether the bridge takes omarock's token.
+      bridgePair: root.pairNote.text !== "" ? note(root.pairNote.text, root.pairNote.kind)
+        : !root.appleEnabled || !apple.healthKnown || !apple.reachable ? note("")
+        : apple.tokenRefused ? note("The bridge refused omarock's token: pair again", "bad")
+        : note("Paired: the bridge takes omarock's token", "ok")
     }
   }
   property int infoSequence: 0
@@ -834,7 +836,7 @@ Panel {
         return
       }
       if (root.appleStream === "") {
-        root.say(apple.tokenRefused ? "The bridge refused omarock's token: the settings' Apple Music tab copies the new one"
+        root.say(apple.tokenRefused ? "The bridge refused omarock's token: pair again, in the settings' Apple Music tab"
           : "The bridge hasn't given omarock its stream: is its token set? (the settings' Apple Music tab)")
         return
       }
@@ -3116,7 +3118,7 @@ Panel {
   }
 
   function openSettings() {
-    root.tokenCopyNote = { text: "", kind: "" }
+    root.pairNote = { text: "", kind: "" }
     root.keysOpen = false
     root.closeInfo()
     settingsView.reset()
@@ -3213,8 +3215,9 @@ Panel {
   // goes over stdin, never on a command line. One at a time.
   readonly property string accountTool: decodeURIComponent(String(Qt.resolvedUrl("tools/omarock-account")).replace(/^file:\/\//, ""))
   readonly property var accountCommands: ({ sxmUser: "sxm-user", sxmPassword: "sxm-password", spotifyClient: "spotify-client",
-    soloistKey: "soloist-key", bridgeToken: "bridge-token", musicFolder: "music-folder" })
+    soloistKey: "soloist-key", musicFolder: "music-folder" })
   function saveAccount(key, value) {
+    if (key === "bridgePair") return root.pairBridge(value)
     if (accountWriter.running) {
       root.say("Still saving the last change: try again in a moment")
       return
@@ -3241,7 +3244,6 @@ Panel {
       root.confirmTarget = { clearHistory: true }
       return
     }
-    if (key === "bridgeTokenCopy") return root.copyBridgeToken()
     if (key !== "spotifyLogin") return
     if (root.settingStates.spotify.signedIn) {
       root.confirmTarget = { signOut: true }
@@ -3677,45 +3679,39 @@ Panel {
     }
   }
 
-  // Copy with ssh, for the bridge's token: it goes from ssh straight into
-  // omarock-account, never through the panel. BatchMode, so ssh asks nothing
-  // (no password, no new host key); what it says goes under the button
-  // (Setup.tokenCopyState).
-  property var tokenCopyNote: ({ text: "", kind: "" })
-  function copyBridgeToken() {
-    if (tokenCopier.running || accountWriter.running) return
-    var host = Setup.bridgeHost(root.appleBridge)
-    if (host === "") {
-      root.tokenCopyNote = { text: "The bridge's address isn't set: Fix… asks for it", kind: "bad" }
+  // Pairing again, from the settings: the code typed goes to
+  // tools/omarock-account bridge-pair on stdin, and the token the bridge
+  // gives for it straight into its file, never through the panel. What came
+  // of it goes under the field (Setup.pairState).
+  property var pairNote: ({ text: "", kind: "" })
+  function pairBridge(code) {
+    if (pairing.running) return
+    if (root.appleBridge === "") {
+      root.pairNote = { text: "The bridge's address isn't set: Fix… asks for it", kind: "bad" }
       return
     }
-    tokenCopier.host = host
-    tokenCopier.command = ["bash", "-c",
-      "t=$(ssh -o BatchMode=yes -o ConnectTimeout=8 \"$1\" \"cat 'Library/Application Support/omarock-bridge/token'\") || exit; "
-        + "[ -n \"$t\" ] || exit 3; printf '%s\\n' \"$t\" | \"$2\" bridge-token || exit 4",
-      "omarock-copy-token", host, root.accountTool]
-    root.tokenCopyNote = { text: "Copying…", kind: "" }
-    tokenCopier.running = true
-    tokenCopyDeadline.restart()
+    pairing.code = code
+    pairing.command = [root.accountTool, "bridge-pair", root.appleBridge]
+    root.pairNote = { text: "Pairing…", kind: "" }
+    pairing.running = true
   }
   Process {
-    id: tokenCopier
-    property string host: ""
-    stderr: StdioCollector { id: tokenCopierErrors; waitForEnd: true }
+    id: pairing
+    property string code: ""
+    stdinEnabled: true
+    stderr: StdioCollector { id: pairingErrors; waitForEnd: true }
+    onStarted: {
+      write(pairing.code + "\n")
+      pairing.code = ""
+    }
     onExited: function(exitCode) {
-      tokenCopyDeadline.stop()
-      root.tokenCopyNote = Setup.tokenCopyState(exitCode, tokenCopierErrors.text, tokenCopier.host)
+      root.pairNote = Setup.pairState(exitCode, pairingErrors.text)
       if (exitCode !== 0) return
-      root.say("Copied the bridge's token from the Mac")
+      root.say("Paired with the bridge")
       apple.reloadToken()
       serviceRecheck.restart()
       accountReader.running = true
     }
-  }
-  Timer {
-    id: tokenCopyDeadline
-    interval: 20000
-    onTriggered: tokenCopier.running = false
   }
 
   // Saves an account, a key or the music folder (saveAccount).
@@ -3737,7 +3733,6 @@ Panel {
         root.say(key === "musicFolder" ? "mpd plays from the new folder now, and is reading it"
           : key === "sxmUser" || key === "sxmPassword" ? "Saved: omarock-sxm is signing in again"
           : key === "soloistKey" ? "Saved: Soloist is restarting" : "Saved")
-        if (key === "bridgeToken") apple.reloadToken()
         serviceRecheck.restart()
       }
       accountReader.running = true

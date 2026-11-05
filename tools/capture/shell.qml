@@ -373,7 +373,7 @@ ShellRoot {
         spotifyMode: p.spotifyMode, spotifyError: p.spotifyMode ? p.player.lastError : "",
         settingsOpen: p.settingsOpen, settingsEditing: p.settingsOpen ? host.settingsView().editing : "",
         settingsCursor: p.settingsOpen ? host.settingsView().cursor : -1,
-        // The cursor is on its row's own button (Copy with ssh by the token).
+        // The cursor is on its row's own button (a field's, beside it).
         settingsOnButton: p.settingsOpen ? host.settingsView().onButton : false,
         // The rows on the tab showing; settingsAllRows, every tab's.
         settingsRows: p.settingsOpen ? host.settingsView().rows.map(function(r) { return r.key }) : [],

@@ -22,6 +22,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import random
 import socket
 import sys
 import tempfile
@@ -218,6 +219,14 @@ class Bridge:
         # /omarock.ogg for anyone, as before 0.9.0 (POST /v1/fake/secretstream
         # {on} switches it).
         self.secret_stream = False
+        # Bridge 0.10.0's pairing (API.md, "Pairing"): health's "pairing", and
+        # a code that POST /v1/pair trades for the token. POST /v1/fake/pair
+        # {code, tries, seconds} opens one as the Mac's installer would ({code:
+        # null} closes it); POST /v1/fake/pairing {on} switches pairing, off as
+        # before 0.10.0. The pairing/open|close routes work too, from anywhere.
+        self.pairing = not self.spotify
+        self.pair = None
+        self.pair_closed = None
         # omarock-spotify 0.3 without omarock's sound output: Soloist's own
         # volume, in the status and set by POST /v1/volume (POST
         # /v1/fake/volume {on} switches it; off, as with the bus). Its
@@ -260,6 +269,43 @@ class Bridge:
         if self.orphan and kind == "song" and self.queue and cid == self.queue[self.index]["catalogId"]: return False
         zen = CATALOG_ALBUMS["c-al-1"]
         return cid in zen["tracks"] if kind == "song" else cid == "c-al-1"
+
+    # Pairing (API.md): a code open for so many seconds and tries.
+    def open_pair(self, code, tries, seconds):
+        with self.lock:
+            if code is None:
+                if self.pair: self.pair, self.pair_closed = None, {"closed": "cancelled"}
+                return
+            self.pair = {"code": str(code), "tries": int(tries), "until": time.monotonic() + float(seconds)}
+            self.pair_closed = None
+
+    def pair_state(self):
+        if self.pair and time.monotonic() >= self.pair["until"]:
+            self.pair, self.pair_closed = None, {"closed": "expired"}
+        if self.pair:
+            return {"open": True, "expiresIn": int(self.pair["until"] - time.monotonic()), "triesLeft": self.pair["tries"]}
+        return dict({"open": False}, **(self.pair_closed or {}))
+
+    def claim(self, code, client, token):
+        if not self.pairing:
+            return 404, {"error": "No such endpoint."}
+        digits = "".join(c for c in code if c.isdigit()) if isinstance(code, str) else ""
+        if len(digits) != 6 or any(not (c.isdigit() or c in " -") for c in code):
+            return 400, {"error": "A pairing code is 6 digits."}
+        with self.lock:
+            if not self.pair_state()["open"]:
+                return 409, {"error": "No pairing code is open on the Mac: run ./install pair there."}
+            if not hmac.compare_digest(digits, self.pair["code"]):
+                self.pair["tries"] -= 1
+                left = self.pair["tries"]
+                if left <= 0:
+                    self.pair, self.pair_closed = None, {"closed": "tries"}
+                    return 403, {"error": "That isn't the code the Mac shows, and that was the last try: run ./install pair on the Mac for a new one.",
+                                 "triesLeft": 0}
+                return 403, {"error": "That isn't the code the Mac shows.", "triesLeft": left}
+            self.pair = None
+            self.pair_closed = {"closed": "paired", "client": client} if client else {"closed": "paired"}
+            return 200, {"token": token or "fake-bridge-token"}
 
     def changed(self):
         self.seq += 1
@@ -512,9 +558,13 @@ class Handler(BaseHTTPRequestHandler):
                     del health["stream"]
             if bridge.min_bitrate:
                 health["minBitrate"] = True
+            if bridge.pairing:
+                health["pairing"] = True
             if bridge.stream_delay is not None:
                 health["streamDelay"] = bridge.stream_delay
             return self.reply(200, health)
+        if url.path == "/v1/pair" and method == "POST" and not bridge.spotify:
+            return self.reply(*bridge.claim(body.get("code"), self.headers.get("X-Omarock-Client", ""), self.server.token))
         if self.server.token and self.headers.get("Authorization") != "Bearer " + self.server.token:
             return self.reply(401, {"error": "Wrong or missing token"})
         if bridge.slowpages and method == "GET" and parts[1:2] in (["albums"], ["artists"]):
@@ -539,6 +589,10 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, b, method, parts, query, body):
         path = "/".join(parts)
         client = self.headers.get("X-Omarock-Client", "")
+        if method == "GET" and path == "pair":
+            if not b.pairing: raise NoEndpoint()
+            with b.lock:
+                return b.pair_state()
         if method == "GET" and path == "status":
             with b.lock:
                 since = query.get("since")
@@ -553,6 +607,20 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(3)
         with b.lock:
             if method == "POST":
+                if path == "fake/pair":
+                    b.open_pair(body.get("code"), body.get("tries", 5), body.get("seconds", 600))
+                    return {"ok": True}
+                if path == "fake/pairing":
+                    b.pairing = bool(body["on"])
+                    return {"ok": True}
+                if path in ("pair/open", "pair/close"):
+                    if not b.pairing: raise NoEndpoint()
+                    if path == "pair/open":
+                        code = "%06d" % random.randrange(1000000)
+                        b.open_pair(code, 5, 600)
+                        return {"code": code, "expiresIn": 600, "tries": 5}
+                    if b.pair_state()["open"]: b.pair, b.pair_closed = None, {"closed": "cancelled"}
+                    return b.pair_state()
                 if path == "fake/elsewhere":
                     b.owner, b.away = body["name"], True
                     if b.queue and b.state != "playing":

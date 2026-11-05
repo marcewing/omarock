@@ -89,8 +89,10 @@ def prepare(work):
     (fakes / "pactl").symlink_to(TOOLS / "fake-pactl")
     # Never the real compositor: hyprctl only logs, and lists no windows.
     (fakes / "hyprctl").symlink_to(TOOLS / "fake-hyprctl")
-    # Never a real machine: ssh only logs, and answers as the test says.
-    (fakes / "ssh").symlink_to(TOOLS / "fake-ssh")
+    # Never a real machine: nothing here uses ssh or scp (pairing replaced
+    # them), and should something start to, it fails rather than reach one.
+    (fakes / "ssh").symlink_to("/usr/bin/false")
+    (fakes / "scp").symlink_to("/usr/bin/false")
     env = dict(HOME=str(home), PATH=f"{fakes}:/usr/bin:/bin", LANG="C.UTF-8",
                XDG_RUNTIME_DIR=str(runtime), OMARCHY_PATH="/usr/share/omarchy")
     subprocess.run(["omarchy-theme-set-templates"], env=env, check=True, stdout=subprocess.DEVNULL)
@@ -5243,7 +5245,7 @@ def settings_scenario(host, output, failures):
           ", opens the settings on the omarock tab: your music and the radio, History, Time Machine, the panel and the bar: "
           + str(s["settingsTabs"]) + " | " + ", ".join(s["settingsRows"]), failures)
     check(all(k in s["settingsAllRows"] for k in ("sxmUser", "sxmPassword", "spotifyClient", "soloistKey",
-                                                  "spotifyLogin", "bridgeToken", "spotifyRemove", "sxmRemove", "appleRemove")),
+                                                  "spotifyLogin", "bridgePair", "spotifyRemove", "sxmRemove", "appleRemove")),
           "each source set up here has its account and keys, and Remove", failures)
     # Tab goes round the tabs, each from its top; Shift+Tab goes back.
     shown = []
@@ -5346,7 +5348,7 @@ def settings_scenario(host, output, failures):
     # Marc, 10-24: a set secret shows as dots, "standard for most password
     # style fields"; one not set says so.
     s = host.state()
-    secrets = [k for k in ("sxmPassword", "soloistKey", "bridgeToken") if k in s["settingsAllRows"]]
+    secrets = [k for k in ("sxmPassword", "soloistKey") if k in s["settingsAllRows"]]
     check(sorted(s["settingMasked"]) == sorted(k for k in secrets if s["settingValues"].get(k) is True)
           and "sxmPassword" in s["settingMasked"],
           "each secret that's set shows dots, and only those: " + ", ".join(s["settingMasked"]), failures)
@@ -5655,7 +5657,7 @@ def setup_scenario(host, output, failures):
     finished()
     wait_for(lambda: "sound:action:Set up…" in host.state()["settingKinds"], "sound removed")
 
-    # Apple Music: the Mac from the tailnet, checked live, then its token.
+    # Apple Music: the Mac from the tailnet, checked live, then pairing.
     apple_json, token_file = config / "apple.json", config / "bridge-token"
     before = {f: f.read_bytes() if f.exists() else None for f in (apple_json, token_file)}
     press_row("appleRemove")
@@ -5668,34 +5670,81 @@ def setup_scenario(host, output, failures):
     check(w["macs"] == ["Attic Mac 127.0.0.2"] and w["values"]["appleMac"] == "127.0.0.2" and not w["otherMac"] and not w["canStart"]
           and w["blocker"].startswith("Nothing answers"),
           "the tailnet's one Mac is picked, and checked: nothing answers there, so Start setup waits", failures)
-    # The token, left blank, isn't checked against a Mac that doesn't answer
-    # (the VM, 11-03: it said "✗ Checking the Mac's Remote Login…" in red).
-    check(w["notes"]["bridgeToken"] == "", "and the blank token says nothing under it: " + repr(w["notes"]["bridgeToken"]), failures)
-    ssh_mode, ssh_log = home / ".fake-ssh", home / "ssh.log"
-    ssh_mode.write_text("refused")
+    # The pairing code isn't tried on a Mac that doesn't answer (as the
+    # token wasn't: the VM, 11-03).
+    check(w["notes"]["pairCode"] == "", "and the pairing code says nothing under it: " + repr(w["notes"]["pairCode"]), failures)
     host.call("setupClick", "setupMacOther")
     host.call("setupFocus", "appleMac")
     url = f"http://127.0.0.1:{BRIDGE['port']}"
     host.call("typeKeys", f"127.0.0.1:{BRIDGE['port']}")
     wait_for(lambda: window()["notes"]["appleMac"].startswith("The bridge answers"), "the bridge answers")
-    wait_for(lambda: window()["notes"]["bridgeToken"].startswith("Remote Login is off"), "the Mac's Remote Login checked")
-    check(not window()["canStart"] and window()["otherMac"]
-          and "-o BatchMode=yes -o ConnectTimeout=5 127.0.0.1 true" in ssh_log.read_text(),
-          "another address: the bridge answers; the token blank, the Mac's Remote Login is checked (ssh in batch mode): "
-          "off, so Start setup waits: " + window()["notes"]["bridgeToken"], failures)
-    ssh_mode.write_text("on")
-    last = str(BRIDGE["port"])[-1]
-    retype("appleMac", last, last)
-    wait_for(lambda: window()["notes"]["bridgeToken"] == "Mac scp enabled", "scp enabled")
-    check(window()["canStart"] and window()["args"] == ["--yes", "scp-token", "--yes", "mpris"],
-          "Remote Login on: \"Mac scp enabled\" under the token field, and Start setup would have setup scp it (--yes scp-token)",
-          failures)
-    host.call("setupFocus", "bridgeToken")
-    host.call("typeKeys", "wrong")
-    wait_for(lambda: window()["notes"]["bridgeToken"] == "The bridge refused this token", "a wrong token")
-    check(not window()["canStart"], "a token the bridge refuses: the field says so, and Start setup waits", failures)
-    retype("bridgeToken", "wrong", "fake-bridge-token")
-    wait_for(lambda: window()["notes"]["bridgeToken"] == "The bridge takes it", "the right token")
+    check(not window()["canStart"] and window()["otherMac"] and window()["blocker"] == "Needs the pairing code from the Mac"
+          and window()["notes"]["pairCode"] == "",
+          "another address: the bridge answers, and Start setup waits for the pairing code: " + window()["blocker"], failures)
+
+    def pair_state():
+        request = urllib.request.Request(url + "/v1/pair", headers={"Authorization": "Bearer fake-bridge-token"})
+        return json.loads(urllib.request.urlopen(request, timeout=5).read())
+
+    def pair_posts():
+        return [r for r in map(json.loads, BRIDGE["log"].read_text().splitlines()) if r["path"] == "/v1/pair" and r["method"] == "POST"]
+
+    # Typing: nothing is sent until there are 6 digits.
+    posts = len(pair_posts())
+    host.call("setupFocus", "pairCode")
+    host.call("typeKeys", "048 21")
+    host.settle(1.5)
+    check(len(pair_posts()) == posts and window()["notes"]["pairCode"] == "",
+          "a code half typed: nothing sent, nothing said under it", failures)
+    # No code open on the Mac yet: the bridge says so.
+    host.call("typeKeys", "3")
+    wait_for(lambda: window()["notes"]["pairCode"].startswith("No pairing code is open"), "no code open")
+    check(not window()["canStart"] and not token_file.exists(),
+          "six digits are sent at once, with no code open on the Mac: the bridge's answer, and Start setup waits: "
+          + window()["notes"]["pairCode"], failures)
+    # The Mac opens one (./install pair): another code is wrong, and costs a try.
+    fake_bridge("pair", {"code": "048213", "tries": 5})
+    retype("pairCode", "048 213", "111111")
+    wait_for(lambda: window()["notes"]["pairCode"] == "That isn't the code the Mac shows", "a wrong code")
+    check(not window()["canStart"] and pair_state() == {"open": True, "expiresIn": pair_state()["expiresIn"], "triesLeft": 4},
+          "a wrong code: the field says so, it cost one of the code's tries, and Start setup waits", failures)
+    # The right one, typed with a dash: paired at once, the token straight
+    # from the bridge into its file (mode 600).
+    retype("pairCode", "111111", "048-213")
+    wait_for(lambda: window()["notes"]["pairCode"] == "Paired with the bridge", "paired")
+    hostname = Path("/etc/hostname").read_text().strip()
+    check(window()["canStart"] and token_file.read_text() == "fake-bridge-token" and token_file.stat().st_mode & 0o777 == 0o600
+          and pair_state() == {"open": False, "closed": "paired", "client": hostname}
+          and [r["body"] for r in pair_posts()[posts:]] == [{"code": "048213"}, {"code": "111111"}, {"code": "048213"}],
+          "the right code: paired, the token in its file (mode 600), the code used up, the Mac told this machine's name; "
+          "each code sent once, as digits: " + str(pair_state()) + " " + str([r["body"] for r in pair_posts()[posts:]]), failures)
+    # Closed and opened again: a token the bridge takes needs no code.
+    host.call("setupClick", "setupCancel")
+    wait_for(lambda: not window()["open"], "closed")
+    open_window("appleMusic", "apple-music")
+    host.call("setupClick", "setupMacOther")
+    host.call("setupFocus", "appleMac")
+    host.call("typeKeys", f"127.0.0.1:{BRIDGE['port']}")
+    wait_for(lambda: window()["notes"]["pairCode"] == "Paired already: no code needed", "paired already")
+    check(window()["canStart"], "opened again: the token saved is checked with the bridge, and no code is needed", failures)
+    # A bridge before 0.10.0, with no token: it can't pair, and says to update it.
+    token_file.unlink()
+    fake_bridge("pairing", {"on": False})
+    host.call("setupClick", "setupCancel")
+    wait_for(lambda: not window()["open"], "closed")
+    open_window("appleMusic", "apple-music")
+    host.call("setupClick", "setupMacOther")
+    host.call("setupFocus", "appleMac")
+    host.call("typeKeys", f"127.0.0.1:{BRIDGE['port']}")
+    wait_for(lambda: "older than 0.10.0" in window()["notes"]["pairCode"], "an older bridge")
+    check(not window()["canStart"] and "git pull, then ./install" in window()["blocker"],
+          "a bridge before 0.10.0: it can't pair, and the window says to update it: " + window()["notes"]["pairCode"], failures)
+    fake_bridge("pairing", {"on": True})
+    fake_bridge("pair", {"code": "300400"})
+    retype("appleMac", str(BRIDGE["port"])[-1], str(BRIDGE["port"])[-1])
+    host.call("setupFocus", "pairCode")
+    host.call("typeKeys", "300400")
+    wait_for(lambda: window()["notes"]["pairCode"] == "Paired with the bridge", "paired again")
     # The smooth-playback fix starts ticked (recommended); unticked here.
     host.call("setupClick", "setupCheck:mpris")
     host.call("grabSetupWindow", str(output / "setup-apple-music.png"))
@@ -5703,69 +5752,69 @@ def setup_scenario(host, output, failures):
     wait_for(lambda: launched().endswith("/install' apple-music --no mpris"), "Apple Music's terminal")
     check(json.loads(apple_json.read_text()) == {"bridge": url, "stream": url + "/omarock.ogg"}
           and token_file.read_text() == "fake-bridge-token" and token_file.stat().st_mode & 0o777 == 0o600,
-          "the Mac's address saved with the stream the bridge names, and the token; ./install apple-music --no mpris",
+          "the Mac's address saved with the stream the bridge names, and the token from pairing; ./install apple-music --no mpris",
           failures)
     open_settings()
     finished()
     wait_for(lambda: "appleMusic:boolean" in host.state()["settingKinds"], "Apple Music set up")
 
     # Marc, 10-28, after setting the Mac's bridge up again (a new token):
-    # "omarock still allows you to select Apple Music, but says refused token"
-    # and "we should have an option in the Apple settings to grab the token
-    # with ssh". A refused token marks the tab, with the dot updates use and
-    # the reason on hover, and Fix…; Copy with ssh brings the new one over,
-    # from ssh straight into omarock-account.
+    # "omarock still allows you to select Apple Music, but says refused token".
+    # A refused token marks the tab, with the dot updates use and the reason
+    # on hover, and Fix…; pairing again, in the tab, brings the new one.
     token_file.write_text("stale-token")
-    (home / ".fake-mac-token").write_text("fake-bridge-token\n")
     host.call("close")
     open_settings()
     wait_for(lambda: "Apple Music •" in host.state()["settingsTabs"], "the refused token marks the tab", timeout=15)
     s = host.state()
     check(s["settingsTabTips"].get("Apple Music •") == "Apple Music: The bridge refused omarock's token"
-          and "appleUpdate:action:Fix…" in s["settingKinds"] and "refused it" in s["settingNotes"]["bridgeToken"]["text"]
-          and "bridgeToken:secret:Copy with ssh" in s["settingKinds"] and "bridgeTokenCopy" not in s["settingsAllRows"],
-          "a refused token: the tab's dot (its hover says why), Fix…, the token's note, and Copy with ssh by the token: "
+          and "appleUpdate:action:Fix…" in s["settingKinds"] and "bridgePair:pair" in s["settingKinds"]
+          and s["settingNotes"]["bridgePair"] == {"text": "The bridge refused omarock's token: pair again", "kind": "bad"},
+          "a refused token: the tab's dot (its hover says why), Fix…, and the pairing field says to pair again: "
           + str(s["settingsTabTips"]), failures)
-    # Marc: "make it so the copy with ssh is right near the other entry box":
-    # under it in the compact panel, beside it expanded.
-    # By the keys: → onto the field's button, ← back, → and Enter presses it.
-    ssh_mode.write_text("refused")
-    settings_cursor_to(host, "bridgeToken")
-    host.grab(output / "compact-settings-token.png")
+    settings_cursor_to(host, "bridgePair")
+    host.grab(output / "compact-settings-pair.png")
     host.call("press", "e")
     wait_for(lambda: host.state()["expanded"], "expanded settings")
     host.settle(.5)
-    host.grab(output / "expanded-settings-token.png")
+    host.grab(output / "expanded-settings-pair.png")
     host.call("press", "e")
     wait_for(lambda: not host.state()["expanded"], "compact settings")
     host.settle(.5)
-    settings_cursor_to(host, "bridgeToken")
-    host.call("press", "Right")
-    on = host.state()["settingsOnButton"]
-    host.call("press", "Left")
-    check(on and not host.state()["settingsOnButton"] and host.state()["settingsOpen"],
-          "→ goes to the token's button, ← back to the field (the settings stay open)", failures)
-    host.call("press", "Right")
+    # Half a code, then Esc: nothing sent (each try counts).
+    posts = len(pair_posts())
+    settings_cursor_to(host, "bridgePair")
     host.call("press", "Return")
-    wait_for(lambda: host.state()["settingNotes"]["bridgeToken"]["text"].startswith("Remote Login is off"), "Remote Login off")
+    host.call("typeKeys", "123")
+    host.call("press", "Escape")
+    host.settle(1)
+    check(len(pair_posts()) == posts and host.state()["settingsEditing"] == "" and host.state()["settingsOpen"],
+          "a code half typed, then Esc: nothing sent, the settings stay open", failures)
+    # No code open on the Mac: the bridge's answer under the field.
+    host.call("press", "Return")
+    host.call("typeKeys", "222222")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingNotes"]["bridgePair"]["text"].startswith("No pairing code is open"), "no code open")
     check(token_file.read_text() == "stale-token" and host.state()["settingsEditing"] == "",
-          "Remote Login off: Copy with ssh says so under the token, which stays (and isn't being edited)", failures)
-    host.call("press", "Down")
-    host.call("press", "Up")
-    check(not host.state()["settingsOnButton"], "another row and back: the field again", failures)
-    # And a click.
-    ssh_mode.write_text("on")
-    check(host.call("clickPanel", "settingButton:bridgeToken") == "ok", "the button can be clicked", failures)
-    wait_for(lambda: host.state()["settingNotes"]["bridgeToken"]["text"] == "Copied from the Mac", "copied")
-    copied = ssh_log.read_text().splitlines()[-1]
-    check(token_file.read_text() == "fake-bridge-token" and token_file.stat().st_mode & 0o777 == 0o600
-          and copied == "-o BatchMode=yes -o ConnectTimeout=8 127.0.0.1 cat 'Library/Application Support/omarock-bridge/token'",
-          "Copy with ssh: the Mac's token, from ssh in batch mode into the token file (mode 600): " + copied, failures)
+          "Enter pairs: with no code open on the Mac, the field says so, and the token stays", failures)
+    # The Mac opens one: Enter pairs, and the dot and Fix… go.
+    fake_bridge("pair", {"code": "654321"})
+    host.call("press", "Return")
+    host.call("typeKeys", "654 321")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingNotes"]["bridgePair"]["text"] == "Paired with the bridge", "paired")
+    check(token_file.read_text() == "fake-bridge-token" and token_file.stat().st_mode & 0o777 == 0o600,
+          "pairing again: the new token in its file (mode 600)", failures)
     wait_for(lambda: "Apple Music" in host.state()["settingsTabs"] and "appleUpdate:action:Fix…" not in host.state()["settingKinds"],
              "the mark gone", timeout=15)
-    check(host.state()["settingNotes"]["bridgeToken"] == {"text": "Copied from the Mac", "kind": "ok"},
-          "the bridge takes it: the dot and Fix… go, and the note says it was copied", failures)
-    (home / ".fake-mac-token").unlink()
+    check(host.state()["settingNotes"]["bridgePair"] == {"text": "Paired with the bridge", "kind": "ok"},
+          "the bridge takes it: the dot and Fix… go, and the note says it paired", failures)
+    host.call("close")
+    open_settings()
+    settings_cursor_to(host, "bridgePair")
+    wait_for(lambda: host.state()["settingNotes"]["bridgePair"]["text"].startswith("Paired: "), "the settled note")
+    check(host.state()["settingNotes"]["bridgePair"] == {"text": "Paired: the bridge takes omarock's token", "kind": "ok"},
+          "opened again: the field says omarock is paired", failures)
     for f, data in before.items():
         if data is None: f.unlink(missing_ok=True)
         else: f.write_bytes(data)

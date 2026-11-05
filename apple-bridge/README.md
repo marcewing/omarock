@@ -25,7 +25,9 @@ Linux: omarock ◀──── bridge API :8710 (JSON, bearer token) ───�
 - **The token.** Every API request needs it, except `/v1/health` (the bridge's version
   and state) and cover art (each image's address carries a key made from the token).
   The stream's address has a secret made from the token in it, which `/v1/health`
-  gives only with the token, so only omarock finds the stream.
+  gives only with the token, so only omarock finds the stream. Your Omarchy machine
+  gets the token by **pairing**: the Mac shows a 6-digit code, and you type it into
+  omarock there.
 - **It runs in the background:** no Dock icon, started at login, restarted if it
   crashes. With nobody listening to the stream for 30 s, it pauses.
 
@@ -59,10 +61,7 @@ In the order to do them:
 6. **An Apple Music subscription** on the Apple ID the Mac's Music app uses.
 7. **The Mac and the Linux machine on one network:** your home network, or both on
    Tailscale. Omarchy finds the bridge on your network by itself (Bonjour).
-8. **Remote Login on the Mac (optional):** System Settings → General → Sharing. Then setup
-   on Linux can copy the bridge's token itself. Without it you paste the token, and the
-   Mac's clipboard doesn't reach Linux.
-9. **On Linux:** omarock with mpd, as in the [main README](../README.md).
+8. **On Linux:** omarock with mpd, as in the [main README](../README.md).
 
 ### What Apple's steps are for
 
@@ -122,7 +121,7 @@ and saves them in `apple-bridge/app/Local.xcconfig`, which git ignores. Then it 
 signs the app, installs it to `~/Applications/OmarockBridge.app`, starts it, and goes
 through the Mac's permissions and its network with you (the firewall, if it's on). It
 ends with what your Omarchy machine needs: this Mac's name on your network
-(`NAME.local`), and on Tailscale if it runs.
+(`NAME.local`), and on Tailscale if it runs, and then a pairing code for it (below).
 Every command it runs is shown, and it asks before changing anything.
 
 Run it again whenever you like. What's done is checked and skipped. The bridge is
@@ -149,6 +148,21 @@ incoming connections" on, nothing gets through: switch that off first.
 
 If macOS says the login item needs approval, allow OmarockBridge in System Settings →
 General → Login Items.
+
+### Pairing
+
+The installer's last step pairs your Omarchy machine with the bridge, so it gets the
+bridge's token without your copying anything across. It asks "Show a pairing code for
+your Omarchy machine?", then shows a 6-digit code, such as `048 213`. On your Omarchy
+machine, type it into omarock's Apple Music setup (part 3, below). The installer waits,
+and says "✓ paired with" that machine's name once it's done.
+
+The code works once, within 10 minutes, and 5 wrong tries close it. That keeps anyone
+else on your network from guessing it while it's open.
+
+For a new code at any time (another Omarchy machine, say, or after a reinstalled bridge
+made a new token), run `./install pair` in the Mac's omarock folder. It does only this
+step.
 
 ### If the installer stops
 
@@ -200,6 +214,13 @@ again: what's done is skipped. What it says, in the order you'd meet it, and wha
   app is signed in to an Apple ID with an Apple Music subscription, and that MusicKit is
   ticked for your bundle ID on developer.apple.com. A new bundle ID can take a few
   minutes.
+- **"Waiting for your Omarchy machine…":** type the code into omarock's Apple Music
+  setup there (above, "Pairing"). Ctrl-C closes the code.
+- **"the code expired"**, **"the code was closed after 5 wrong tries"** or **"the code
+  is closed":** `./install pair` opens a new one.
+- From `./install pair`: **"the bridge isn't installed on this Mac"**, or **"the bridge
+  here (0.9.0) is too old to pair":** run `./install` first, which sets the bridge up or
+  updates it.
 
 ### Keep the Mac awake
 
@@ -286,29 +307,28 @@ stream, because restarting the bridge under mpd gives mpd errors until it's back
 On your Omarchy machine, **Set up…** on the Apple Music tab of omarock's settings (`,`
 in the panel), or `./install apple-music` in your clone there, connects to the bridge.
 Its window lists the bridges it finds on your network, and the Macs among your Tailscale
-machines, with a Mac's Tailscale address first, and checks that the bridge answers. Then the bridge's token:
-- **Left blank,** setup copies it from the Mac with `scp`. That needs the Mac's Remote
-  Login (System Settings → General → Sharing), which the window checks first.
-- **Or paste it,** and the window checks it. On the Mac it's in
-  `~/Library/Application Support/omarock-bridge/token`; `pbcopy < ~/Library/Application\
-  Support/omarock-bridge/token` copies it without showing it (the Mac's `./install`
-  offers to). The Mac's clipboard doesn't reach Linux, so bring it across your own way.
+machines, with a Mac's Tailscale address first, and checks that the bridge answers. Then
+type the pairing code the Mac shows (above, "Pairing"): the window pairs as soon as it
+has all 6 digits, and the token goes straight into `~/.config/omarock/bridge-token`.
+`./install apple-music` asks for the code the same way.
 
-By hand instead (`build.sh` prints these with your addresses filled in):
+By hand instead, from your omarock clone:
 
 ```sh
 mkdir -p ~/.config/omarock
 echo '{ "bridge": "http://my-mac.local:8710" }' > ~/.config/omarock/apple.json
-scp you@my-mac.local:'Library/Application Support/omarock-bridge/token' ~/.config/omarock/bridge-token
-chmod 600 ~/.config/omarock/bridge-token
+echo 048213 | tools/omarock-account bridge-pair http://my-mac.local:8710   # the Mac's code
 ```
 
-The stream's address comes from the bridge once the token is in (omarock asks for it).
+Or copy the token file across yourself: it's
+`~/Library/Application Support/omarock-bridge/token` on the Mac (`build.sh` prints an
+`scp` line for it), and goes in `~/.config/omarock/bridge-token`, mode 600. The stream's
+address comes from the bridge once the token is in (omarock asks for it).
 
-Then switch Apple Music on in omarock's settings (`,` in the panel). The token can be
-pasted there later too, or copied again with **Copy with ssh** (Remote Login again).
-A reinstalled bridge makes a new token: the old one is refused, and the Apple Music
-tab is marked • until the new one is in (hover over the tab for why). If the Mac's
+Then switch Apple Music on in omarock's settings (`,` in the panel). A reinstalled
+bridge makes a new token: the old one is refused, and the Apple Music tab is marked •
+until omarock pairs again (hover over the tab for why). Run `./install pair` on the
+Mac, and type its code into **Pair with the bridge** on that tab. If the Mac's
 address changes, **Fix…** there (or `./install apple-music`) asks again. Its other setting there, also in
 `~/.config/omarock/settings.json`:
 - `appleIdleStop`: after the bridge has been paused this many seconds, mpd lets go of the
@@ -368,6 +388,9 @@ For what `./install` says while it sets the bridge up, see
   System Settings → General → Login Items & Extensions (App Background Activity).
 - **mpd far behind live:** update the bridge to 0.7.0 or later (`git pull`, then
   `./install`, in the Mac's clone). Older bridges' streams made mpd fall behind.
+- **omarock says the bridge refused its token:** a reinstalled bridge has a new one.
+  Pair again: `./install pair` on the Mac, then its code in **Pair with the bridge** on
+  omarock's Apple Music tab.
 - **On Linux,** run `tools/omarock-doctor`.
 - **Another Icecast on port 8000:** the bridge uses whatever answers on 127.0.0.1:8000,
   so stop the other one, or move it. The bridge's own Icecast serves only the stream:

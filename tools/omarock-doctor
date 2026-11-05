@@ -169,7 +169,7 @@ print("  " + ("\033[32m✓\033[0m the bridge answers, and may use Apple Music" i
         code_stream=$(printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "$(tr -d '\n\r"\\' <"$tokenfile")" \
           | curl -s -m 5 -K - -w '\n%{http_code}' "$bridge/v1/status" 2>/dev/null | tail -1)
         if [[ $code_stream == 401 ]]; then
-          bad "the bridge refused omarock's token: Copy with ssh, in the settings' Apple Music tab, fetches the new one"
+          bad "the bridge refused omarock's token: pair again (./install pair on the Mac, then its code in the settings' Apple Music tab)"
         elif [[ $code_stream == 200 ]]; then
           ok "the bridge accepts omarock's token"
           stream=$(printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "$(tr -d '\n\r"\\' <"$tokenfile")" \

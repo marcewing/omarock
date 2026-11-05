@@ -15,6 +15,17 @@
 #   omarock-account apple-bridge     the bridge's address (http://HOST:8710), into
 #                                    apple.json, with its stream if the bridge
 #                                    says where (from 0.9.0, only with the token)
+#   omarock-account bridge-pair URL  pairs with the bridge at URL (from 0.10.0): the
+#                                    pairing code the Mac shows comes on stdin, and
+#                                    the token the bridge gives for it goes straight
+#                                    into bridge-token (then the stream, as above).
+#                                    On a failure, the bridge's reason on stderr,
+#                                    and the exit code: 3 not the code, 4 no code
+#                                    open on the Mac, 5 a bridge that can't pair
+#                                    (before 0.10.0), 6 no answer, 7 not saved
+#   omarock-account bridge-check URL whether the bridge at URL takes the token saved
+#                                    here: exit 0 if it does, 1 if it refuses it,
+#                                    6 if it doesn't answer, 8 if there's none
 #   omarock-account music-folder     mpd's music folder: mpd.conf's music_directory
 #                                    line only (a copy of mpd.conf first), then mpd
 #                                    restarts and reads the folder
@@ -44,6 +55,11 @@ apple_stream() {  # BRIDGE
   [[ -r $config/bridge-token ]] && token=$(<"$config/bridge-token")
   printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "${token//[$'\n\r "\\']/}" \
     | curl -s -m 5 -K - "$1/v1/health" 2>/dev/null | jq -r '.stream // empty' 2>/dev/null
+}
+bridge_url() {  # URL: the bridge's address, checked
+  local b=${1%/}
+  [[ $b =~ ^https?://[^/]+$ ]] || { echo "omarock-account: not a bridge's address: $1" >&2; exit 2; }
+  printf '%s' "$b"
 }
 write_apple() {  # BRIDGE STREAM: apple.json
   install -d "$config"
@@ -91,6 +107,52 @@ print(json.dumps({"username": login.get("username", ""), "password": login.get("
       [[ -n $stream ]] && write_apple "$bridge" "$stream"
     fi
     true ;;
+  bridge-pair)
+    bridge=$(bridge_url "${2:-}") || exit 2
+    # Only the digits count ("048 213" is 048213), so they go into the JSON as they are.
+    code=$(value | tr -cd '0-9') || exit 2
+    [[ ${#code} == 6 ]] || { echo "A pairing code is 6 digits." >&2; exit 3; }
+    client=$(tr -cd 'A-Za-z0-9._-' </etc/hostname 2>/dev/null | head -c 64)
+    reply=$(printf '{"code":"%s"}' "$code" | curl -s -m 8 -w '\n%{http_code}' -H 'Content-Type: application/json' \
+      -H "X-Omarock-Client: $client" --data-binary @- "$bridge/v1/pair" 2>/dev/null)
+    status=${reply##*$'\n'}
+    reply=${reply%$'\n'*}
+    said=$(jq -r '.error // empty' <<<"$reply" 2>/dev/null)
+    case $status in
+      200)
+        # The token goes from the reply into its file, never printed or on a command line.
+        token=$(jq -r '.token // empty' <<<"$reply" 2>/dev/null)
+        reply=""
+        [[ -n $token ]] || { echo "The bridge answered without a token." >&2; exit 6; }
+        printf '%s' "$token" | write_private "$config/bridge-token" || { token=""; echo "Couldn't save the token in $config." >&2; exit 7; }
+        token=""
+        # The stream, given only with the token, if apple.json is for this bridge.
+        if [[ $(jq -r '.bridge // empty' "$config/apple.json" 2>/dev/null) == "$bridge" ]]; then
+          stream=$(apple_stream "$bridge")
+          [[ -n $stream ]] && write_apple "$bridge" "$stream"
+        fi
+        true ;;
+      400|403) [[ -n $said ]] || said="That isn't the code the Mac shows."
+        echo "$said" >&2; exit 3 ;;
+      409) [[ -n $said ]] || said="No pairing code is open on the Mac: run ./install pair there."
+        echo "$said" >&2; exit 4 ;;
+      404) echo "The bridge on the Mac is older than 0.10.0, and can't pair: update it there (git pull, then ./install)." >&2; exit 5 ;;
+      000|"") echo "Nothing answers at $bridge." >&2; exit 6 ;;
+      *) [[ -n $said ]] || said="The bridge said $status."
+        echo "$said" >&2; exit 6 ;;
+    esac ;;
+  bridge-check)
+    bridge=$(bridge_url "${2:-}") || exit 2
+    [[ -s $config/bridge-token ]] || exit 8
+    token=$(<"$config/bridge-token")
+    status=$(printf 'header = "Authorization: Bearer %s"\n' "${token//[$'\n\r "\\']/}" \
+      | curl -s -m 5 -o /dev/null -w '%{http_code}' -K - "$bridge/v1/status" 2>/dev/null)
+    token=""
+    case $status in
+      200) exit 0 ;;
+      401) exit 1 ;;
+      *) exit 6 ;;
+    esac ;;
   apple-bridge)
     bridge=$(value) && bridge=${bridge%/}
     [[ $bridge =~ ^https?://[^/]+$ ]] || { echo "omarock-account: not a bridge's address: $bridge" >&2; exit 1; }

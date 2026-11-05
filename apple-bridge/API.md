@@ -334,8 +334,10 @@ offers a code at its end, and `./install pair` there opens a new one any time.
   (`048213`). It works once, for 10 minutes, and for 5 wrong tries. Opening a new
   one replaces any code still open. Codes are compared in constant time.
 - `POST /v1/pair/open`, `GET /v1/pair` and `POST /v1/pair/close` need the token
-  **and** a request from the Mac itself (127.0.0.1 or ::1); from anywhere else, 403
-  `{"error": "Pairing codes are opened on the Mac: run ./install pair there."}`.
+  **and** a request from the Mac itself (127.0.0.1 or ::1, by the connection's peer
+  address, never the `Host` header). Where it comes from is checked first: from
+  anywhere else, 403 `{"error": "Pairing codes are opened on the Mac: run ./install
+  pair there."}`, token or not; from the Mac without the right token, 401.
   - `POST /v1/pair/open` → `{ "code": "048213", "expiresIn": 600, "tries": 5 }`.
   - `GET /v1/pair` → while a code is open, `{ "open": true, "expiresIn": 431,
     "triesLeft": 4 }`; once it's closed, `{ "open": false, "closed": "paired",
@@ -348,12 +350,14 @@ offers a code at its end, and `./install pair` there opens a new one any time.
   count, so `"048 213"` works.
   - 200 `{ "token": "…" }`: the code is used up (`closed: "paired"`).
   - 403 `{ "error": "That isn't the code the Mac shows.", "triesLeft": 3 }`. At the
-    fifth, the code closes (`tries`), `triesLeft` is 0, and the error says to run
-    `./install pair` on the Mac for a new one.
+    fifth, the code closes (`tries`), `triesLeft` is 0, and the error is "That isn't
+    the code the Mac shows, and that was the last try: run ./install pair on the Mac
+    for a new one."
   - 409 `{ "error": "No pairing code is open on the Mac: run ./install pair there." }`:
     none was opened, or it expired, was used or was closed.
-  - 400 `{ "error": "A pairing code is 6 digits." }` for anything else in `code`.
-    It doesn't count as a try.
+  - 400 `{ "error": "A pairing code is 6 digits." }` for anything else in `code`
+    (a number rather than a string too), or a body that isn't JSON. It doesn't count
+    as a try.
   - The errors are sentences omarock shows as they are. An older bridge answers 404
     (`No such endpoint.`).
 - The bridge logs opening, wrong tries (with the machine and the tries left), the

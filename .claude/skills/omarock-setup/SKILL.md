@@ -154,8 +154,11 @@ There are two halves, and the Mac's is the user's to build. Follow
   - `~/.config/omarock/apple.json` names the bridge (`http://my-mac.local:8710`),
     and the stream once the bridge has given it: from bridge 0.9.0 the stream's
     address has a secret, which `/v1/health` gives only with the token.
-  - The bridge's token goes in `~/.config/omarock/bridge-token` (mode 600), put
-    there by the user.
+  - The bridge's token goes in `~/.config/omarock/bridge-token` (mode 600), by
+    pairing: the Mac's `./install` ends with a 6-digit code (`./install pair` there
+    shows a new one), which the user types into Set up… or Pair with the bridge on
+    the Apple Music tab, or `./install apple-music` asks for. Never handle the token
+    or the code yourself.
 - **The stream's lag:** bridge 0.7.0 and later keep Arch's own libFLAC in step
   (`"minBitrate": true` in its `/v1/health`); for an older one, update it on the
   Mac, and keep `appleRejoin` on (the default) until then. A patched libFLAC left

@@ -120,13 +120,13 @@ download):
 - **[Homebrew](https://brew.sh)**, which the installer uses to add the tools it needs.
 - **An Apple Music subscription** on the Apple ID that the Mac's Music app uses.
 - **The Mac and your Omarchy machine on one network**, or both on [Tailscale](https://tailscale.com).
-- **Remote Login on the Mac** (optional), so setup can copy the bridge's token across.
 - **omarock installed on your Omarchy machine**, as above.
 
 Nothing between the Mac and your Omarchy machine is encrypted, so securing that network
 is up to you: Tailscale is one way, and it also works away from home.
 
-On the Mac, clone omarock and run `./install` and it walks you through the rest.
+On the Mac, clone omarock and run `./install` and it walks you through the rest. It
+ends by showing a pairing code: type it into **Set up…** on omarock's Apple Music tab.
 [apple-bridge/README.md](apple-bridge/README.md) has the details: what each of Apple's
 steps is for, and what to do if the installer stops.
 
@@ -442,7 +442,7 @@ change saves at once.
   (Before 0.6 they were keys on omarock's entry in `~/.config/omarchy/shell.json`;
   those still apply until you change them.)
 - **Accounts and keys** (the SiriusXM login, Spotify's Client ID and Soloist
-  key, the bridge's token) each keep their own file in `~/.config/omarock`,
+  key, the bridge's token from pairing) each keep their own file in `~/.config/omarock`,
   readable only by you. (Soloist, Spotify's player, takes its key only on its
   command line, so while it runs another user on this machine could see it with
   `ps`.) The settings screen never shows a password or key: one

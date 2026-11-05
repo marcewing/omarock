@@ -46,9 +46,10 @@ test("the values saved first: what was typed, a line only if it changed", () => 
     [["sxm-password", " pass word "]])
   assert.deepEqual(Setup.writes("siriusxm", { sxmTerms: true, sxmUser: " new@example.com ", sxmPassword: "" }, known),
     [["sxm-user", "new@example.com"]])
-  assert.deepEqual(Setup.writes("apple-music", { appleMac: "100.64.0.10", bridgeToken: "t" }, {}),
-    [["apple-bridge", "http://100.64.0.10:8710"], ["bridge-token", "t"]])
-  assert.deepEqual(Setup.writes("apple-music", { appleMac: "http://100.64.0.10:8710", bridgeToken: "" },
+  // The pairing code saves nothing at Start: pairing saved the token already.
+  assert.deepEqual(Setup.writes("apple-music", { appleMac: "100.64.0.10", pairCode: "048213" }, {}),
+    [["apple-bridge", "http://100.64.0.10:8710"]])
+  assert.deepEqual(Setup.writes("apple-music", { appleMac: "http://100.64.0.10:8710", pairCode: "" },
     { appleBridge: "http://100.64.0.10:8710" }), [])
 })
 
@@ -61,24 +62,44 @@ test("SiriusXM: the risk is ticked, and the login filled in", () => {
   assert.deepEqual(Setup.args("siriusxm", { sxmTerms: true }), ["--yes", "terms"])
 })
 
-test("Apple Music: the Mac has to answer; a token typed has to be taken", () => {
-  const values = { appleMac: "my-mac", bridgeToken: "", mpris: false }
+test("Apple Music: the Mac has to answer, then pairing has to work", () => {
+  const values = { appleMac: "my-mac", pairCode: "", mpris: false }
   assert.equal(Setup.blocker("apple-music", values, {}, {}), "Checking the bridge…")
   assert.equal(Setup.blocker("apple-music", values, {}, { appleMac: { kind: "bad", text: "Nothing answers" } }), "Nothing answers")
   const answers = { appleMac: { kind: "ok", text: "The bridge answers" } }
-  // No token: setup copies it from the Mac with scp, once its Remote Login answers.
-  assert.equal(Setup.blocker("apple-music", values, {}, answers), "Checking the Mac's Remote Login…")
-  const off = Setup.scpState(255, "ssh: connect to host 100.64.0.10 port 22: Connection refused")
-  assert.equal(Setup.blocker("apple-music", values, {}, Object.assign({ bridgeToken: off }, answers)), off.text)
-  assert.equal(Setup.blocker("apple-music", values, {}, Object.assign({ bridgeToken: Setup.scpState(0, "") }, answers)), "")
-  // A token set already: no need.
-  assert.equal(Setup.blocker("apple-music", values, { bridgeToken: true }, Object.assign({ bridgeToken: off }, answers)), "")
-  const typed = Object.assign({}, values, { bridgeToken: "abc" })
-  assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "checking" } }, answers)), "Checking the token…")
-  assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "bad", text: "Refused" } }, answers)), "Refused")
-  assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ bridgeToken: { kind: "ok" } }, answers)), "")
-  assert.deepEqual(Setup.args("apple-music", values), ["--yes", "scp-token", "--no", "mpris"])
+  assert.equal(Setup.blocker("apple-music", values, {}, answers), "Needs the pairing code from the Mac")
+  // Typing: a part of a code still needs the rest; letters can't be one.
+  assert.equal(Setup.blocker("apple-music", Object.assign({}, values, { pairCode: "048" }), {}, answers),
+    "Needs the pairing code from the Mac")
+  assert.equal(Setup.blocker("apple-music", Object.assign({}, values, { pairCode: "04x213" }), {}, answers), "A pairing code is 6 digits")
+  assert.equal(Setup.blocker("apple-music", Object.assign({}, values, { pairCode: "0482135" }), {}, answers), "A pairing code is 6 digits")
+  // Six digits (spaces and a dash aside) are being paired, then paired or not.
+  const typed = Object.assign({}, values, { pairCode: "048 213" })
+  assert.equal(Setup.blocker("apple-music", typed, {}, answers), "Pairing…")
+  assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ pairCode: { kind: "checking", text: "Pairing…" } }, answers)), "Pairing…")
+  assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ pairCode: Setup.pairState(0, "") }, answers)), "")
+  const wrong = Object.assign({ code: "048213" }, Setup.pairState(3, "That isn't the code the Mac shows.\n"))
+  assert.equal(Setup.blocker("apple-music", typed, {}, Object.assign({ pairCode: wrong }, answers)), "That isn't the code the Mac shows")
+  // A refusal is about the code it was for: another code typed is paired in turn.
+  assert.equal(Setup.blocker("apple-music", Object.assign({}, values, { pairCode: "111111" }), {},
+    Object.assign({ pairCode: wrong }, answers)), "Pairing…")
+  // A bridge that can't pair says so, whatever's typed.
+  assert.match(Setup.blocker("apple-music", values, {}, Object.assign({ pairCode: Setup.pairState(5, "") }, answers)), /older than 0\.10\.0/)
+  // A token the bridge takes already: no code needed.
+  assert.equal(Setup.blocker("apple-music", values, { bridgeToken: true },
+    Object.assign({ pairCode: { kind: "ok", text: "Paired already: no code needed" } }, answers)), "")
   assert.deepEqual(Setup.args("apple-music", typed), ["--no", "mpris"])
+})
+
+test("pairing's answers, by omarock-account's exit and the bridge's sentence", () => {
+  assert.deepEqual(Setup.pairState(0, ""), { kind: "ok", text: "Paired with the bridge" })
+  assert.deepEqual(Setup.pairState(4, "No pairing code is open on the Mac: run ./install pair there.\n"),
+    { kind: "bad", text: "No pairing code is open on the Mac: run ./install pair there" })
+  assert.equal(Setup.pairState(3, "").text, "That isn't the code the Mac shows")
+  assert.equal(Setup.pairState(6, "Nothing answers at http://my-mac.local:8710.").text, "Nothing answers at http://my-mac.local:8710")
+  assert.equal(Setup.pairState(7, "").kind, "bad")
+  assert.equal(Setup.pairDigits("048 213"), "048213")
+  assert.equal(Setup.pairDigits("048-213"), "048213")
 })
 
 test("a Mac's address is the bridge's URL", () => {
@@ -145,38 +166,20 @@ test("the outputs, as ./install offers them", () => {
   assert.deepEqual(Setup.outputList(""), [])
 })
 
-test("the Mac's Remote Login, from ssh in batch mode", () => {
-  assert.deepEqual(Setup.scpState(0, ""), { kind: "ok", text: "Mac scp enabled" })
-  assert.equal(Setup.scpState(255, "marc@100.64.0.10: Permission denied (publickey,password,keyboard-interactive).").kind, "ok")
-  assert.match(Setup.scpState(255, "marc@100.64.0.10: Permission denied (publickey,password).").text, /password on the Mac/)
-  assert.match(Setup.scpState(255, "Host key verification failed.").text, /trust the Mac/)
-  assert.match(Setup.scpState(255, "ssh: connect to host 100.64.0.10 port 22: Connection refused").text, /^Remote Login is off/)
-  assert.equal(Setup.scpState(255, "ssh: connect to host 100.64.0.10 port 22: Connection timed out").kind, "bad")
-  assert.equal(Setup.bridgeHost("http://100.64.0.10:8710"), "100.64.0.10")
-  assert.equal(Setup.bridgeHost("http://my-mac:8710"), "my-mac")
-})
-
-test("tokenCopyState: what Copy with ssh says, by ssh's exit and its errors", () => {
-  assert.deepEqual(Setup.tokenCopyState(0, "", "mac"), { kind: "ok", text: "Copied from the Mac" })
-  assert.match(Setup.tokenCopyState(255, "ssh: connect to host mac port 22: Connection refused", "mac").text, /^Remote Login is off/)
-  assert.match(Setup.tokenCopyState(255, "marc@mac: Permission denied (publickey,password).", "mac").text, /password/)
-  assert.match(Setup.tokenCopyState(255, "Host key verification failed.", "100.64.0.10").text, /run ssh 100\.64\.0\.10 once/)
-  assert.match(Setup.tokenCopyState(1, "cat: Library/Application Support/omarock-bridge/token: No such file or directory", "mac").text,
-    /no bridge token/)
-  assert.match(Setup.tokenCopyState(3, "", "mac").text, /empty/)
-  assert.equal(Setup.tokenCopyState(4, "omarock-account: nothing on stdin\n", "mac").text, "Couldn't save it: omarock-account: nothing on stdin")
-  assert.equal(Setup.tokenCopyState(255, "ssh: Could not resolve hostname mac", "mac").kind, "bad")
-})
-
 test("the windows as Marc laid them out: no Tailscale link, no list of what the terminal does", () => {
   const all = Object.values(Setup.pages)
   assert.ok(!all.some(p => p.after || p.introLinks))
   assert.ok(!all.some(p => p.steps.some(s => (s.links || []).some(l => /tailscale/i.test(l.label + l.url)))))
   const apple = Setup.pages["apple-music"]
-  assert.equal(apple.steps[3].title, "Smooth playback (optional, recommended)")
+  assert.equal(apple.steps[4].title, "Smooth playback (optional, recommended)")
   // The recommended fix starts ticked; the libFLAC one is gone (bridge 0.7.0's stream needs none).
-  assert.deepEqual(Setup.args("apple-music", Setup.initial("apple-music", {})), ["--yes", "scp-token", "--yes", "mpris"])
-  assert.ok(!apple.steps[3].fields.some(f => f.key === "flac"))
+  assert.deepEqual(Setup.args("apple-music", Setup.initial("apple-music", {})), ["--yes", "mpris"])
+  assert.ok(!apple.steps[4].fields.some(f => f.key === "flac"))
+  // What's done on the Mac is shown to type there, not to copy (this clipboard doesn't reach it), and
+  // the only link is the guide: the rest is the Mac's.
+  assert.ok(!apple.steps.some(s => (s.copies || []).length))
+  assert.deepEqual(apple.steps[1].commands, ["git clone https://github.com/marcewing/omarock", "cd omarock && ./install"])
+  assert.deepEqual(apple.steps.flatMap(s => (s.links || []).map(l => l.label)), ["The bridge's guide"])
   // Spotify: where the Client ID comes from, Soloist's own page, and what Start setup does next, as step 3.
   const spotify = Setup.pages.spotify
   assert.match(spotify.steps[0].fields[0].lead, /copy the app's Client ID and paste it here/)

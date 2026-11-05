@@ -105,7 +105,9 @@ everything else:
   `fake-tailscale`, `fake-avahi-browse` and `fake-pactl` give the setup windows
   a tailnet's Mac, the bridges "on the network" that `$HOME/.fake-avahi` lists,
   and two outputs, `fake-hyprctl` stands in for the compositor (a window it
-  says is tiled gets floated), and `fake-ssh` for the Mac's Remote Login.
+  says is tiled gets floated). `ssh` and `scp` there fail at once: nothing
+  should reach another machine. The fake bridge pairs (API.md): `POST
+  /v1/fake/pair {code, tries, seconds}` opens a code, as the Mac's installer would.
   The test HOME starts with Spotify and SiriusXM "set up"; `--only setup` sets
   pieces up and removes them through the settings.
 

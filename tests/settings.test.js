@@ -76,7 +76,7 @@ test("a source not set up: its Set up button, and none of its other rows", () =>
   assert.equal(spotify.button, "Set up…")
   assert.match(spotify.description, /Premium/)
   for (const key of ["spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove", "spotifyUpdate", "sxmPassword",
-    "bridgeToken", "appleRemove", "soundRemove"])
+    "bridgePair", "appleRemove", "soundRemove"])
     assert.ok(!keys(rows).includes(key), key)
   assert.equal(row(rows, "sound").button, "Set up…")
   assert.ok(keys(rows).includes("musicFolder") && keys(rows).includes("radio"))

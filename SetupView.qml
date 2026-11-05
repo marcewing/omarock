@@ -9,16 +9,19 @@ import "Setup.js" as Setup
 // A piece's setup (Set up… in the settings), in a window of its own
 // (Setup.js has what's in it): what it is and how it works, what it needs
 // and where to get it, and the fields to fill in there and then. A link
-// opens in the browser; Copy puts its line on the clipboard. Start setup
+// opens in the browser; Copy puts its line on the clipboard (a command for
+// the Mac has none: this clipboard doesn't reach it). Start setup
 // hands the values to the panel, which saves them and runs the rest in a
 // terminal. Tab goes through the fields, ticks and buttons; Enter in a field
 // goes on to the next (on the last, Start setup); Space or Enter presses a
 // button or flips a tick; Esc closes.
 //
-// The Mac's address and a token typed are checked live against the bridge,
-// so Start setup waits until the bridge answers and takes the token. A
-// token left blank is copied from the Mac with scp during setup, so then
-// the Mac's Remote Login is checked (ssh in batch mode: it asks nothing).
+// The Mac's address is checked live against the bridge, so Start setup
+// waits until the bridge answers. The pairing code is traded for the
+// bridge's token as soon as it's typed (tools/omarock-account bridge-pair:
+// the token goes straight into its file, never through here), so it stays
+// paired even if the window is then closed; a token the bridge takes
+// already needs no code (bridge-check).
 Rectangle {
   id: root
 
@@ -86,8 +89,11 @@ Rectangle {
 
   // A piece opening: its fields as they start, from the top.
   function reset() {
-    scpProbe.running = false
     root.autoMac = ""
+    root.canPair = false
+    root.tokenSaved = false
+    root.tokenFor = {}
+    root.refused = {}
     root.values = Setup.initial(root.piece, root.known, root.defaultOutput)
     root.touched = {}
     root.live = {}
@@ -155,7 +161,7 @@ Rectangle {
       t[key] = true
       root.touched = t
     }
-    if (key === "appleMac" || key === "bridgeToken") root.checkSoon()
+    if (key === "appleMac" || key === "pairCode") root.checkSoon()
   }
 
   // The first field still empty takes the keys.
@@ -193,6 +199,13 @@ Rectangle {
   function fieldNote(field) {
     var l = root.live[field.key]
     var p = Setup.problem(field, root.values[field.key], root.known, l)
+    // The pairing code: what pairing said, or a code that can't be one.
+    if (field.type === "pair") {
+      if (l && l.kind === "checking") return { kind: "", text: l.text || "Pairing…" }
+      if (l && l.kind === "ok") return { kind: "ok", text: l.text }
+      if (p === "" || p.indexOf("Needs ") === 0 || p === "Pairing…") return { kind: "", text: "" }
+      return { kind: "bad", text: p }
+    }
     if (l && l.kind === "checking") return { kind: "", text: "Checking…" }
     if (!l && (field.type === "mac" || root.values[field.key] === "")) return { kind: "", text: "" }
     if (p !== "" && p.indexOf("Needs ") !== 0) return { kind: "bad", text: p }
@@ -214,21 +227,18 @@ Rectangle {
   }
   function checkBridge() {
     var url = Setup.bridgeUrl(root.values.appleMac)
-    var token = String(root.values.bridgeToken || "")
     var seq = ++root.checkSeq
     if (url === "") {
       root.live = {}
       return
     }
-    var l = { appleMac: { kind: "checking", text: "" } }
-    if (token !== "") l.bridgeToken = { kind: "checking", text: "" }
-    root.live = l
+    root.live = { appleMac: { kind: "checking", text: "" } }
     root.get(url + "/v1/health", "", function(status, data) {
       if (seq !== root.checkSeq) return
       var now = Object.assign({}, root.live)
       if (status !== 200) {
         now.appleMac = { kind: "bad", text: "Nothing answers at " + url + ". Is the bridge running there, and can this machine reach the Mac?" }
-        delete now.bridgeToken
+        delete now.pairCode
         root.live = now
         return
       }
@@ -236,48 +246,117 @@ Rectangle {
       now.appleMac = data && data.authorized === false
         ? { kind: "ok", warn: true, text: "The bridge answers" + version + ", but can't use Apple Music yet: allow it on the Mac, in System Settings, Privacy & Security, Media & Apple Music" }
         : { kind: "ok", text: "The bridge answers" + version }
-      // No token typed: whether setup can scp it from the Mac.
-      if (token === "") now.bridgeToken = { kind: "checking", text: "" }
+      root.canPair = !!data && data.pairing === true
       root.live = now
-      if (token === "") {
-        root.probeMac(Setup.bridgeHost(url), seq)
-        return
-      }
-      root.get(url + "/v1/status", token, function(code) {
-        if (seq !== root.checkSeq) return
-        var after = Object.assign({}, root.live)
-        after.bridgeToken = code === 200 ? { kind: "ok", text: "The bridge takes it" }
-          : code === 401 ? { kind: "bad", text: "The bridge refused this token" }
-          : { kind: "bad", text: code === 0 ? "The bridge didn't answer" : "The bridge said " + code }
-        root.live = after
-      })
+      root.checkPairing(url, seq)
     })
   }
-  // The Mac's Remote Login: ssh in batch mode (no prompts, and nothing
-  // added to known_hosts), through the ssh config, as setup's scp goes.
-  function probeMac(host, seq) {
-    scpProbe.running = false
-    scpProbe.seq = seq
-    scpProbe.command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, "true"]
-    scpProbe.running = true
-    scpDeadline.restart()
+
+  // ---- Pairing (tools/omarock-account: the token never comes here) ----
+
+  readonly property string accountTool: decodeURIComponent(String(Qt.resolvedUrl("tools/omarock-account")).replace(/^file:\/\//, ""))
+  // The bridge says it can pair (health's "pairing", from 0.10.0).
+  property bool canPair: false
+  // A token saved by pairing here; url -> whether that bridge takes the
+  // token saved; url + " " + code -> the answer to a code it refused (each
+  // costs one of the code's tries, so the same one isn't sent again).
+  property bool tokenSaved: false
+  property var tokenFor: ({})
+  property var refused: ({})
+  property bool pairAgain: false
+  function setLive(key, state) {
+    var now = Object.assign({}, root.live)
+    if (state) now[key] = state
+    else delete now[key]
+    root.live = now
   }
+  function checkPairing(url, seq) {
+    if (!root.fieldList.some(function(f) { return f.type === "pair" })) return
+    if (pairer.running || tokenChecker.running) {
+      root.pairAgain = true
+      return
+    }
+    var hasToken = root.known.bridgeToken === true || root.tokenSaved
+    if (hasToken && root.tokenFor[url] === undefined) {
+      root.setLive("pairCode", { kind: "checking", text: "Checking this machine's token…" })
+      tokenChecker.url = url
+      tokenChecker.seq = seq
+      tokenChecker.command = [root.accountTool, "bridge-check", url]
+      tokenChecker.running = true
+      return
+    }
+    if (hasToken && root.tokenFor[url] === true) {
+      root.setLive("pairCode", { kind: "ok", text: root.tokenSaved ? "Paired with the bridge" : "Paired already: no code needed" })
+      return
+    }
+    if (!root.canPair) {
+      root.setLive("pairCode", Setup.pairState(5, ""))
+      return
+    }
+    var code = Setup.pairDigits(root.values.pairCode)
+    if (!/^\d{6}$/.test(code)) {
+      root.setLive("pairCode", null)
+      return
+    }
+    if (root.refused[url + " " + code]) {
+      root.setLive("pairCode", root.refused[url + " " + code])
+      return
+    }
+    root.setLive("pairCode", { kind: "checking", text: "Pairing…" })
+    pairer.url = url
+    pairer.seq = seq
+    pairer.code = code
+    pairer.command = [root.accountTool, "bridge-pair", url]
+    pairer.running = true
+  }
+  // Whether the bridge takes the token saved here.
   Process {
-    id: scpProbe
+    id: tokenChecker
+    property string url: ""
     property int seq: 0
-    stderr: StdioCollector { id: scpErrors; waitForEnd: true }
     onExited: function(exitCode) {
-      scpDeadline.stop()
-      if (scpProbe.seq !== root.checkSeq) return
-      var now = Object.assign({}, root.live)
-      now.bridgeToken = Setup.scpState(exitCode, scpErrors.text)
-      root.live = now
+      // Not taken, or no answer: a code is wanted (asked again next time the window opens).
+      var known = Object.assign({}, root.tokenFor)
+      known[tokenChecker.url] = exitCode === 0
+      root.tokenFor = known
+      root.pairedOn(tokenChecker.seq, tokenChecker.url)
     }
   }
-  Timer {
-    id: scpDeadline
-    interval: 12000
-    onTriggered: scpProbe.running = false
+  // The code typed, traded for the token: on stdin, and the token goes
+  // into its file.
+  Process {
+    id: pairer
+    property string url: ""
+    property string code: ""
+    property int seq: 0
+    stdinEnabled: true
+    stderr: StdioCollector { id: pairErrors; waitForEnd: true }
+    onStarted: write(pairer.code + "\n")
+    onExited: function(exitCode) {
+      var state = Setup.pairState(exitCode, pairErrors.text)
+      if (exitCode === 0) {
+        root.tokenSaved = true
+        var known = {}
+        known[pairer.url] = true
+        root.tokenFor = known
+      } else if (exitCode === 3) {
+        var refused = Object.assign({}, root.refused)
+        refused[pairer.url + " " + pairer.code] = Object.assign({ code: pairer.code }, state)
+        root.refused = refused
+      }
+      if (exitCode !== 0) state.code = pairer.code
+      if (pairer.seq === root.checkSeq && !root.pairAgain) root.setLive("pairCode", state)
+      root.pairedOn(pairer.seq, pairer.url)
+    }
+  }
+  // A check or a pairing done: on to what's in the fields now.
+  function pairedOn(seq, url) {
+    if (root.pairAgain || seq !== root.checkSeq) {
+      root.pairAgain = false
+      root.checkSoon()
+    } else if (root.live.pairCode === undefined || root.live.pairCode.kind === "checking") {
+      root.checkPairing(url, seq)
+    }
   }
 
   // A GET, given up after 5 s: callback(status, data), status 0 when nothing answered.
@@ -435,21 +514,23 @@ Rectangle {
             }
           }
 
-          // A line to type or paste somewhere else, with Copy.
+          // A line to paste somewhere else, with Copy; a command for the
+          // Mac, shown the same, without.
           Repeater {
-            model: step.modelData.copies || []
+            model: (step.modelData.copies || []).map(function(c) { return { text: c, copy: true } })
+              .concat((step.modelData.commands || []).map(function(c) { return { text: c, copy: false } }))
 
             Item {
               id: copyRow
-              required property string modelData
+              required property var modelData
               width: step.width
-              height: Math.max(copyText.implicitHeight + Style.space(10), copyButton.implicitHeight)
+              height: Math.max(copyText.implicitHeight + Style.space(10), copyRow.modelData.copy ? copyButton.implicitHeight : 0)
               property bool copied: false
 
               Rectangle {
                 anchors.left: parent.left
-                anchors.right: copyButton.left
-                anchors.rightMargin: Style.space(8)
+                anchors.right: copyRow.modelData.copy ? copyButton.left : parent.right
+                anchors.rightMargin: copyRow.modelData.copy ? Style.space(8) : 0
                 height: parent.height
                 radius: Style.cornerRadius
                 color: Style.hoverFillFor(root.foreground, Commons.Color.accent)
@@ -464,7 +545,7 @@ Rectangle {
                   readOnly: true
                   selectByMouse: true
                   textFormat: TextEdit.PlainText
-                  text: copyRow.modelData
+                  text: copyRow.modelData.text
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
@@ -474,7 +555,8 @@ Rectangle {
 
               Button {
                 id: copyButton
-                objectName: "setupCopy:" + copyRow.modelData
+                objectName: "setupCopy:" + copyRow.modelData.text
+                visible: copyRow.modelData.copy
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: copyRow.copied ? "Copied" : "Copy"
@@ -484,7 +566,7 @@ Rectangle {
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
                 onClicked: {
-                  Quickshell.clipboardText = copyRow.modelData
+                  Quickshell.clipboardText = copyRow.modelData.text
                   copyRow.copied = true
                   copiedTimer.restart()
                 }
@@ -654,7 +736,7 @@ Rectangle {
               TextField {
                 id: editor
                 objectName: "setupField:" + field.f.key
-                visible: field.f.type === "text" || field.f.type === "secret" || (field.f.type === "mac" && root.otherMac)
+                visible: field.f.type === "text" || field.f.type === "secret" || field.f.type === "pair" || (field.f.type === "mac" && root.otherMac)
                 width: Math.min(field.width, Style.space(480))
                 password: field.f.type === "secret"
                 passwordCharacter: "●"

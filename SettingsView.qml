@@ -13,7 +13,8 @@ import "Paging.js" as Paging
 // file (changeRequested); an account, a key or the music folder through
 // tools/omarock-account (accountRequested, folderRequested). A secret is
 // never shown: a set one shows a row of dots (the panel only knows that it's
-// set), and a new one is typed into an empty, masked field. Tab and
+// set), and a new one is typed into an empty, masked field. A pairing code
+// goes the same way, and leaves the field empty again. Tab and
 // Shift+Tab change tabs, ↑↓ move, Space or Enter toggles, edits, presses or
 // takes the next choice, ←→ change a number or a choice, Esc closes (or drops
 // an edit). A field with a button of its own: → to the button, ← back.
@@ -235,6 +236,8 @@ Rectangle {
         root.shownAs(key, true)
         root.accountRequested(key, text)
       }
+    } else if (save && row && row.type === "pair") {
+      if (text.trim() !== "") root.accountRequested(key, text.trim())
     } else if (save && row && row.type === "account") {
       if (text.trim() !== "" && text.trim() !== root.valueOf(key)) {
         root.shownAs(key, text.trim())
@@ -343,7 +346,7 @@ Rectangle {
 
           function focusEditor() {
             if (editor.visible) {
-              editor.text = rowItem.row.type === "secret" || rowItem.value === undefined || rowItem.value === null ? ""
+              editor.text = rowItem.row.type === "secret" || rowItem.row.type === "pair" || rowItem.value === undefined || rowItem.value === null ? ""
                 : String(rowItem.value)
               editor.forceActiveFocus()
               editor.selectAll()
@@ -515,10 +518,11 @@ Rectangle {
                 foreground: root.foreground
                 font.family: root.fontFamily
                 inputMethodHints: rowItem.row.type === "integer" ? Qt.ImhDigitsOnly : Qt.ImhNone
-                placeholderText: rowItem.row.type !== "secret" ? root.placeholders[rowItem.row.key] || ""
+                placeholderText: rowItem.row.type === "pair" ? (root.editing === rowItem.row.key ? "6 digits" : "Enter, then the code")
+                  : rowItem.row.type !== "secret" ? root.placeholders[rowItem.row.key] || ""
                   : root.editing === rowItem.row.key ? (rowItem.value === true ? "Type a new one · Esc keeps it" : "Type or paste it")
                   : rowItem.value === true ? "" : "Not set · Enter to set it"
-                readonly property string shown: rowItem.row.type === "secret" || rowItem.value === undefined || rowItem.value === null ? ""
+                readonly property string shown: rowItem.row.type === "secret" || rowItem.row.type === "pair" || rowItem.value === undefined || rowItem.value === null ? ""
                   : String(rowItem.value)
                 text: shown
                 onShownChanged: if (!activeFocus) text = shown
@@ -528,9 +532,10 @@ Rectangle {
                     root.onButton = false
                     root.editing = rowItem.row.key
                   }
+                  // Leaving a pairing code half typed sends nothing: each try counts.
                   if (!activeFocus && root.editing === rowItem.row.key) {
-                    root.finishEdit(rowItem.row.key, text, true)
-                    if (password) text = ""
+                    root.finishEdit(rowItem.row.key, text, rowItem.row.type !== "pair")
+                    if (password || rowItem.row.type === "pair") text = ""
                   }
                 }
                 Keys.onPressed: function(event) {
@@ -538,7 +543,7 @@ Rectangle {
                     root.finishEdit(rowItem.row.key, editor.text, true)
                     // A secret leaves nothing behind in the field; the music
                     // folder shows mpd's until mpd has changed it.
-                    if (editor.password) editor.text = ""
+                    if (editor.password || rowItem.row.type === "pair") editor.text = ""
                     else if (rowItem.row.type === "folder") editor.text = editor.shown
                     event.accepted = true
                   } else if (event.key === Qt.Key_Escape) {
@@ -561,7 +566,7 @@ Rectangle {
                 }
               }
 
-              // The field's own button (Copy with ssh by the bridge's token).
+              // The field's own button (`button` and `action` in Settings.js).
               Button {
                 id: fieldButton
                 objectName: "settingButton:" + (rowItem.row.key || "")

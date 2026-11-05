@@ -21,18 +21,16 @@
 #   ./install PIECE --yes NAME --no NAME --output NAME
 #                              questions answered ahead, as omarock's setup
 #                              window does: terms (SiriusXM's risk), mpris
-#                              (Apple Music's patched mpd-mpris),
-#                              scp-token (the bridge's token copied from the
-#                              Mac with scp, as ssh's config reaches it), and
-#                              the output (the sound output's)
+#                              (Apple Music's patched mpd-mpris), and the
+#                              output (the sound output's)
 #   ./install --uninstall      take omarock off, a piece at a time, asking first
 #   ./install --help
 #
 # On a Mac, ./install sets up the Apple Music bridge instead (apple-bridge/install).
 #
-# Secrets (the Soloist key, the SiriusXM login, the bridge's token) are typed
-# into hidden prompts and go straight into files only you can read
-# (~/.config/omarock, mode 600). None is printed, and none is passed on a
+# Secrets (the Soloist key, the SiriusXM login) are typed into hidden prompts,
+# and the bridge's token comes from pairing with it; they go straight into
+# files only you can read (~/.config/omarock, mode 600). None is printed, and none is passed on a
 # command line here. Soloist itself takes its key only as an option
 # (--api-key), so while it runs, others on this machine can see it (ps).
 #
@@ -1126,35 +1124,28 @@ step_apple() {
   if private_ok "$tokenfile" && [[ $(bridge_status "$bridge" "$tokenfile") == 200 ]]; then
     ok "the bridge's token: $tokenfile"
   else
-    explain "omarock needs the bridge's token, which the bridge made on the Mac. It goes into $tokenfile."
-    local how token code user host from
-    host=${bridge#http://}
-    host=${host%:*}
-    # Left blank in the setup window, which checked the Mac's Remote Login:
-    # scp, with the user name ssh's config (or yours) gives.
-    if [[ ${preset[scp-token]:-} == yes ]]; then
-      how=ssh from=$host
-      gap
-      answered "How do you want to set the token?" "" "Copy it with scp, in the setup window"
-    else
-      how=$(choose "How do you want to set the token?" paste \
-        paste "I'll paste it (on the Mac: pbcopy < ~/Library/Application\ Support/omarock-bridge/token)" \
-        ssh "Copy it with scp (your Mac's Remote Login must be on)") || exit 1
+    explain "omarock needs the bridge's token, and gets it by pairing with the bridge: ./install on the Mac ends by showing a pairing code, and ./install pair in omarock's folder there shows a new one."
+    if ! jq -e '.pairing == true' >/dev/null 2>&1 <<<"${h:-$(health "$bridge")}"; then
+      bad "the bridge on the Mac is older than 0.10.0, and can't pair: update it there (git pull, then ./install), then run ./install apple-music here again"
+      return 1
     fi
-    if [[ $how == ssh ]]; then
-      if [[ -z $from ]]; then
-        user=$(ask "Your user name on the Mac:" "$USER") || exit 1
-        from=$user@$host
+    # The code goes to omarock-account on stdin, and the token the bridge
+    # gives for it straight into its file.
+    local code said rc
+    while :; do
+      code=$(ask "The pairing code the Mac shows (Blank to stop here):" "" "6 digits") || exit 1
+      [[ -z $code ]] && return 1
+      said=$(printf '%s\n' "$code" | "$repo/tools/omarock-account" bridge-pair "$bridge" 2>&1 >/dev/null)
+      rc=$?
+      if ((rc == 0)); then
+        ok "paired with the bridge"
+        break
       fi
-      (umask 077 && run scp "$from:Library/Application Support/omarock-bridge/token" "$tokenfile.new") || return 1
-      tr -d '\n' <"$tokenfile.new" | write_private "$tokenfile"
-      rm -f "$tokenfile.new"
-    else
-      token=$(secret "The bridge's token:") || exit 1
-      [[ -z $token ]] && return 1
-      printf '%s' "$token" | write_private "$tokenfile"
-      token=""
-    fi
+      bad "${said%.}"
+      # Not the code, or none open: another try (./install pair on the Mac opens a new one).
+      ((rc == 3 || rc == 4)) || return 1
+    done
+    tokenfile=$config/bridge-token
     code=$(bridge_status "$bridge" "$tokenfile")
     if [[ $code == 200 ]]; then ok "the bridge accepts the token"; else bad "the bridge refused the token (HTTP $code)"; return 1; fi
   fi

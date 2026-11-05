@@ -6,8 +6,10 @@
 // as options (`arg`). Pure functions, so node can test them
 // (tests/setup.test.js).
 //
-// A step is { title, warning, text, copies (lines to copy), links, fields,
-// bullets }; `{host}` in its text or bullets is this machine's name.
+// A step is { title, warning, text, bullets, copies (lines to copy),
+// commands (lines to type on another machine: shown, with no Copy, since
+// this clipboard doesn't reach it), links, fields }; `{host}` in its text or
+// bullets is this machine's name.
 //
 // A field is { key, type, label, lead (a line above it), description,
 // placeholder, required, needs (what the footer says while it's missing),
@@ -19,12 +21,14 @@
 //   "mac": the Mac running the bridge, from the tailnet's Macs or typed,
 //     checked live: it has to answer;
 //   "output": one of PipeWire's outputs, which goes to ./install as
-//     --output NAME.
+//     --output NAME;
+//   "pair": the pairing code the Mac's bridge shows. The window trades it
+//     for the bridge's token as soon as it's typed (tools/omarock-account
+//     bridge-pair), so the token goes straight into its file; a token that
+//     the bridge takes already needs no code.
 // `pattern` and `wrong`: what a text has to look like, and what's said when
 // it doesn't. `checked` (a secret): the window checks it live, against the
-// bridge. `scp` (the bridge's token): left blank, setup copies it from the
-// Mac with scp (--yes ARG), so the window checks the Mac's Remote Login
-// first.
+// bridge.
 
 var GUIDES = "https://github.com/marcewing/omarock/blob/main/"
 var REDIRECT = "http://127.0.0.1:8730/callback"
@@ -91,21 +95,27 @@ var pages = {
       "Both machines need to reach each other: on your home network, or over Tailscale. Nothing between them is encrypted, so use a network you trust, or Tailscale."
     ],
     steps: [
-      { title: "The bridge, on your Mac",
-        text: ["It's built with your own Apple Developer membership. On the Mac, clone omarock and run ./install there: it builds the bridge, and starts it at login."],
-        copies: ["git clone https://github.com/marcewing/omarock.git && cd omarock && ./install"],
-        links: [
-          { label: "The bridge's guide", url: GUIDES + "apple-bridge/README.md" },
-          { label: "Apple Developer Program", url: "https://developer.apple.com/programs/" }
-        ] },
+      { title: "First, on your Mac",
+        text: ["The bridge is built and runs on the Mac, with your own Apple Developer membership, so this part is done there. Set aside an hour the first time. The Mac needs:"],
+        bullets: [
+          "Apple silicon, and macOS 15 or later",
+          "A paid Apple Developer Program membership",
+          "Xcode from the App Store, opened once, with your developer Apple ID in its Settings, Accounts",
+          "Homebrew (brew.sh)",
+          "An Apple Music subscription"
+        ],
+        links: [{ label: "The bridge's guide", url: GUIDES + "apple-bridge/README.md" }] },
+      { title: "The bridge",
+        text: ["In the Mac's Terminal, type these. ./install walks you through the rest, and ends by showing a pairing code for this machine."],
+        commands: ["git clone https://github.com/marcewing/omarock", "cd omarock && ./install"] },
       { title: "Which Mac",
         text: ["The Mac running the bridge: one found on this network or your tailnet, or its address."],
         fields: [{ key: "appleMac", type: "mac", required: true, needs: "the Mac running the bridge", placeholder: "my-mac.local or 100.64.0.10",
           account: "apple-bridge" }] },
-      { title: "The bridge's token",
-        text: ["From the Mac: ~/Library/Application\\ Support/omarock-bridge/token",
-          "Paste it here or leave blank to scp it during setup (Remote Login must be enabled on the Mac)."],
-        fields: [{ key: "bridgeToken", type: "secret", checked: true, scp: true, arg: "scp-token", account: "bridge-token" }] },
+      { title: "Pairing",
+        text: ["Type the pairing code the Mac shows. For a new one, run ./install pair in omarock's folder on the Mac."],
+        fields: [{ key: "pairCode", type: "pair", label: "Pairing code", placeholder: "6 digits", required: true,
+          needs: "the pairing code from the Mac" }] },
       { title: "Smooth playback (optional, recommended)",
         text: ["A fix for mpd-mpris that isn't in Arch's package yet (patches/README.md). It's built here, for omarock only, from a pinned release, and sudo asks for your password to install the packages it builds with (those you don't have yet; they stay afterwards)."],
         fields: [
@@ -164,8 +174,15 @@ function initial(piece, known, defaultOutput) {
     else if (f.type === "check") out[f.key] = f.defaultValue === true
     else if (f.type === "mac") out[f.key] = typeof known.appleBridge === "string" ? known.appleBridge : ""
     else if (f.type === "output") out[f.key] = defaultOutput && defaultOutput !== "omarock" ? defaultOutput : ""
+    else if (f.type === "pair") out[f.key] = ""
   })
   return out
+}
+
+// A pairing code's digits: "048 213" and "048-213" are 048213. Anything
+// else typed stays, so it can be called wrong.
+function pairDigits(value) {
+  return String(value || "").replace(/[\s-]/g, "")
 }
 
 // What's wrong with a field, or "": value is what's in it, known what's set
@@ -179,12 +196,22 @@ function problem(field, value, known, live) {
     if (field.type === "output") return ""
     return !live || live.kind === "checking" ? "Checking the bridge…" : live.kind === "ok" ? "" : live.text
   }
+  // The pairing code: paired (or a token the bridge takes) is done; a code
+  // tried and refused says why while it's still in the field; a bridge
+  // that can't pair says so whatever is typed.
+  if (field.type === "pair") {
+    if (live && live.kind === "ok") return ""
+    if (live && live.kind === "checking") return live.text || "Pairing…"
+    var code = pairDigits(value)
+    if (live && live.kind === "bad" && (live.code === undefined || live.code === code)) return live.text
+    if (code !== "" && !/^\d*$/.test(code)) return "A pairing code is 6 digits"
+    if (code.length < 6) return field.required ? "Needs " + field.needs : ""
+    if (code.length > 6) return "A pairing code is 6 digits"
+    return "Pairing…"
+  }
   // A password's spaces are its own; a line's aren't.
   var typed = field.type === "secret" ? String(value || "") : String(value || "").trim()
   if (typed === "" && field.required && !set) return "Needs " + field.needs
-  // Left blank to be copied from the Mac: its Remote Login has to answer.
-  if (typed === "" && field.scp && !set)
-    return !live || live.kind === "checking" ? "Checking the Mac's Remote Login…" : live.kind === "bad" ? live.text : ""
   if (typed === "") return ""
   if (field.pattern && !new RegExp(field.pattern).test(typed)) return field.wrong
   if (field.checked && live) return live.kind === "checking" ? "Checking the token…" : live.kind === "bad" ? live.text : ""
@@ -234,45 +261,19 @@ function args(piece, values) {
     if (!f.arg) return
     if (f.type === "check") out.push(values[f.key] === true ? "--yes" : "--no", f.arg)
     else if (f.type === "output" && values[f.key]) out.push("--output", String(values[f.key]))
-    else if (f.scp && String(values[f.key] || "") === "") out.push("--yes", f.arg)
   })
   return out
 }
 
-// The host in a bridge's URL, for ssh: "http://100.64.0.10:8710" is 100.64.0.10.
-function bridgeHost(url) {
-  return String(url || "").replace(/^https?:\/\//, "").replace(/:\d+$/, "")
-}
-
-// What `ssh -o BatchMode=yes HOST true` says of the Mac's Remote Login,
-// for under the token field: whether setup's scp can copy the token from it.
-function scpState(code, stderr) {
-  var e = String(stderr || "")
-  if (code === 0) return { kind: "ok", text: "Mac scp enabled" }
-  if (/Host key verification failed/.test(e)) return { kind: "ok", text: "Mac scp enabled (setup asks once to trust the Mac)" }
-  if (/Permission denied/.test(e)) return { kind: "ok", text: "Mac scp enabled (setup asks for your password on the Mac)" }
-  if (/Connection refused/.test(e))
-    return { kind: "bad", text: "Remote Login is off on the Mac: paste the token, or turn it on there (System Settings, General, Sharing)" }
-  return { kind: "bad", text: "Can't reach the Mac with ssh: paste the token" }
-}
-
-// What Copy with ssh (the settings' Apple Music tab) came to, as a note
-// { kind, text }: ssh copying the token from the Mac (BatchMode, so it asks
-// nothing) into omarock-account. 3: the Mac's token file was empty; 4:
-// omarock-account couldn't save it.
-function tokenCopyState(code, stderr, host) {
-  var e = String(stderr || "")
-  if (code === 0) return { kind: "ok", text: "Copied from the Mac" }
-  if (code === 3) return { kind: "bad", text: "The bridge's token file on the Mac is empty" }
-  if (code === 4) return { kind: "bad", text: "Couldn't save it: " + (e.trim().split("\n").pop() || "no reason given") }
-  if (/Host key verification failed/.test(e))
-    return { kind: "bad", text: "ssh doesn't know the Mac yet: run ssh " + host + " once in a terminal to trust it, then copy again" }
-  if (/Permission denied/.test(e))
-    return { kind: "bad", text: "ssh needs a password for the Mac, and can't ask for one here: paste the token, or give ssh a key for the Mac" }
-  if (/Connection refused/.test(e))
-    return { kind: "bad", text: "Remote Login is off on the Mac: turn it on (System Settings, General, Sharing), or paste the token" }
-  if (/No such file/.test(e)) return { kind: "bad", text: "The Mac has no bridge token: is the bridge set up there?" }
-  return { kind: "bad", text: "Can't reach the Mac with ssh: paste the token" }
+// What tools/omarock-account bridge-pair (or bridge-check) came to, as a
+// note { kind, text }: its exit code, and the bridge's reason on stderr.
+function pairState(code, stderr) {
+  var said = String(stderr || "").trim().split("\n").pop().replace(/\.$/, "")
+  if (code === 0) return { kind: "ok", text: "Paired with the bridge" }
+  var fallback = { 3: "That isn't the code the Mac shows", 4: "No pairing code is open on the Mac: run ./install pair there",
+    5: "The bridge on the Mac is older than 0.10.0, and can't pair: update it there (git pull, then ./install)",
+    6: "The bridge didn't answer", 7: "Couldn't save the bridge's token" }
+  return { kind: "bad", text: said || fallback[code] || "Pairing didn't work (" + code + ")" }
 }
 
 // The Macs on a tailnet, from `tailscale status --json`:
@@ -362,7 +363,7 @@ function outputList(text) {
 
 if (typeof module !== "undefined") {
   module.exports = { pages: pages, REDIRECT: REDIRECT, title: title, fields: fields, bridgeUrl: bridgeUrl, initial: initial,
-    problem: problem, blocker: blocker, writes: writes, args: args, bridgeHost: bridgeHost, scpState: scpState, tokenCopyState: tokenCopyState,
+    problem: problem, blocker: blocker, writes: writes, args: args, pairDigits: pairDigits, pairState: pairState,
     tailnetMacs: tailnetMacs, bonjourMacs: bonjourMacs, unescapeAvahi: unescapeAvahi, macList: macList, macLabel: macLabel,
     outputList: outputList }
 }
