@@ -190,11 +190,10 @@ Panel {
   readonly property var player: bridgeMode ? bridge : sxmMode ? sxm : radioMode ? radio : client
   // Live sources: no seeking, shuffle or repeat; a pause is a stop.
   readonly property bool live: sxmMode || radioMode
-  // Under the song in the player card: Explicit, and Lossless or Dolby Atmos
-  // only when the player says it's playing that (the genre has a line of
-  // its own).
+  // Under the song in the player card: Explicit (the genre has a line of its
+  // own).
   readonly property string bridgeExtra: bridge.elsewhere !== "" ? "Playing on " + bridge.elsewhere + " · Play moves it here"
-    : bridge.song ? Apple.badges(bridge.song, bridge.audioVariant) : ""
+    : bridge.song ? Apple.badges(bridge.song) : ""
   // Under the station in the player card: where it is, its genres and sound.
   readonly property string radioExtra: radio.station ? Radio.describe(radio.station) : ""
   // Under the channel in the player card: the show, else the genre.
@@ -2805,7 +2804,7 @@ Panel {
     return info.coverFile ? (root.coverUrls[Mpd.directoryOf(info.coverFile)] || "") : ""
   }
 
-  // A heading's second line, with Apple Music's details (label, lossless).
+  // A heading's second line, with Apple Music's details (the label).
   function infoSubtitle(info) {
     if (!info) return ""
     return [info.subtitle || "", info.detail || ""].filter(function(part) { return part !== "" }).join(" · ")

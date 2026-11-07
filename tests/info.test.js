@@ -100,7 +100,7 @@ test("appleItem: the library status leads the card", () => {
   assert.deepEqual(lines(out), [
     "SONG: Artist = Hüsker Dü", "SONG: Album = Metal Circus", "SONG: Track = 5 (disc 1)", "SONG: Released = 1 Oct 1983",
     "SONG: Genre = Punk", "SONG: Composer = Grant Hart", "SONG: Length = 4:09",
-    "APPLE MUSIC: Apple offers = Lossless, AAC", "APPLE MUSIC: ISRC = USSS18300001", "APPLE MUSIC: Catalog id = 1440857781"
+    "APPLE MUSIC: ISRC = USSS18300001", "APPLE MUSIC: Catalog id = 1440857781"
   ])
 })
 

@@ -165,13 +165,9 @@ test("statusAsMpd and songAsMpd give the player card mpd's shapes", () => {
   assert.equal(Apple.statusAsMpd({ state: "stopped" }, -1).song, -1)
 })
 
-test("badges name explicit and the sound playing, never what the catalog offers", () => {
-  var lossless = song("a", "x", { explicit: true, audioTraits: ["lossless", "atmos"] })
-  assert.equal(Apple.badges(lossless), "Explicit")
-  assert.equal(Apple.badges(lossless, ""), "Explicit")
-  assert.equal(Apple.badges(lossless, "lossless"), "Explicit · Lossless")
-  assert.equal(Apple.badges(song("a", "x"), "atmos"), "Dolby Atmos")
-  assert.equal(Apple.badges(song("a", "x"), "something-new"), "")
+test("badges name explicit, never a sound format the catalog offers", () => {
+  assert.equal(Apple.badges(song("a", "x", { explicit: true, audioTraits: ["lossless", "atmos"] })), "Explicit")
+  assert.equal(Apple.badges(song("a", "x", { audioTraits: ["lossless"] })), "")
   assert.equal(Apple.badges(song("a", "x")), "")
 })
 

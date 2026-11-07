@@ -340,7 +340,7 @@ step_requirements() {
   local need=() t
   for t in xcodegen icecast; do (( $+commands[$t] )) || need+=($t); done
   if (( $#need )); then
-    explain "From Homebrew: xcodegen makes the Xcode project, and Icecast serves the stream (lossless FLAC) to your network."
+    explain "From Homebrew: xcodegen makes the Xcode project, and Icecast serves the stream (FLAC) to your network."
     confirm "Install ${(j:, :)need} with Homebrew?" || { bad "The bridge needs them."; stopped; }
     run brew install $need || stopped
     rehash

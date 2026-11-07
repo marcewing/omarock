@@ -98,7 +98,7 @@ function formatAudio(format) {
   return join([rateText, bits, channels])
 }
 
-var FILE_TYPES = { mp3: "MP3", m4a: "M4A (AAC or Apple Lossless)", aac: "AAC", flac: "FLAC", ogg: "Ogg",
+var FILE_TYPES = { mp3: "MP3", m4a: "M4A (AAC or ALAC)", aac: "AAC", flac: "FLAC", ogg: "Ogg",
   oga: "Ogg", opus: "Opus", wav: "WAV", aif: "AIFF", aiff: "AIFF", wma: "WMA", ape: "Monkey's Audio",
   wv: "WavPack", dsf: "DSD", dff: "DSD", mpc: "Musepack" }
 
@@ -269,13 +269,6 @@ function localAlbum(songs, extra) {
   ])
 }
 
-var TRAITS = { "lossless": "Lossless", "hi-res-lossless": "Hi-Res Lossless", "lossy-stereo": "AAC",
-  "atmos": "Dolby Atmos", "dolby-audio": "Dolby Audio", "spatial": "Spatial Audio" }
-
-function traitsText(traits) {
-  return (traits || []).map(function(t) { return TRAITS[t] || t }).join(", ")
-}
-
 // A library rating, 0 to 100, as stars.
 function stars(rating) {
   var n = Math.round((rating || 0) / 20)
@@ -340,7 +333,6 @@ function appleItem(item, extra, service) {
         field("Playable", item.playable === false ? "No: " + serviceName + " won't stream it" : "")
       ])
   var apple = group(serviceName.toUpperCase(), [
-    field("Apple offers", traitsText(item.audioTraits)),
     field("ISRC", item.isrc),
     field("Catalog id", catalogId),
     field("Link", extra.catalog && extra.catalog.url)

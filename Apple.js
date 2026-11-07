@@ -563,17 +563,12 @@ function statusAsMpd(status, volume) {
     single: false, consume: false, queueLength: status.queueLength || 0, updating: false, error: "" }
 }
 
-// The sound a player says it's playing (the bridge's status audioVariant).
-var VARIANTS = { "lossless": "Lossless", "hi-res-lossless": "Hi-Res Lossless", "atmos": "Dolby Atmos",
-  "dolby-audio": "Dolby Audio", "spatial": "Spatial Audio" }
-
-// Badges for the now playing card: Explicit, and the sound the player says
-// it's playing (variant, the status's audioVariant). Never the catalog's
-// audioTraits: those say what Apple offers, and MusicKit's player streams
-// AAC even for a song offered lossless.
-function badges(song, variant) {
+// Badges for the now playing card: Explicit. No sound format: the bridge's
+// MusicKit player streams Apple's 256 kbps AAC whatever the catalog offers
+// (its audioTraits), and its status audioVariant stays null.
+function badges(song) {
   if (!song) return ""
-  return join([song.explicit ? "Explicit" : "", variant ? VARIANTS[variant] || "" : ""])
+  return song.explicit ? "Explicit" : ""
 }
 
 if (typeof module !== "undefined") {

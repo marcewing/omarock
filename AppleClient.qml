@@ -112,11 +112,6 @@ Item {
   // The machine it plays on instead ("dellxps"), or "": here it's paused,
   // and Play moves it here. Pause, skip and seek are refused meanwhile.
   readonly property string elsewhere: bridgeStatus.elsewhere || ""
-  // The sound the Mac's player says it's playing ("lossless", "atmos"), for
-  // the song heard only (the Mac may be a song ahead); "" for plain AAC, or
-  // from a bridge older than 0.11.0.
-  readonly property string audioVariant: bridgeStatus.audioVariant && bridgeStatus.song && root.song
-    && Apple.songKey(bridgeStatus.song) === Apple.songKey(root.song) ? bridgeStatus.audioVariant : ""
 
   // Another machine took the Mac's music: this one's mpd stops listening,
   // and the Mac plays on for it.
