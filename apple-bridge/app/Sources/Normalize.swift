@@ -228,16 +228,19 @@ enum Normalize {
 
     private static func traits(_ variants: [AudioVariant]?, into o: inout [String: Any]) {
         guard let variants, !variants.isEmpty else { return }
-        o["audioTraits"] = variants.map { variant -> String in
-            switch variant {
-            case .lossless: return "lossless"
-            case .highResolutionLossless: return "hi-res-lossless"
-            case .lossyStereo: return "lossy-stereo"
-            case .dolbyAtmos: return "atmos"
-            case .dolbyAudio: return "dolby-audio"
-            case .spatialAudio: return "spatial"
-            default: return String(describing: variant)
-            }
+        o["audioTraits"] = variants.map(trait)
+    }
+
+    /// An audio variant by Apple's audioTraits name (songs' audioTraits, status's audioVariant).
+    static func trait(_ variant: AudioVariant) -> String {
+        switch variant {
+        case .lossless: return "lossless"
+        case .highResolutionLossless: return "hi-res-lossless"
+        case .lossyStereo: return "lossy-stereo"
+        case .dolbyAtmos: return "atmos"
+        case .dolbyAudio: return "dolby-audio"
+        case .spatialAudio: return "spatial"
+        default: return String(describing: variant)
         }
     }
 

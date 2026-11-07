@@ -278,15 +278,24 @@ skipped, and later detail responses mark them `"playable": false`.
                                            // queueIndex is in the whole queue too, so the
                                            // current song is queue[queueIndex - queueOffset]
   "queueLength": 23, "shuffle": false, "repeat": "off",
+  "audioVariant": null,                    // from 0.11.0: what the player plays (below)
   "elsewhere": "dellxps" }                 // only to a machine the Mac isn't playing for
 ```
 
 `seq` goes up on every change omarock would show: the song, the state, the
-queue, shuffle, repeat or the owner (below). It does not change for position alone; omarock works
+queue, shuffle, repeat, `audioVariant` or the owner (below). It does not change for position alone; omarock works
 the position out from `position`, `positionAt` and `state`. The exception, from 0.8.1: about
 1.5 s after `play`, `next`, `previous` and a jump, `seq` goes up once more with nothing else
 changed. Right after those MusicKit's clock runs 0.1-0.35 s ahead of the sound, and that
 status carries the settled position.
+
+`audioVariant` (from 0.11.0) is what MusicKit's player reports it is playing now, not
+what the catalog offers (a song's `audioTraits`): `lossless`,
+`hi-res-lossless`, `atmos`, `dolby-audio`, `spatial` or `lossy-stereo`, Apple's
+`audioTraits` names. `null` when the player reports none, which so far has meant Apple's
+256 kbps AAC: MusicKit played that even for songs the catalog offers as lossless (checked
+in the player's logs, 0.10.0). It can settle a moment after the song starts, with a new
+`seq`. Older bridges leave it out.
 
 Songs in `song` and `queue` carry `albumId` and `artistId`, which open with
 `GET /albums/{source}/{albumId}` and `GET /artists/{source}/{artistId}` (the song's

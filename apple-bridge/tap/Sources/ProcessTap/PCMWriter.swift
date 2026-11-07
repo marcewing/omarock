@@ -51,7 +51,9 @@ public final class PCMWriter {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         guard let first = buffers.first, let firstData = first.mData else { return }
 
-        @inline(__always) func s16(_ x: Float) -> Int16 { Int16(max(-1, min(1, x)) * 32767) }
+        // Core Audio's Int16 → Float32 divides by 32768, so this undoes it: a 16-bit source at
+        // unity comes through bit-exact.
+        @inline(__always) func s16(_ x: Float) -> Int16 { Int16(max(-32768, min(32767, (x * 32768).rounded()))) }
 
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }

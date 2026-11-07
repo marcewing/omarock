@@ -5,7 +5,7 @@ import MusicKit
 
 /// ApplicationMusicPlayer, the status long poll, and the keep-awake assertion.
 /// `seq` goes up on every change omarock would show (song, state, queue, shuffle,
-/// repeat, the owner), and for position only once, as it settles after a skip (resyncSoon).
+/// repeat, the owner, the audio variant), and for position only once, as it settles after a skip (resyncSoon).
 @MainActor
 final class Player {
     private let player = ApplicationMusicPlayer.shared
@@ -79,8 +79,13 @@ final class Player {
             "repeat": repeatName,
         ]
         if let song = player.queue.currentEntry.flatMap({ song(of: $0) }) { status["song"] = normalize(song) }
+        status["audioVariant"] = audioVariant ?? NSNull()
         return status
     }
+
+    /// What the player says it's playing, by Apple's audioTraits names; nil when it says
+    /// nothing (plain AAC, it seems). It can settle after the song starts.
+    private var audioVariant: String? { player.state.audioVariant.map(Normalize.trait) }
 
     /// The status as `client` sees it: with `elsewhere` when the Mac plays for another.
     func snapshot(for client: String?) -> [String: Any] { seen(snapshot(), by: client) }
@@ -333,7 +338,7 @@ final class Player {
         // An entry's item can arrive after the entry; that changes what omarock shows.
         let ids = player.queue.entries.map { $0.id + ($0.item == nil ? "" : "+") }.joined(separator: ",")
         return [stateName, player.queue.currentEntry?.id ?? "", ids,
-                "\(player.state.shuffleMode == .songs)", repeatName].joined(separator: "|")
+                "\(player.state.shuffleMode == .songs)", repeatName, audioVariant ?? ""].joined(separator: "|")
     }
 
     private var stateName: String {
