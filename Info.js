@@ -340,7 +340,7 @@ function appleItem(item, extra, service) {
         field("Playable", item.playable === false ? "No: " + serviceName + " won't stream it" : "")
       ])
   var apple = group(serviceName.toUpperCase(), [
-    field("Audio", traitsText(item.audioTraits)),
+    field("Apple offers", traitsText(item.audioTraits)),
     field("ISRC", item.isrc),
     field("Catalog id", catalogId),
     field("Link", extra.catalog && extra.catalog.url)

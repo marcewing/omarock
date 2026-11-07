@@ -190,12 +190,11 @@ Panel {
   readonly property var player: bridgeMode ? bridge : sxmMode ? sxm : radioMode ? radio : client
   // Live sources: no seeking, shuffle or repeat; a pause is a stop.
   readonly property bool live: sxmMode || radioMode
-  // Under the album in the player card: the genre, and Explicit, Lossless or
-  // Dolby Atmos.
-  // Under the song in the player card: Explicit, Lossless, Dolby Atmos (the
-  // genre has a line of its own).
+  // Under the song in the player card: Explicit, and Lossless or Dolby Atmos
+  // only when the player says it's playing that (the genre has a line of
+  // its own).
   readonly property string bridgeExtra: bridge.elsewhere !== "" ? "Playing on " + bridge.elsewhere + " · Play moves it here"
-    : bridge.song ? Apple.badges(bridge.song) : ""
+    : bridge.song ? Apple.badges(bridge.song, bridge.audioVariant) : ""
   // Under the station in the player card: where it is, its genres and sound.
   readonly property string radioExtra: radio.station ? Radio.describe(radio.station) : ""
   // Under the channel in the player card: the show, else the genre.

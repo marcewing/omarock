@@ -3713,6 +3713,14 @@ def elsewhere_scenario(host, socket_path, failures):
     wait_for(lambda: not host.state()["bar"]["playing"], "paused")
     host.call("press", "Space")
     wait_for(lambda: host.state()["bar"]["playing"] and mpd_state(socket_path)["state"] == "play", "playing here")
+    # The card says Lossless only when the Mac's player does: the fake's
+    # songs are offered lossless (audioTraits), and MusicKit plays AAC.
+    check("Lossless" not in host.state()["playerExtra"],
+          "a song Apple offers lossless, played as AAC: no Lossless on the card: " + host.state()["playerExtra"], failures)
+    fake_bridge("variant", {"value": "lossless"})
+    wait_for(lambda: "Lossless" in host.state()["playerExtra"], "the card says Lossless once the player does")
+    fake_bridge("variant", {"value": None})
+    wait_for(lambda: "Lossless" not in host.state()["playerExtra"], "and not once it doesn't")
     pauses = len(bridge_requests("/v1/pause"))
 
     # Another machine presses Play: mpd here stops, the Mac plays on.

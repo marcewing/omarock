@@ -50,7 +50,7 @@ test("albumView: Play the album, then songs by disc", () => {
     ["playalbum:Play the album:", "track:One:DISC 1", "track:Two:DISC 2"])
   assert.equal(view.rows[0].subtitle, "2 songs · 4 min")
   assert.equal(view.info.subtitle, "The Band · 1985 · Rock")
-  assert.equal(view.info.detail, "SST · Lossless")
+  assert.equal(view.info.detail, "SST")
   assert.equal(view.rows[2].position, 1)
 })
 
@@ -165,9 +165,13 @@ test("statusAsMpd and songAsMpd give the player card mpd's shapes", () => {
   assert.equal(Apple.statusAsMpd({ state: "stopped" }, -1).song, -1)
 })
 
-test("badges name explicit, lossless and Atmos", () => {
-  assert.equal(Apple.badges(song("a", "x", { explicit: true, audioTraits: ["lossless", "atmos"] })),
-    "Explicit · Lossless · Dolby Atmos")
+test("badges name explicit and the sound playing, never what the catalog offers", () => {
+  var lossless = song("a", "x", { explicit: true, audioTraits: ["lossless", "atmos"] })
+  assert.equal(Apple.badges(lossless), "Explicit")
+  assert.equal(Apple.badges(lossless, ""), "Explicit")
+  assert.equal(Apple.badges(lossless, "lossless"), "Explicit · Lossless")
+  assert.equal(Apple.badges(song("a", "x"), "atmos"), "Dolby Atmos")
+  assert.equal(Apple.badges(song("a", "x"), "something-new"), "")
   assert.equal(Apple.badges(song("a", "x")), "")
 })
 

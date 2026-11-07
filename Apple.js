@@ -267,8 +267,7 @@ function albumView(album, tracks, service) {
   return { rows: rows, info: {
     title: nameOf(album), artwork: album.artwork, item: album,
     subtitle: join([album.artist, yearOf(album), (album.genres || [])[0]]),
-    detail: join([album.recordLabel, album.audioTraits && album.audioTraits.indexOf("lossless") >= 0 ? "Lossless" : "",
-      album.audioTraits && album.audioTraits.indexOf("atmos") >= 0 ? "Dolby Atmos" : ""]),
+    detail: album.recordLabel || "",
     notes: album.editorialNotes || "", copyright: album.copyright || "",
     emptyText: (service || "Apple Music") + " lists no songs for this album." } }
 }
@@ -564,12 +563,17 @@ function statusAsMpd(status, volume) {
     single: false, consume: false, queueLength: status.queueLength || 0, updating: false, error: "" }
 }
 
-// Badges for the now playing card: Explicit, Lossless, Dolby Atmos.
-function badges(song) {
+// The sound a player says it's playing (the bridge's status audioVariant).
+var VARIANTS = { "lossless": "Lossless", "hi-res-lossless": "Hi-Res Lossless", "atmos": "Dolby Atmos",
+  "dolby-audio": "Dolby Audio", "spatial": "Spatial Audio" }
+
+// Badges for the now playing card: Explicit, and the sound the player says
+// it's playing (variant, the status's audioVariant). Never the catalog's
+// audioTraits: those say what Apple offers, and MusicKit's player streams
+// AAC even for a song offered lossless.
+function badges(song, variant) {
   if (!song) return ""
-  var traits = song.audioTraits || []
-  return join([song.explicit ? "Explicit" : "", traits.indexOf("lossless") >= 0 || traits.indexOf("hi-res-lossless") >= 0 ? "Lossless" : "",
-    traits.indexOf("atmos") >= 0 ? "Dolby Atmos" : ""])
+  return join([song.explicit ? "Explicit" : "", variant ? VARIANTS[variant] || "" : ""])
 }
 
 if (typeof module !== "undefined") {

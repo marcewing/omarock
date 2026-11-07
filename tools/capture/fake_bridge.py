@@ -236,6 +236,9 @@ class Bridge:
         # omarock-spotify's Web API sign-in: POST /v1/logout forgets it, POST
         # /v1/fake/signin {on} sets it (no browser here).
         self.signed_in = True
+        # Bridge 0.11.0's status audioVariant: what the Mac's player says it's
+        # playing, null for plain AAC (POST /v1/fake/variant {value} sets it).
+        self.audio_variant = None
         # Out of reach: POST /v1/fake/offline {closed, hang} (seconds). For
         # `closed`, every request (a long poll waiting too) closes unanswered,
         # as a refused or reset connection does; then for `hang`, a request
@@ -379,6 +382,8 @@ class Bridge:
                "queueLength": len(self.queue), "shuffle": self.shuffle, "repeat": self.repeat}
         if self.volume is not None:
             out["volume"] = self.volume
+        if not self.spotify:
+            out["audioVariant"] = self.audio_variant
         if self.elsewhere(client):
             out["elsewhere"] = self.owner
             if self.spotify: out["state"] = "paused"
@@ -641,6 +646,10 @@ class Handler(BaseHTTPRequestHandler):
                     return {"ok": True}
                 if path == "fake/genres":
                     b.genres_route = bool(body["on"])
+                    return {"ok": True}
+                if path == "fake/variant":
+                    b.audio_variant = body.get("value")
+                    b.changed()
                     return {"ok": True}
                 if path == "fake/minbitrate":
                     b.min_bitrate = bool(body["on"])
