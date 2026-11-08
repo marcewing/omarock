@@ -217,10 +217,72 @@ function searchRows(stations, playingUuid, favoriteUuids) {
   }).map(function(s, i) { return stationRow(s, i === 0 ? "STATIONS" : "", playingUuid, favoriteUuids) })
 }
 
-// The song from a station's ICY title. iHeart's is Artist - text="Title"
-// song_spot="M" … amgArtworkURL="…"; most are "Artist - Title".
-function parseTitle(raw) {
+// A plain ICY title read both ways: "Artist - Title" (split at the first
+// " - ", as a title may have one: "Song - Live") and "Title - Artist" (at
+// the last), and a show's name at the front ("The World's Your Oyster:
+// Dumb - Nirvana", WRCT), if it has one. null when there's no " - ".
+function titleParts(raw) {
   raw = String(raw || "").trim()
+  if (/\btext="/.test(raw)) return null
+  var first = raw.indexOf(" - "), last = raw.lastIndexOf(" - ")
+  if (first <= 0 || last + 3 >= raw.length) return null
+  var colon = raw.indexOf(": ")
+  var show = colon > 0 && colon + 2 < first ? raw.slice(0, colon).trim() : ""
+  return {
+    artistFirst: { artist: raw.slice(0, first).trim(), title: raw.slice(first + 3).trim() },
+    titleFirst: { artist: raw.slice(last + 3).trim(), title: raw.slice(0, last).trim() },
+    show: show,
+    cut: show ? colon + 2 : 0
+  }
+}
+
+// How a station writes its titles, from what has been learned of it
+// (RadioClient's votes, below): the title first, a show's name in front.
+function titleForm(votes) {
+  votes = votes || {}
+  return { titleFirst: (votes.title || 0) > (votes.artist || 0), show: (votes.show || 0) > 0 }
+}
+
+// What to ask your library about a title, to learn its station's form:
+// whether each reading's artist is an artist you have (the artist before
+// and after the show's name, and the one at the end), and whether the
+// song at the end's artist has the title without the show's name.
+function titleQuestions(raw) {
+  var parts = titleParts(raw)
+  if (!parts) return null
+  return {
+    artistFirst: parts.artistFirst.artist,
+    bareArtist: parts.show ? parts.artistFirst.artist.slice(parts.cut).trim() : "",
+    titleFirst: parts.titleFirst.artist,
+    bareTitle: parts.show ? parts.titleFirst.title.slice(parts.cut).trim() : "",
+    show: parts.show
+  }
+}
+
+// The votes one title gives, from the library's answers (known: true for
+// each question that found songs). An artist you have at the end, and none
+// at the front, is a vote for the title first; the other way round, for
+// the artist first. The show's name: an artist or a song you have once it
+// is gone, or the same name in front of the station's last title.
+function titleVotes(questions, known, previousRaw) {
+  var votes = { artist: 0, title: 0, show: 0 }
+  if (!questions) return votes
+  var front = known.artistFirst || known.bareArtist
+  if (known.titleFirst && !front) votes.title = 1
+  if (front && !known.titleFirst) votes.artist = 1
+  if ((known.bareArtist && !known.artistFirst && !known.titleFirst) || known.bareTitle) votes.show = 1
+  var previous = titleParts(previousRaw)
+  if (questions.show && previous && previous.show === questions.show) votes.show = 1
+  return votes
+}
+
+// The song from a station's ICY title. iHeart's is Artist - text="Title"
+// song_spot="M" … amgArtworkURL="…"; most are "Artist - Title", some
+// "Title - Artist", some with a show's name first: form (titleForm) says
+// which, for the station playing.
+function parseTitle(raw, form) {
+  raw = String(raw || "").trim()
+  form = form || {}
   var song = { artist: "", title: "", art: "" }
   var text = raw.match(/\btext="([^"]*)"/)
   if (text) {
@@ -230,23 +292,28 @@ function parseTitle(raw) {
     if (art && /^https?:\/\//.test(art[1])) song.art = art[1]
     return song
   }
-  var dash = raw.indexOf(" - ")
-  if (dash > 0) {
-    song.artist = raw.slice(0, dash).trim()
-    song.title = raw.slice(dash + 3).trim()
-  } else {
+  var parts = titleParts(raw)
+  if (!parts) {
     song.title = raw
+    return song
+  }
+  var reading = form.titleFirst ? parts.titleFirst : parts.artistFirst
+  song.artist = reading.artist
+  song.title = reading.title
+  if (form.show && parts.show) {
+    if (form.titleFirst) song.title = song.title.slice(parts.cut).trim()
+    else song.artist = song.artist.slice(parts.cut).trim()
   }
   return song
 }
 
 // The station playing, as mpd's currentsong would have it: the song as the
 // title and artist (when the station sends them), the station as the album.
-function songAsMpd(mpdSong, station) {
+function songAsMpd(mpdSong, station, form) {
   var file = mpdSong ? mpdSong.file || "" : ""
   if (!file) return {}
   var name = station ? nameOf(station) : (mpdSong.name || "Radio")
-  var song = parseTitle(mpdSong.title)
+  var song = parseTitle(mpdSong.title, form)
   // No song: the station is the title, and the album line stays empty.
   return { file: file, title: song.title || name, artist: song.title ? song.artist : "", album: song.title ? name : "",
     genre: station ? String(station.tags || "").split(",")[0] : "" }
@@ -276,6 +343,10 @@ if (typeof module !== "undefined") {
     localTier: localTier,
     localStations: localStations,
     searchRows: searchRows,
+    titleParts: titleParts,
+    titleForm: titleForm,
+    titleQuestions: titleQuestions,
+    titleVotes: titleVotes,
     parseTitle: parseTitle,
     songAsMpd: songAsMpd,
     stepStation: stepStation

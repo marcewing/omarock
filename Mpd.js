@@ -324,6 +324,13 @@ function searchPattern(query) {
   return out === "" ? "" : "(?i)" + out
 }
 
+// The same, for the whole value: "fiona apple" matches the artist "Fiona
+// Apple", not "Fiona Apple & Friends".
+function exactPattern(name) {
+  var pattern = searchPattern(name)
+  return pattern === "" ? "" : "(?i)^" + pattern.slice(4) + "$"
+}
+
 // Rank a name against the query: whole-name prefix first, then a word that
 // starts with it, then anywhere. Lower is better.
 function matchRank(name, query) {
@@ -737,6 +744,7 @@ if (typeof module !== "undefined") {
     streamRetryDelay: streamRetryDelay,
     fold: fold,
     searchPattern: searchPattern,
+    exactPattern: exactPattern,
     matchRank: matchRank,
     sortByMatch: sortByMatch,
     queueCommands: queueCommands,

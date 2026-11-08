@@ -43,6 +43,51 @@ test("parseTitle reads iHeart's tagged titles and plain Artist - Title", () => {
   assert.deepEqual(Radio.parseTitle("KEXP"), { artist: "", title: "KEXP", art: "" })
 })
 
+test("parseTitle reads a station's form: the title first, a show's name in front", () => {
+  const wrct = "The World's Your Oyster: Criminal - Fiona Apple"
+  assert.deepEqual(Radio.parseTitle(wrct), { artist: "The World's Your Oyster: Criminal", title: "Fiona Apple", art: "" })
+  assert.deepEqual(Radio.parseTitle(wrct, { titleFirst: true, show: true }), { artist: "Fiona Apple", title: "Criminal", art: "" })
+  assert.deepEqual(Radio.parseTitle(wrct, { titleFirst: true }), { artist: "Fiona Apple", title: "The World's Your Oyster: Criminal", art: "" })
+  // Title first splits at the last dash, artist first at the first.
+  assert.deepEqual(Radio.parseTitle("Song - Live - Band", { titleFirst: true }), { artist: "Band", title: "Song - Live", art: "" })
+  assert.deepEqual(Radio.parseTitle("Band - Song - Live"), { artist: "Band", title: "Song - Live", art: "" })
+  // A show's name in front of the artist; a colon in the title stays.
+  assert.deepEqual(Radio.parseTitle("Morning Jazz: Miles Davis - So What", { show: true }), { artist: "Miles Davis", title: "So What", art: "" })
+  assert.deepEqual(Radio.parseTitle("Wilco - Jesus, Etc.: Live", { show: true }), { artist: "Wilco", title: "Jesus, Etc.: Live", art: "" })
+  // No show's name to take off: as it is.
+  assert.deepEqual(Radio.parseTitle("Criminal - Fiona Apple", { titleFirst: true, show: true }), { artist: "Fiona Apple", title: "Criminal", art: "" })
+  // iHeart's tagged titles never change.
+  assert.deepEqual(Radio.parseTitle('Days Of The New - text="Touch"', { titleFirst: true, show: true }), { artist: "Days Of The New", title: "Touch", art: "" })
+})
+
+test("titleForm: the title first only on more votes for it; a show's name on any", () => {
+  assert.deepEqual(Radio.titleForm(undefined), { titleFirst: false, show: false })
+  assert.deepEqual(Radio.titleForm({ artist: 1, title: 1 }), { titleFirst: false, show: false })
+  assert.deepEqual(Radio.titleForm({ artist: 1, title: 2, show: 1 }), { titleFirst: true, show: true })
+})
+
+test("titleQuestions and titleVotes: learned from the artists and songs you have", () => {
+  const q = Radio.titleQuestions("The World's Your Oyster: Criminal - Fiona Apple")
+  assert.deepEqual(q, { artistFirst: "The World's Your Oyster: Criminal", bareArtist: "Criminal", titleFirst: "Fiona Apple",
+    bareTitle: "Criminal", show: "The World's Your Oyster" })
+  assert.equal(Radio.titleQuestions("KEXP"), null)
+  assert.equal(Radio.titleQuestions('Days Of The New - text="Touch"'), null)
+  // Fiona Apple is yours, with Criminal: the title first, after a show's name.
+  assert.deepEqual(Radio.titleVotes(q, { titleFirst: true, bareTitle: true }, ""), { artist: 0, title: 1, show: 1 })
+  // Only the artist: the title first; the same show's name before: a show.
+  assert.deepEqual(Radio.titleVotes(q, { titleFirst: true }, ""), { artist: 0, title: 1, show: 0 })
+  assert.deepEqual(Radio.titleVotes(q, {}, "The World's Your Oyster: Dumb - Nirvana"), { artist: 0, title: 0, show: 1 })
+  assert.deepEqual(Radio.titleVotes(q, {}, "All Things Folk: Say goodbye - Thanh Force"), { artist: 0, title: 0, show: 0 })
+  // Artist first; an artist after a show's name.
+  const wilco = Radio.titleQuestions("Wilco - Jesus, Etc.")
+  assert.deepEqual(Radio.titleVotes(wilco, { artistFirst: true }, ""), { artist: 1, title: 0, show: 0 })
+  const jazz = Radio.titleQuestions("Morning Jazz: Miles Davis - So What")
+  assert.deepEqual(Radio.titleVotes(jazz, { bareArtist: true }, ""), { artist: 1, title: 0, show: 1 })
+  // Both, or neither, an artist you have: no vote on the order.
+  assert.deepEqual(Radio.titleVotes(wilco, { artistFirst: true, titleFirst: true }, ""), { artist: 0, title: 0, show: 0 })
+  assert.deepEqual(Radio.titleVotes(wilco, {}, ""), { artist: 0, title: 0, show: 0 })
+})
+
 test("songAsMpd: the song when sent, else the station; the station as the album", () => {
   assert.deepEqual(Radio.songAsMpd({ file: "f", title: "Wilco - Jesus, Etc.", name: "KEXP" }, kexp),
     { file: "f", title: "Jesus, Etc.", artist: "Wilco", album: "KEXP 90.3", genre: "indie" })

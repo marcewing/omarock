@@ -64,9 +64,103 @@ Item {
 
   readonly property string currentUuid: root.mpd ? Radio.uuidOf(root.mpd.currentSong.file || "") : ""
   readonly property var station: root.stations[root.currentUuid] || null
-  readonly property var song: Radio.parseTitle(root.mpd && root.mpd.currentSong ? root.mpd.currentSong.title : "")
+  readonly property string rawTitle: root.mpd && root.mpd.currentSong ? root.mpd.currentSong.title || "" : ""
+  readonly property var song: Radio.parseTitle(root.rawTitle, root.titleForm)
   readonly property bool ready: root.mpd !== null && root.mpd.ready
-  readonly property var currentSong: Radio.songAsMpd(root.mpd ? root.mpd.currentSong : null, root.station)
+  readonly property var currentSong: Radio.songAsMpd(root.mpd ? root.mpd.currentSong : null, root.station, root.titleForm)
+
+  // How each station writes its titles: most "Artist - Title", some "Title
+  // - Artist", some with a show's name in front ("The World's Your Oyster:
+  // Dumb - Nirvana", WRCT). Learned from your library (Radio.titleVotes):
+  // votes by station uuid, { artist, title, show }, each up to 9, kept in
+  // ~/.cache/omarock/radio-titles.json. Radio.titleForm reads them.
+  property var titleVotes: ({})
+  readonly property var titleForm: Radio.titleForm(root.titleVotes[root.currentUuid])
+  // Each station's title before this one (a show's name said twice is a
+  // show's), and the last title asked about.
+  property var lastTitles: ({})
+  property string titleAsked: ""
+  readonly property bool titlePlaying: root.mpd !== null && root.mpd.status.state === "play"
+  onRawTitleChanged: titleTimer.restart()
+  onTitlePlayingChanged: if (root.titlePlaying) titleTimer.restart()
+  // A few seconds after a title arrives: by then the stream has started, and
+  // nothing more is sent to mpd while one starts (MpdClient.playStream).
+  Timer {
+    id: titleTimer
+    interval: 3000
+    onTriggered: root.learnTitle()
+  }
+  function learnTitle() {
+    var uuid = root.currentUuid, raw = root.rawTitle
+    if (uuid === "" || raw === "" || !root.titlePlaying || !root.mpd.ready) return
+    if (root.mpd.streamTuning !== "") {
+      titleTimer.restart()
+      return
+    }
+    if (root.titleAsked === uuid + "\n" + raw) return
+    root.titleAsked = uuid + "\n" + raw
+    // Only a song's title: a station saying its own name between songs isn't
+    // the title before.
+    var questions = Radio.titleQuestions(raw)
+    if (!questions) return
+    var previous = root.lastTitles[uuid] || ""
+    var last = Object.assign({}, root.lastTitles)
+    last[uuid] = raw
+    root.lastTitles = last
+    var keys = [], commands = []
+    function ask(key, filters) {
+      if (filters.some(function(f) { return f === "" })) return
+      keys.push(key)
+      commands.push(Mpd.command("count", [filters.length === 1 ? filters[0] : Mpd.andFilter(filters)]))
+    }
+    function artist(name) { var p = Mpd.exactPattern(name); return p === "" ? "" : Mpd.tagFilter("artist", "=~", p) }
+    function title(name) { var p = Mpd.exactPattern(name); return p === "" ? "" : Mpd.tagFilter("title", "=~", p) }
+    ask("artistFirst", [artist(questions.artistFirst)])
+    if (questions.bareArtist !== "") ask("bareArtist", [artist(questions.bareArtist)])
+    ask("titleFirst", [artist(questions.titleFirst)])
+    if (questions.bareTitle !== "") ask("bareTitle", [artist(questions.titleFirst), title(questions.bareTitle)])
+    if (commands.length === 0) return
+    root.mpd.send(Mpd.commandListOk(commands), function(lines, error) {
+      if (!root || typeof root.learnTitle !== "function" || error !== "") return
+      var known = {}
+      Mpd.splitReplies(lines).forEach(function(reply, i) {
+        known[keys[i]] = (parseInt(Mpd.parseObject(reply).songs, 10) || 0) > 0
+      })
+      root.addTitleVotes(uuid, Radio.titleVotes(questions, known, previous))
+    }, true)
+  }
+  function addTitleVotes(uuid, votes) {
+    if (!votes.artist && !votes.title && !votes.show) return
+    var had = root.titleVotes[uuid] || {}
+    var all = Object.assign({}, root.titleVotes)
+    all[uuid] = {
+      artist: Math.min(9, (had.artist || 0) + votes.artist),
+      title: Math.min(9, (had.title || 0) + votes.title),
+      show: Math.min(9, (had.show || 0) + votes.show)
+    }
+    root.titleVotes = all
+    if (root.cacheDir === "") return
+    titlesWriter.command = ["sh", "-c", 'mkdir -p "$1" && printf "%s" "$2" > "$1/radio-titles.json.new.$$" && mv "$1/radio-titles.json.new.$$" "$1/radio-titles.json"',
+      "sh", root.cacheDir, JSON.stringify(all)]
+    titlesWriter.running = true
+  }
+  Process {
+    id: titlesWriter
+    stderr: StdioCollector {}
+  }
+  Process {
+    id: titlesReader
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var votes = null
+        try { votes = text ? JSON.parse(text) : null } catch (e) {}
+        // Learned while this was being read: those stay.
+        if (votes && typeof votes === "object") root.titleVotes = Object.assign(votes, root.titleVotes)
+      }
+    }
+    stderr: StdioCollector {}
+  }
   // Live radio: no seeking, no queue position, no shuffle or repeat.
   readonly property var status: ({
     state: root.mpd ? root.mpd.status.state : "stop", volume: root.mpd ? root.mpd.status.volume : -1,
@@ -328,6 +422,8 @@ Item {
     }
     cacheReader.command = ["cat", root.cacheDir + "/radio-local.json"]
     cacheReader.running = true
+    titlesReader.command = ["cat", root.cacheDir + "/radio-titles.json"]
+    titlesReader.running = true
   }
 
   // The favorites: the "Radio" playlist's stations, looked up by uuid.
@@ -435,7 +531,9 @@ Item {
   onStationChanged: if (root.station) root.checkLogo(root.station.favicon)
 
   // The station playing, looked up if it isn't known yet (after a restart).
+  // And what it sends learned from (titleTimer).
   onCurrentUuidChanged: {
+    titleTimer.restart()
     if (root.currentUuid !== "" && !root.stations[root.currentUuid])
       root.get("/json/stations/byuuid?uuids=" + root.currentUuid, function(data) { root.remember(data) })
   }

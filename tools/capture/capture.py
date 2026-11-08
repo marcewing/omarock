@@ -277,6 +277,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     now_playing_scenario(host, output, socket_path, failures)
     card_keys_scenario(host, output, socket_path, failures)
     lookup_scenario(host, output, socket_path, failures)
+    radio_titles_scenario(host, output, socket_path, failures)
     spotify_scenario(host, output, socket_path, failures)
     spotify_volume_scenario(host, socket_path, failures)
     spotify_previews_scenario(host, failures)
@@ -2775,6 +2776,71 @@ def lookup_scenario(host, output, socket_path, failures):
     check(any(x.startswith("SPOTIFY ·") for x in s["sections"]), "with the setting on Spotify, Spotify: " + ", ".join(x for x in s["sections"] if x), failures)
     host.call("press", "Escape")
     host.call("setSetting", "lookup", "Apple Music", "false")
+    to_source(host, "local")
+    BRIDGE["config"].unlink()
+
+
+def radio_titles_scenario(host, output, socket_path, failures):
+    """Marc, 11-08, on WRCT: a click on the artist "filled the search box with
+    the artist and the song name". WRCT's titles are "Show: Title - Artist"
+    ("The World's Your Oyster: Criminal - Fiona Apple"), and were read as
+    "Artist - Title". A station's form is learned from your library (an
+    artist you have at the end, their song once the show's name is off), and
+    kept; then the card, its links and History have the artist and title,
+    for artists you don't have too."""
+    url = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": url + "/omarock.ogg"}))
+    home = BRIDGE["config"].parents[2]
+    votes_file = home / ".cache/omarock/radio-titles.json"
+    history = home / ".local/share/omarock/history.jsonl"
+    votes_file.unlink(missing_ok=True)
+    history.unlink(missing_ok=True)
+    host.call("settings", json.dumps({"historyAfter": 8}))
+    host.call("close")
+    host.call("open")
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    wait_for(lambda: host.state()["opened"], "open")
+    to_source(host, "radio")
+    wait_for(lambda: mpd_state(socket_path).get("state") == "play", "the station plays")
+    uuid = mpd_files(socket_path)[int(mpd_state(socket_path)["song"])].split("#omarock-radio=")[1]
+
+    mpd_client(socket_path, 'fake_stream_title "Late Night Signals: Undertow - Glass Harbor"')
+    wait_for(lambda: host.state()["nowPlaying"] == "Undertow · Glass Harbor", "the station's form learned", timeout=12)
+    check(True, "Show: Title - Artist, with an artist and song of yours: the card has the song and the artist", failures)
+    wait_for(lambda: votes_file.exists() and uuid in json.loads(votes_file.read_text() or "{}"), "the form kept")
+    votes = json.loads(votes_file.read_text())[uuid]
+    check(votes.get("title", 0) >= 1 and votes.get("show", 0) >= 1 and not votes.get("artist"),
+          "kept in ~/.cache/omarock/radio-titles.json: " + json.dumps(votes), failures)
+    host.grab(output / "radio-titles.png")
+
+    check(host.call("clickPanel", "playingArtist") == "ok", "the artist can be clicked", failures)
+    wait_for(lambda: host.state()["lookup"] == "apple" and host.state()["query"] == "Glass Harbor"
+             and not host.state()["searching"], "the artist looked up")
+    check(True, "the artist's link looks up the artist alone", failures)
+    host.call("press", "Escape")
+    wait_for(lambda: host.state()["lookup"] == "", "Esc ends it")
+
+    def heard(title):
+        lines = history.read_text().splitlines() if history.exists() else []
+        return next((json.loads(l) for l in lines if l.strip() and json.loads(l).get("title") == title), None)
+    wait_for(lambda: heard("Undertow"), "the song in History", timeout=12)
+    e = heard("Undertow")
+    check(e["artist"] == "Glass Harbor" and e["source"] == "radio", "History has it the right way round: " + json.dumps(e), failures)
+
+    # Someone you don't have, on the same station: its form holds.
+    mpd_client(socket_path, 'fake_stream_title "Late Night Signals: Moon Over Water - Nobody You Know"')
+    wait_for(lambda: host.state()["nowPlaying"] == "Moon Over Water · Nobody You Know", "the next song")
+    check(True, "an artist you don't have, the same way round", failures)
+    host.call("clickPanel", "playingTitle")
+    wait_for(lambda: host.state()["query"] == "Moon Over Water Nobody You Know", "the song looked up")
+    check(host.state()["lookup"] == "apple", "the title's link looks up the song and its artist", failures)
+    host.call("press", "Escape")
+    wait_for(lambda: host.state()["lookup"] == "", "Esc ends it")
+
+    check(host.call("forgetRadioTitles") == "ok", "the made-up form forgotten", failures)
+    votes_file.unlink(missing_ok=True)
+    history.unlink(missing_ok=True)
+    host.call("settings", "{}")
     to_source(host, "local")
     BRIDGE["config"].unlink()
 
@@ -6452,6 +6518,7 @@ def main():
                             elif name == "now-playing": now_playing_scenario(host, output, socket_path, failures)
                             elif name == "card-keys": card_keys_scenario(host, output, socket_path, failures)
                             elif name == "lookup": lookup_scenario(host, output, socket_path, failures)
+                            elif name == "radio-titles": radio_titles_scenario(host, output, socket_path, failures)
                             elif name == "library": library_scenario(host, output, socket_path, failures)
                             elif name == "keep-state": keep_state_scenario(host, output, failures)
                             elif name == "hints": hints_scenario(host, output, failures)

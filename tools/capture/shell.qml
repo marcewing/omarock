@@ -652,6 +652,17 @@ ShellRoot {
         Qt.NoModifier, -1) ? "ok" : "no window"
     }
     function settings(json: string): void { host.widget.settings = host.baseSettings(JSON.parse(json)) }
+    // What the radio learned of its stations' titles (RadioClient.titleVotes)
+    // forgotten, while the radio is the player: a scenario's made-up
+    // station form doesn't reach the next.
+    function forgetRadioTitles(): string {
+      var p = host.panel.player
+      if (!p || p.titleVotes === undefined) return "not the radio"
+      p.titleVotes = ({})
+      p.lastTitles = ({})
+      p.titleAsked = ""
+      return "ok"
+    }
     // One of the widget's settings in shell.json (which omarock's settings
     // file, when it has the key, outranks).
     function setSetting(key: string, value: string, isJson: bool): void {

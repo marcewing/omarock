@@ -181,6 +181,16 @@ test("searchPattern ignores case and accents in both directions", () => {
   assert.equal(Mpd.searchPattern("   "), "")
 })
 
+test("exactPattern matches the whole name, case and accents aside", () => {
+  const fiona = jsRegex(Mpd.exactPattern("fiona apple"))
+  assert.match("Fiona Apple", fiona)
+  assert.doesNotMatch("Fiona Apple & Friends", fiona)
+  assert.doesNotMatch("The Fiona Apple Tribute", fiona)
+  assert.match("Flügel Café", jsRegex(Mpd.exactPattern("Flugel Cafe")))
+  assert.ok(Mpd.exactPattern("x").startsWith("(?i)^"))
+  assert.equal(Mpd.exactPattern("  "), "")
+})
+
 test("searchPattern escapes regex characters", () => {
   const p = Mpd.searchPattern("a.b (live)?")
   assert.match("A.B (Live)?", jsRegex(p))
