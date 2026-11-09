@@ -279,11 +279,12 @@ function titleVotes(questions, known, previousRaw) {
 // The song from a station's ICY title. iHeart's is Artist - text="Title"
 // song_spot="M" … amgArtworkURL="…"; most are "Artist - Title", some
 // "Title - Artist", some with a show's name first: form (titleForm) says
-// which, for the station playing.
+// which, for the station playing. show: the show's name, once it's known
+// to be one.
 function parseTitle(raw, form) {
   raw = String(raw || "").trim()
   form = form || {}
-  var song = { artist: "", title: "", art: "" }
+  var song = { artist: "", title: "", art: "", show: "" }
   var text = raw.match(/\btext="([^"]*)"/)
   if (text) {
     song.title = text[1]
@@ -303,19 +304,23 @@ function parseTitle(raw, form) {
   if (form.show && parts.show) {
     if (form.titleFirst) song.title = song.title.slice(parts.cut).trim()
     else song.artist = song.artist.slice(parts.cut).trim()
+    song.show = parts.show
   }
   return song
 }
 
 // The station playing, as mpd's currentsong would have it: the song as the
-// title and artist (when the station sends them), the station as the album.
+// title and artist (when the station sends them), the station as the album,
+// with the show's name after it ("WRCT · The World's Your Oyster"); the
+// station's name alone too, for History.
 function songAsMpd(mpdSong, station, form) {
   var file = mpdSong ? mpdSong.file || "" : ""
   if (!file) return {}
   var name = station ? nameOf(station) : (mpdSong.name || "Radio")
   var song = parseTitle(mpdSong.title, form)
   // No song: the station is the title, and the album line stays empty.
-  return { file: file, title: song.title || name, artist: song.title ? song.artist : "", album: song.title ? name : "",
+  return { file: file, title: song.title || name, artist: song.title ? song.artist : "",
+    album: song.title ? name + (song.show ? " · " + song.show : "") : "", station: name, show: song.show,
     genre: station ? String(station.tags || "").split(",")[0] : "" }
 }
 

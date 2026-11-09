@@ -381,7 +381,7 @@ function station(st, extra) {
   var checked = st.lastcheckok === 1 ? "Working" : st.lastcheckok === 0 ? "Not working" : ""
   return card("radio", "Station", String(st.name || "").trim() || "Untitled station",
     [place, join([now.artist, now.title], " – ")], [
-      group("ON NOW", [field("Artist", now.artist), field("Title", now.title)]),
+      group("ON NOW", [field("Artist", now.artist), field("Title", now.title), field("Show", now.show)]),
       group("STATION", [
         field("Place", place),
         field("Language", st.language),

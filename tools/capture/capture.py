@@ -2825,7 +2825,12 @@ def radio_titles_scenario(host, output, socket_path, failures):
         return next((json.loads(l) for l in lines if l.strip() and json.loads(l).get("title") == title), None)
     wait_for(lambda: heard("Undertow"), "the song in History", timeout=12)
     e = heard("Undertow")
-    check(e["artist"] == "Glass Harbor" and e["source"] == "radio", "History has it the right way round: " + json.dumps(e), failures)
+    check(e["artist"] == "Glass Harbor" and e["source"] == "radio" and e["station"] == "KEXP 90.3 FM",
+          "History has it the right way round, with the station: " + json.dumps(e), failures)
+    # Marc: "we lose the show name ... display it in the radio station line,
+    # with a dot between?"
+    check(host.state()["songAlbum"] == "KEXP 90.3 FM · Late Night Signals",
+          "the show's name after the station's: " + host.state()["songAlbum"], failures)
 
     # Someone you don't have, on the same station: its form holds.
     mpd_client(socket_path, 'fake_stream_title "Late Night Signals: Moon Over Water - Nobody You Know"')

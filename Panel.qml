@@ -1619,7 +1619,7 @@ Panel {
     if (root.sxmMode)
       return { title: song.title, artist: song.artist, station: sxm.channel ? sxm.channel.name : root.songAlbum,
         isAd: !!(sxm.now && sxm.now.isAd) }
-    if (root.radioMode) return { title: song.title, artist: song.artist, station: song.album }
+    if (root.radioMode) return { title: song.title, artist: song.artist, station: song.station || song.album }
     return { title: root.songTitle, artist: root.songArtist, album: root.songAlbum, file: song.file,
       duration: parseFloat(song.duration || song.time || 0) }
   }

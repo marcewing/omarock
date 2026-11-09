@@ -37,27 +37,27 @@ test("listRows puts a station found by search at the top, so A can keep it", () 
 
 test("parseTitle reads iHeart's tagged titles and plain Artist - Title", () => {
   assert.deepEqual(Radio.parseTitle('Days Of The New - text="Touch, Peel & Stand" song_spot="M" amgArtworkURL="http://assets.iheart.com/a.jpg" length="00:04:55"'),
-    { artist: "Days Of The New", title: "Touch, Peel & Stand", art: "http://assets.iheart.com/a.jpg" })
-  assert.deepEqual(Radio.parseTitle('Ad - text="Spot Block" amgArtworkURL="null"'), { artist: "Ad", title: "Spot Block", art: "" })
-  assert.deepEqual(Radio.parseTitle("Wilco - Jesus, Etc."), { artist: "Wilco", title: "Jesus, Etc.", art: "" })
-  assert.deepEqual(Radio.parseTitle("KEXP"), { artist: "", title: "KEXP", art: "" })
+    { artist: "Days Of The New", title: "Touch, Peel & Stand", art: "http://assets.iheart.com/a.jpg", show: "" })
+  assert.deepEqual(Radio.parseTitle('Ad - text="Spot Block" amgArtworkURL="null"'), { artist: "Ad", title: "Spot Block", art: "", show: "" })
+  assert.deepEqual(Radio.parseTitle("Wilco - Jesus, Etc."), { artist: "Wilco", title: "Jesus, Etc.", art: "", show: "" })
+  assert.deepEqual(Radio.parseTitle("KEXP"), { artist: "", title: "KEXP", art: "", show: "" })
 })
 
 test("parseTitle reads a station's form: the title first, a show's name in front", () => {
   const wrct = "The World's Your Oyster: Criminal - Fiona Apple"
-  assert.deepEqual(Radio.parseTitle(wrct), { artist: "The World's Your Oyster: Criminal", title: "Fiona Apple", art: "" })
-  assert.deepEqual(Radio.parseTitle(wrct, { titleFirst: true, show: true }), { artist: "Fiona Apple", title: "Criminal", art: "" })
-  assert.deepEqual(Radio.parseTitle(wrct, { titleFirst: true }), { artist: "Fiona Apple", title: "The World's Your Oyster: Criminal", art: "" })
+  assert.deepEqual(Radio.parseTitle(wrct), { artist: "The World's Your Oyster: Criminal", title: "Fiona Apple", art: "", show: "" })
+  assert.deepEqual(Radio.parseTitle(wrct, { titleFirst: true, show: true }), { artist: "Fiona Apple", title: "Criminal", art: "", show: "The World's Your Oyster" })
+  assert.deepEqual(Radio.parseTitle(wrct, { titleFirst: true }), { artist: "Fiona Apple", title: "The World's Your Oyster: Criminal", art: "", show: "" })
   // Title first splits at the last dash, artist first at the first.
-  assert.deepEqual(Radio.parseTitle("Song - Live - Band", { titleFirst: true }), { artist: "Band", title: "Song - Live", art: "" })
-  assert.deepEqual(Radio.parseTitle("Band - Song - Live"), { artist: "Band", title: "Song - Live", art: "" })
+  assert.deepEqual(Radio.parseTitle("Song - Live - Band", { titleFirst: true }), { artist: "Band", title: "Song - Live", art: "", show: "" })
+  assert.deepEqual(Radio.parseTitle("Band - Song - Live"), { artist: "Band", title: "Song - Live", art: "", show: "" })
   // A show's name in front of the artist; a colon in the title stays.
-  assert.deepEqual(Radio.parseTitle("Morning Jazz: Miles Davis - So What", { show: true }), { artist: "Miles Davis", title: "So What", art: "" })
-  assert.deepEqual(Radio.parseTitle("Wilco - Jesus, Etc.: Live", { show: true }), { artist: "Wilco", title: "Jesus, Etc.: Live", art: "" })
+  assert.deepEqual(Radio.parseTitle("Morning Jazz: Miles Davis - So What", { show: true }), { artist: "Miles Davis", title: "So What", art: "", show: "Morning Jazz" })
+  assert.deepEqual(Radio.parseTitle("Wilco - Jesus, Etc.: Live", { show: true }), { artist: "Wilco", title: "Jesus, Etc.: Live", art: "", show: "" })
   // No show's name to take off: as it is.
-  assert.deepEqual(Radio.parseTitle("Criminal - Fiona Apple", { titleFirst: true, show: true }), { artist: "Fiona Apple", title: "Criminal", art: "" })
+  assert.deepEqual(Radio.parseTitle("Criminal - Fiona Apple", { titleFirst: true, show: true }), { artist: "Fiona Apple", title: "Criminal", art: "", show: "" })
   // iHeart's tagged titles never change.
-  assert.deepEqual(Radio.parseTitle('Days Of The New - text="Touch"', { titleFirst: true, show: true }), { artist: "Days Of The New", title: "Touch", art: "" })
+  assert.deepEqual(Radio.parseTitle('Days Of The New - text="Touch"', { titleFirst: true, show: true }), { artist: "Days Of The New", title: "Touch", art: "", show: "" })
 })
 
 test("titleForm: the title first only on more votes for it; a show's name on any", () => {
@@ -90,9 +90,15 @@ test("titleQuestions and titleVotes: learned from the artists and songs you have
 
 test("songAsMpd: the song when sent, else the station; the station as the album", () => {
   assert.deepEqual(Radio.songAsMpd({ file: "f", title: "Wilco - Jesus, Etc.", name: "KEXP" }, kexp),
-    { file: "f", title: "Jesus, Etc.", artist: "Wilco", album: "KEXP 90.3", genre: "indie" })
+    { file: "f", title: "Jesus, Etc.", artist: "Wilco", album: "KEXP 90.3", station: "KEXP 90.3", show: "", genre: "indie" })
   assert.deepEqual(Radio.songAsMpd({ file: "f", name: "Some Stream" }, null),
-    { file: "f", title: "Some Stream", artist: "", album: "", genre: "" })
+    { file: "f", title: "Some Stream", artist: "", album: "", station: "Some Stream", show: "", genre: "" })
+  // A show's name, once known to be one, follows the station's.
+  const wrct = { file: "f", title: "The World's Your Oyster: Criminal - Fiona Apple" }
+  assert.deepEqual(Radio.songAsMpd(wrct, kexp, { titleFirst: true, show: true }),
+    { file: "f", title: "Criminal", artist: "Fiona Apple", album: "KEXP 90.3 · The World's Your Oyster", station: "KEXP 90.3",
+      show: "The World's Your Oyster", genre: "indie" })
+  assert.equal(Radio.songAsMpd(wrct, kexp, { titleFirst: true }).album, "KEXP 90.3")
 })
 
 test("stepStation goes around the playable favorites", () => {
