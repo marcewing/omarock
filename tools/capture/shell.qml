@@ -553,6 +553,14 @@ ShellRoot {
       var at = row.mapToItem(card, row.width / 3, row.height / 2)
       return JSON.stringify({ x: Math.round(at.x), y: Math.round(at.y) })
     }
+    // The panel list's row under a point on the card, -1 if none.
+    function rowAtPoint(x: real, y: real): int {
+      var card = popup().contentItem[0].parent.parent
+      var list = host.panel.listView
+      if (!list) return -1
+      var at = card.mapToItem(list.contentItem, x, y)
+      return list.indexAt(at.x, at.y)
+    }
     // The list scrolled to y, as a mouse wheel would.
     function scrollList(y: real): void { host.panel.listView.contentY = y }
     // The row in the middle of the list as it's scrolled.

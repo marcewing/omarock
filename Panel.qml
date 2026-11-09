@@ -216,7 +216,18 @@ Panel {
   // The cursor is where the pointer put it (hoverRow), not the keys: it goes
   // when the pointer leaves the list.
   property bool pointerCursor: false
-  onCursorIndexChanged: root.pointerCursor = false
+  // Where the pointer was (on the card) when anything but the pointer last
+  // moved the cursor, null if it wasn't on the card. A row coming under it
+  // while it's still there is the list moving under a pointer that stayed
+  // put (↓ past the list's edge scrolls it), not the pointer going to that
+  // row (Marc, 11-08: "it scrolls up one, but the highlight row also moves
+  // up one, so I have to hit down arrow twice").
+  property var keyPointer: null
+  property bool hovering: false
+  onCursorIndexChanged: {
+    root.pointerCursor = false
+    if (!root.hovering) root.keyPointer = root.pointerOnCard()
+  }
   property bool returnPressed: false
   property string notice: ""
   property string localCoverUrl: ""
@@ -2825,10 +2836,23 @@ Panel {
     root.cursorIndex = Math.max(0, Math.min(root.rows.length - 1, root.cursorIndex + dy))
   }
 
+  // The pointer on a row. Decided once the card's own hover has the
+  // pointer's position too (a row hears of the pointer first).
   function hoverRow(index) {
-    root.cursorActive = true
-    root.cursorIndex = index
-    root.pointerCursor = true
+    Qt.callLater(function() {
+      if (index < 0 || index >= root.rows.length) return
+      var at = root.pointerOnCard()
+      if (root.keyPointer && at && Math.abs(at.x - root.keyPointer.x) < 1 && Math.abs(at.y - root.keyPointer.y) < 1) return
+      root.keyPointer = null
+      root.hovering = true
+      root.cursorActive = true
+      root.cursorIndex = index
+      root.pointerCursor = true
+      root.hovering = false
+    })
+  }
+  function pointerOnCard() {
+    return cardHover.hovered ? Qt.point(cardHover.point.scenePosition.x, cardHover.point.scenePosition.y) : null
   }
 
   // PgUp and PgDn: to the first or last row in full view, then a page on
@@ -4118,8 +4142,16 @@ Panel {
             root.pointerArmed = true
             leaveDelay.stop()
           } else {
+            root.keyPointer = null
             root.pointerLeft()
           }
+        }
+        // The pointer moved since the keys moved the cursor: rows it goes
+        // to take the cursor again (root.keyPointer).
+        onPointChanged: {
+          var at = point.scenePosition
+          if (root.keyPointer && (Math.abs(at.x - root.keyPointer.x) >= 1 || Math.abs(at.y - root.keyPointer.y) >= 1))
+            root.keyPointer = null
         }
       }
 

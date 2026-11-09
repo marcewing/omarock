@@ -4542,6 +4542,42 @@ def hover_scroll_scenario(host, failures):
         check(after["cursor"] == cut["index"] and (after["listY"] - s["listY"]) * step > 0,
               f"then {key} brings the cursor back to row {after['cursor']}, in view ({s['listY']} -> {after['listY']})", failures)
 
+    # The pointer resting on the list while ↓ and ↑ go past its edges (Marc,
+    # 11-08, searching Sonic Youth: "it scrolls up one, but the highlight row
+    # also moves up one, so I have to hit down arrow twice"). The list moves
+    # under a pointer that stayed put; that isn't the pointer going to a row.
+    reopen(host)
+    host.call("scrollList", 0)
+    host.settle(.4)
+    at = json.loads(host.call("rowPoint", "", 2))
+    host.hover(at["x"], at["y"])
+    host.settle(.5)
+    for key, step in (("Down", 1), ("Up", -1)):
+        top = host.state()["listY"]
+        moves = []
+        for _ in range(12):
+            before = host.state()["cursor"]
+            host.call("press", key)
+            host.settle(.3)
+            moves.append(host.state()["cursor"] - before)
+        s = host.state()
+        check(all(m == step for m in moves) and (s["listY"] - top) * step > 0,
+              f"the pointer resting on the list, {key} ×12 past its edge: one row each ({moves}), "
+              f"the list scrolled ({top} -> {s['listY']})", failures)
+    # The pointer moving again (off the list, then back to the very spot it
+    # rested on while the keys moved the cursor, over another row now): that
+    # row takes the cursor.
+    under = int(host.call("rowAtPoint", at["x"], at["y"]))
+    if under >= 0 and under != s["cursor"]:
+        host.hover(4, 4)
+        host.settle(.3)
+        host.hover(at["x"], at["y"])
+        host.settle(.5)
+        check(host.state()["cursor"] == under,
+              f"then the pointer moved, off and back to that spot: the cursor follows it to row {under} ({host.state()['cursor']})", failures)
+    else:
+        check(False, f"the spot the pointer rested on is over another row than the cursor ({under}, {s['cursor']})", failures)
+
 
 def page_sweep(host, what, get, failures):
     """PgDn to the end, then PgUp to the top, each press checked against
