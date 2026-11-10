@@ -37,6 +37,12 @@ config() { [[ -r $CONFIG ]] && jq -r --arg k "$1" '.[$k] // empty' "$CONFIG" 2>/
 BRIDGE=${OMAROCK_BRIDGE:-$(config bridge)}
 STREAM=${OMAROCK_STREAM:-$(config stream)}
 TOKEN_FILE=${OMAROCK_BRIDGE_TOKEN:-$HOME/.config/omarock/bridge-token}
+# mpc reaches mpd where omarock does, on its socket, unless MPD_HOST says.
+if [[ -z ${MPD_HOST:-} ]]; then
+  MPD_HOST=$(jq -r '.socket // empty' "$HOME/.config/omarock/settings.json" 2>/dev/null || true)
+  MPD_HOST=${MPD_HOST/#\~/$HOME}
+  export MPD_HOST=${MPD_HOST:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket}
+fi
 
 die() { echo "omarock-am: $*" >&2; exit 1; }
 

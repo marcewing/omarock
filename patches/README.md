@@ -36,8 +36,8 @@ offers to remove it. By hand: delete
 ```bash
 tools/build-mpd-mpris        # builds mpd-mpris 0.4.4 (Arch's version), patched, into ~/.local/lib/omarock-mpris
 mkdir -p ~/.config/systemd/user/mpd-mpris.service.d
-printf '[Service]\nExecStart=\nExecStart=%%h/.local/lib/omarock-mpris/mpd-mpris -no-instance\n' \
-  > ~/.config/systemd/user/mpd-mpris.service.d/omarock-mpris.conf
+printf '[Service]\nExecStart=\nExecStart=%%h/.local/lib/omarock-mpris/mpd-mpris -no-instance -network unix -host "%s"\n' \
+  "$XDG_RUNTIME_DIR/mpd/socket" > ~/.config/systemd/user/mpd-mpris.service.d/omarock-mpris.conf
 systemctl --user daemon-reload && systemctl --user restart mpd-mpris
 ```
 

@@ -318,6 +318,46 @@ else:
 open(path, "w").write("".join(lines))
 PY
 }
+# mpd's TCP addresses in CONF (mpd has no logins: anyone who reaches one can
+# read the queue and change what plays). CONF show prints the bind_to_address
+# lines that aren't a unix socket; CONF write makes CONF.new without them: the
+# localhost line omarock 1.0 added goes, and others become comments that
+# --uninstall turns back on, as does a port line (with no TCP address, mpd
+# would only advertise that port on the network, over zeroconf).
+mpd_tcp() {
+  python3 -I - "$@" <<'PY'
+import re, sys
+path, mode = sys.argv[1:]
+lines = open(path).read().split("\n")
+bind = re.compile(r'\s*bind_to_address\s+"?([^"\s]*)"?')
+port = re.compile(r'\s*port\s')
+out, shown, ours = [], [], False
+for line in lines:
+    m = bind.match(line)
+    if line.startswith("# omarock: a unix socket"):
+        ours = True
+    elif not m:
+        ours = False
+    if m and not m.group(1).startswith(("/", "~/", "@")):
+        shown.append(line.strip())
+        if not (ours and m.group(1) == "localhost"):
+            out.append("# omarock (socket only): " + line)
+        continue
+    if port.match(line):
+        out.append("# omarock (socket only): " + line)
+        continue
+    out.append(line)
+if mode == "show":
+    print("\n".join(shown))
+else:
+    open(path + ".new", "w").write("\n".join(out))
+PY
+}
+# Whether mpd listens on TCP: an address in CONF, none at all (mpd's default
+# is port 6600 on every interface), or mpd.socket (which opens 6600 too).
+mpd_on_tcp() {
+  [[ -n $(mpd_tcp "$1" show) ]] || ! grep -qE '^[[:space:]]*bind_to_address' "$1" || active mpd.socket
+}
 # FILE.new in FILE's place, with FILE's mode: an mpd.conf kept private (it
 # can hold mpd's passwords) stays private.
 swap_in() { chmod --reference="$1" "$1.new" && mv "$1.new" "$1"; }
@@ -391,6 +431,34 @@ declare -A done_=()
 
 # ---- 1. mpd ----
 
+# mpd-mpris looks for mpd on TCP unless told where it is (it doesn't read
+# MPD_HOST). Its drop-in gives it the socket, and so does the patched build's
+# (Apple Music's setup), which comes later and wins.
+mpris_exec() {  # BINARY: mpd-mpris's ExecStart line, on omarock's socket
+  printf 'ExecStart=%s -no-instance -network unix -host "%s"\n' "$1" "${mpd_socket//%/%%}"
+}
+mpris_patched_conf() {  # the patched build's drop-in
+  install -d "$units/mpd-mpris.service.d"
+  { printf '# omarock: mpd-mpris, patched (patches/README.md)\n[Service]\nExecStart=\n'
+    mpris_exec '%h/.local/lib/omarock-mpris/mpd-mpris'; } >"$units/mpd-mpris.service.d/omarock-mpris.conf"
+}
+mpris_unsocketed() {
+  local d=$units/mpd-mpris.service.d want
+  want=$(mpris_exec x | cut -d' ' -f2-)
+  ! grep -qsF -- "$want" "$d/mpd-socket.conf" \
+    || { [[ -f $d/omarock-mpris.conf ]] && ! grep -qF -- "$want" "$d/omarock-mpris.conf"; }
+}
+mpris_socket() {
+  local d=$units/mpd-mpris.service.d
+  install -d "$d"
+  { printf '# omarock: mpd-mpris finds mpd on its socket\n[Service]\nExecStart=\n'; mpris_exec mpd-mpris; } >"$d/mpd-socket.conf"
+  ok "wrote $d/mpd-socket.conf"
+  if [[ -f $d/omarock-mpris.conf ]]; then mpris_patched_conf && ok "wrote $d/omarock-mpris.conf"; fi
+  run systemctl --user daemon-reload
+  if active mpd-mpris; then run systemctl --user restart mpd-mpris; fi
+  return 0
+}
+
 step_mpd() {
   step "mpd"
   local need=() p conf music v
@@ -457,12 +525,13 @@ step_mpd() {
   # from its last saved state, which can be minutes old.
   [[ -f $conf ]] || lines+=("$(printf '%-19s "%s"' restore_paused yes)")
 
-  # The socket. Omarchy's bar (Quickshell) can only open unix sockets, not
-  # mpd's TCP port, so mpd listens on one, and on TCP for this machine only
-  # (as before, for mpc and ncmpcpp) if it had no other address.
+  # The socket. Omarchy's bar (Quickshell) can only open unix sockets, and
+  # mpd listens only there: mpd has no logins, so on TCP every account on
+  # this machine could read the queue (with Apple Music, the private address
+  # of the Mac's stream) and change what plays.
   mpd_socket=$(setting socket "")
   [[ -z $mpd_socket ]] && mpd_socket=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket
-  local other dropin_dir=$units/mpd.service.d need_dropin=false
+  local other dropin_dir=$units/mpd.service.d need_dropin=false tcp_default=false
   other=$(grep -E '^[[:space:]]*bind_to_address[[:space:]]+"(/|~/)' "$conf" 2>/dev/null | head -1 | cut -d'"' -f2)
   other=${other/#\~/$HOME}
   if [[ -n $other && $other != "$mpd_socket" ]]; then
@@ -474,7 +543,8 @@ step_mpd() {
     ((${#lines[@]})) && lines+=("")
     lines+=("# omarock: a unix socket (Omarchy's bar can't use TCP)")
     lines+=("bind_to_address     \"$mpd_socket\"")
-    grep -qE '^[[:space:]]*bind_to_address' "$conf" 2>/dev/null || lines+=("bind_to_address     \"localhost\"")
+    # An address of its own ends mpd's default, port 6600 on every interface.
+    [[ -f $conf ]] && ! grep -qE '^[[:space:]]*bind_to_address' "$conf" && tcp_default=true
   fi
   # mpc, here and in the commands shown, uses omarock's socket.
   export MPD_HOST=$mpd_socket
@@ -489,6 +559,7 @@ step_mpd() {
       if [[ -f $conf ]]; then explain "This adds to $conf:"; else explain "This makes $conf:"; fi
       printf '    %s\n' "${lines[@]}"
     fi
+    $tcp_default && explain "mpd then listens there only, and no longer on TCP port 6600 (every network interface), where any account on this machine and anyone on your network could reach it. Other mpd clients find it with MPD_HOST (a question below)."
     $need_dropin && explain "and a systemd drop-in, $dropin_dir/runtime-dir.conf, that makes the socket's folder."
     confirm "Make these changes?" || { bad "omarock needs mpd's socket and playlists."; stopped; }
     if ((${#lines[@]})); then
@@ -506,6 +577,31 @@ step_mpd() {
       changed=true
     fi
   fi
+  # TCP addresses already there (omarock 1.0 added localhost): off, if you say,
+  # once mpd.conf has the socket (with no address at all, mpd would go back
+  # to its default, port 6600 on every interface).
+  local tcp
+  tcp=$([[ -f $conf ]] && grep -qE '^[[:space:]]*bind_to_address[[:space:]]+"(/|~/|@)' "$conf" && mpd_tcp "$conf" show)
+  if [[ -n $tcp ]]; then
+    explain "mpd also listens on TCP:"
+    sed 's/^/    /' <<<"$tcp"
+    printed
+    explain "mpd has no logins, so every account on this machine can reach it there (and on an address other than localhost, anyone on your network). They can read the queue, which holds the private address of the Mac's stream while Apple Music plays, and change what plays. omarock needs only the socket."
+    if confirm "Have mpd listen on its socket only?"; then
+      backup "$conf"
+      mpd_tcp "$conf" write && swap_in "$conf" && ok "mpd listens on its socket only (wrote $conf)"
+      changed=true
+    else
+      note "mpd stays on TCP too"
+    fi
+  fi
+  # mpd.conf without TCP, and mpd still on it from before (a run that
+  # stopped short of the restart): the restart below ends that.
+  if ! $changed && active mpd && ! mpd_on_tcp "$conf" && ss -ltnpH 2>/dev/null | grep -q '"mpd"'; then
+    note "mpd still listens on TCP, from its config before: a restart ends that"
+    changed=true
+  fi
+  active mpd.socket && note "mpd.socket also opens TCP port 6600, on every network interface. For the socket alone: systemctl --user disable --now mpd.socket, then ./install again."
   mkdir -p ~/.local/share/mpd/playlists ~/.local/state/mpd
 
   # Running, and answering on the socket.
@@ -534,6 +630,19 @@ step_mpd() {
     ok "mpd knows $songs songs (after adding music: mpc update)"
   fi
 
+  # Other clients look for mpd on TCP unless MPD_HOST says where it is.
+  local envd=${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/omarock-mpd.conf
+  if ! mpd_on_tcp "$conf" && [[ ! -f $envd ]] && ! systemctl --user show-environment 2>/dev/null | grep -q '^MPD_HOST='; then
+    explain "Other mpd clients (mpc, ncmpcpp, rmpc and the like) look for mpd on TCP unless MPD_HOST says where it is. A line in $envd sets it for everything you start, from your next login."
+    if confirm "Point mpd clients at the socket?"; then
+      install -d "$(dirname "$envd")"
+      printf '# omarock: mpd clients find mpd on its socket\nMPD_HOST=%s\n' "$mpd_socket" >"$envd"
+      ok "wrote $envd"
+      run systemctl --user set-environment "MPD_HOST=$mpd_socket"
+      note "until you next log in, in a terminal: export MPD_HOST=$mpd_socket"
+    fi
+  fi
+
   # A crash: mpd's own unit leaves it down; a drop-in brings it back.
   if [[ $(systemctl --user show mpd -p Restart --value 2>/dev/null) == no ]]; then
     explain "If mpd crashes, it stays down until you start it again. A drop-in ($dropin_dir/restart.conf) brings it back$([[ $(conf_value "$conf" restore_paused) == yes ]] && echo ", paused")."
@@ -555,6 +664,14 @@ step_mpd() {
       printf '# omarock: follow mpd, and come back after it restarts\n[Unit]\nPartOf=mpd.service\n\n[Service]\nRestart=always\nRestartSec=3\n' >"$mpris_dir/follow-mpd.conf"
       ok "wrote $mpris_dir/follow-mpd.conf"
       run systemctl --user daemon-reload
+    fi
+  fi
+  if mpris_unsocketed; then
+    explain "mpd-mpris looks for mpd on TCP unless it's told where mpd is. A drop-in ($mpris_dir/mpd-socket.conf) gives it the socket$([[ -f $mpris_dir/omarock-mpris.conf ]] && echo ", and the patched mpd-mpris's (omarock-mpris.conf) does too")."
+    if confirm "Give mpd-mpris the socket?"; then
+      mpris_socket
+    else
+      note "mpd-mpris reaches mpd only while mpd listens on TCP"
     fi
   fi
   if ! active mpd-mpris || ! systemctl --user is-enabled --quiet mpd-mpris 2>/dev/null; then
@@ -1180,7 +1297,7 @@ step_apple() {
     if confirm "Build the patched mpd-mpris?" no mpris; then
       run sudo pacman -S --needed --noconfirm go git \
         && run "$repo/tools/build-mpd-mpris" \
-        && printf '# omarock: mpd-mpris, patched (patches/README.md)\n[Service]\nExecStart=\nExecStart=%%h/.local/lib/omarock-mpris/mpd-mpris -no-instance\n' >"$units/mpd-mpris.service.d/omarock-mpris.conf" \
+        && mpris_patched_conf \
         && run systemctl --user daemon-reload \
         && run systemctl --user restart mpd-mpris \
         && ok "mpd-mpris is the patched one" \
@@ -1583,7 +1700,8 @@ un_bus() {
 }
 
 # The unix socket step_mpd added to mpd.conf: its comment and bind_to_address
-# lines. CONF show|write, as mpd_conf_undo.
+# lines, and TCP addresses it turned off come back. CONF show|write, as
+# mpd_conf_undo.
 mpd_socket_undo() {
   python3 -I - "$@" <<'PY'
 import re, sys
@@ -1591,6 +1709,11 @@ path, mode = sys.argv[1:]
 lines = open(path).read().split("\n")
 out, gone, i = [], [], 0
 while i < len(lines):
+    if lines[i].startswith("# omarock (socket only): "):
+        gone.append(lines[i])
+        out.append(lines[i][len("# omarock (socket only): "):])
+        i += 1
+        continue
     if lines[i].startswith("# omarock: a unix socket"):
         if out and not out[-1].strip():
             out.pop()
@@ -1610,31 +1733,34 @@ PY
 }
 
 un_mpd() {
-  local conf gone dropins=() f
+  local conf gone dropins=() f envd=${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/omarock-mpd.conf
   conf=$(mpd_conf)
   gone=$([[ -f $conf ]] && mpd_socket_undo "$conf" show)
   for f in "$units/mpd.service.d/runtime-dir.conf" "$units/mpd.service.d/restart.conf" \
-           "$units/mpd-mpris.service.d/follow-mpd.conf"; do
+           "$units/mpd-mpris.service.d/follow-mpd.conf" "$units/mpd-mpris.service.d/mpd-socket.conf" "$envd"; do
     head -1 "$f" 2>/dev/null | grep -q '^# omarock:' && dropins+=("$f")
   done
   [[ -n $gone ]] || ((${#dropins[@]})) || return 0
   step "omarock's changes to mpd"
   explain "omarock also set mpd up for itself. Other mpd clients can use these too, so they stay unless you say otherwise."
-  if [[ -n $gone ]]; then explain "In $conf, mpd's unix socket:"; sed 's/^/    /' <<<"$gone"; fi
-  if ((${#dropins[@]})); then explain "Drop-ins (the socket's folder, mpd coming back after a crash, and mpd-mpris following mpd):"; listing "${dropins[@]}"; fi
+  if [[ -n $gone ]]; then explain "In $conf, mpd's unix socket (and any TCP address it turned off, back on):"; sed 's/^/    /' <<<"$gone"; fi
+  if ((${#dropins[@]})); then explain "Drop-ins (the socket's folder, mpd coming back after a crash, mpd-mpris following mpd and finding it on the socket), and MPD_HOST for other clients:"; listing "${dropins[@]}"; fi
   confirm "Take these out too, and restart mpd?" no || { ok "kept them"; return 0; }
   if [[ -n $gone ]]; then
     backup "$conf"
     mpd_socket_undo "$conf" write && swap_in "$conf" && ok "wrote $conf"
   fi
   ((${#dropins[@]} == 0)) || run rm -f "${dropins[@]}"
-  rmdir "$units/mpd.service.d" "$units/mpd-mpris.service.d" 2>/dev/null
+  rmdir "$units/mpd.service.d" "$units/mpd-mpris.service.d" "$(dirname "$envd")" 2>/dev/null
+  [[ " ${dropins[*]} " == *" $envd "* ]] && run systemctl --user unset-environment MPD_HOST
   run systemctl --user daemon-reload
   run systemctl --user restart mpd
   unset MPD_HOST
   mpd_back
   # Without follow-mpd.conf, mpd-mpris dies with mpd's restart and stays down.
   if systemctl --user is-enabled -q mpd-mpris 2>/dev/null; then run systemctl --user restart mpd-mpris; fi
+  [[ -n $gone && -f $units/mpd-mpris.service.d/omarock-mpris.conf ]] \
+    && note "the patched mpd-mpris you kept still looks for mpd on the socket: ./install --remove apple-music takes it out"
   if [[ -n $gone ]] && ! grep -q '^[[:space:]]*bind_to_address' "$conf"; then
     note "mpd listens where it does by default now: port 6600 on every network interface, and its socket"
   fi

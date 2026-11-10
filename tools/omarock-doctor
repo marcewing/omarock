@@ -69,6 +69,29 @@ if [[ -S $sock ]]; then
 else
   bad "no mpd socket at $sock: README.md, Install, 1. mpd"
 fi
+# mpd has no logins: on TCP, every account here can read its queue (with
+# Apple Music, the private address of the Mac's stream) and change it.
+tcp=$(ss -ltnpH 2>/dev/null | awk '/"mpd"/ {print $4}' | sort -u | paste -sd' ' -)
+if active mpd.socket; then
+  note "mpd.socket opens TCP port 6600 on every network interface, where every account here, and your network, can reach mpd: systemctl --user disable --now mpd.socket, then ./install"
+elif [[ -n $tcp ]]; then
+  conf=${XDG_CONFIG_HOME:-$HOME/.config}/mpd/mpd.conf
+  for f in "$conf" "$HOME/.mpdconf" "$HOME/.mpd/mpd.conf"; do [[ -f $f ]] && { conf=$f; break; }; done
+  if grep -qE '^[[:space:]]*bind_to_address[[:space:]]+"?[^"/~@[:space:]]' "$conf" 2>/dev/null \
+     || ! grep -qE '^[[:space:]]*bind_to_address' "$conf" 2>/dev/null; then
+    fix="./install offers to turn that off"
+  else
+    fix="mpd.conf has no TCP address now: systemctl --user restart mpd"
+  fi
+  note "mpd also listens on TCP ($tcp), where every account here can read its queue (with Apple Music, the stream's private address): $fix"
+else
+  ok "mpd listens on its socket only"
+  if systemctl --user show-environment 2>/dev/null | grep -q '^MPD_HOST='; then ok "MPD_HOST points mpd clients at it"
+  else note "mpc and other mpd clients need MPD_HOST=$sock to find mpd (./install offers it)"; fi
+  if ! systemctl --user show mpd-mpris -p ExecStart --value 2>/dev/null | grep -q -- '-network unix'; then
+    bad "mpd-mpris looks for mpd on TCP, so the media keys don't reach it: ./install gives it the socket"
+  fi
+fi
 if active mpd-mpris; then ok "mpd-mpris is running (media keys)"; else note "mpd-mpris isn't running: the media keys won't reach mpd (systemctl --user enable --now mpd-mpris)"; fi
 
 head2 "The plugin"

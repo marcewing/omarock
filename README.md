@@ -166,21 +166,33 @@ playlists and radio favorites with them. `restore_paused` makes mpd start
 paused, at login or after a crash, rather than playing on from its last saved
 state, which can be minutes old.
 
-omarock talks to mpd over a unix socket, so mpd must listen on one. Either:
-- **The quick way:** `systemctl --user enable --now mpd.socket`. The unit that comes
-  with mpd opens `$XDG_RUNTIME_DIR/mpd/socket`, and TCP port 6600 too, on every
-  network interface: without a password in mpd.conf, anyone who can reach this
-  machine (your LAN; your tailnet, which ufw doesn't cover) can play, stop and
-  change mpd. `./install` does it the next way instead (with port 6600 on
-  localhost only, for `mpc` and other clients).
-- **Socket only:** add `bind_to_address "/run/user/1000/mpd/socket"` to mpd.conf
-  (your user id in place of 1000), with a drop-in that makes the folder:
-  ```ini
-  # ~/.config/systemd/user/mpd.service.d/runtime-dir.conf
-  [Service]
-  RuntimeDirectory=mpd
-  ```
-  Then `systemctl --user daemon-reload && systemctl --user enable --now mpd`.
+omarock talks to mpd over a unix socket, and mpd should listen only there. mpd
+has no logins, so whoever can reach a TCP port of mpd's can read the queue (with
+Apple Music, the private address of the Mac's stream) and change what plays: on
+localhost, every account on this machine; on mpd's default, port 6600 on every
+network interface, your network too. Add
+`bind_to_address "/run/user/1000/mpd/socket"` to mpd.conf (your user id in place
+of 1000), with a drop-in that makes the folder:
+
+```ini
+# ~/.config/systemd/user/mpd.service.d/runtime-dir.conf
+[Service]
+RuntimeDirectory=mpd
+```
+
+Then `systemctl --user daemon-reload && systemctl --user enable --now mpd`. With
+an address of its own, mpd no longer listens on port 6600. Leave mpd's packaged
+`mpd.socket` unit off: it opens port 6600 on every interface too.
+
+**Other mpd clients** (`mpc`, ncmpcpp, rmpc) look for mpd on TCP unless
+`MPD_HOST` says where it is. This sets it for everything you start, from your
+next login (until then, `export MPD_HOST=/run/user/1000/mpd/socket` in a
+terminal):
+
+```ini
+# ~/.config/environment.d/omarock-mpd.conf
+MPD_HOST=/run/user/1000/mpd/socket
+```
 
 mpd scans your music the first time it starts. After you add music later, run
 `mpc update`.
@@ -208,6 +220,16 @@ PartOf=mpd.service
 [Service]
 Restart=always
 RestartSec=3
+```
+
+It also looks for mpd on TCP unless it's told where mpd is (it doesn't read
+`MPD_HOST`), so a second drop-in gives it the socket:
+
+```ini
+# ~/.config/systemd/user/mpd-mpris.service.d/mpd-socket.conf
+[Service]
+ExecStart=
+ExecStart=mpd-mpris -no-instance -network unix -host "/run/user/1000/mpd/socket"
 ```
 
 Then `systemctl --user daemon-reload && systemctl --user enable --now mpd-mpris`.

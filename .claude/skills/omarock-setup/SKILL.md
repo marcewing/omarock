@@ -67,14 +67,16 @@ below.
   them. Use README.md's six-line mpd.conf, and make its folders. mpd scans on its
   first start; after that, new music needs `mpc update`.
 - **The socket.** omarock reaches mpd only through a unix socket, by default
-  `$XDG_RUNTIME_DIR/mpd/socket`. There are two ways (README.md, Install), so let
-  the user choose:
-  - `mpd.socket` is easiest, but also opens TCP port 6600 on every interface.
-  - A `bind_to_address` line with a `RuntimeDirectory=mpd` drop-in opens only the
-    socket.
+  `$XDG_RUNTIME_DIR/mpd/socket`, and mpd should listen only there: a
+  `bind_to_address` line with a `RuntimeDirectory=mpd` drop-in (README.md, Install
+  by hand). mpd has no logins, so on a TCP port (localhost included, and
+  `mpd.socket`'s 6600 on every interface) any account on the machine can read the
+  queue, which holds the Apple Music stream's private address. Other clients then
+  need `MPD_HOST` (`~/.config/environment.d/omarock-mpd.conf`), and mpd-mpris its
+  `mpd-socket.conf` drop-in; ./install offers all three.
 
-  If their mpd already listens elsewhere, setting omarock's `socket` setting may be
-  simpler than changing mpd.
+  If their mpd already listens on another socket, setting omarock's `socket`
+  setting may be simpler than changing mpd.
 - **The media keys** need `mpd-mpris` running, with README.md's `follow-mpd.conf`
   drop-in: without it, mpd-mpris dies the first time mpd restarts and stays down.
 - **A crash:** mpd's own unit has `Restart=no`, so a crashed mpd stays down.
