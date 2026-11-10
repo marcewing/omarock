@@ -181,12 +181,15 @@ case $cmd in
     # Like omarock's m: the stream after the current song in mpd, playing.
     fresh_stream
     # An entry from before (another token, an older bridge) goes.
-    for pos in $(mpc -f '%position%~%file%' playlist | awk -F'~' -v s="$STREAM" '$2 != s {print $1}' | grep -xFf <(stream_positions) | sort -rn); do
+    # The stream's address has a secret in it: awk has it from its
+    # environment and mpc on stdin, never on a command line (which others on
+    # this machine can read).
+    for pos in $(mpc -f '%position%~%file%' playlist | S=$STREAM awk -F'~' '$2 != ENVIRON["S"] {print $1}' | grep -xFf <(stream_positions) | sort -rn); do
       mpc -q del "$pos"
     done
-    pos=$(mpc -f '%position%~%file%' playlist | awk -F'~' -v s="$STREAM" '$2 == s {print $1; exit}')
+    pos=$(mpc -f '%position%~%file%' playlist | S=$STREAM awk -F'~' '$2 == ENVIRON["S"] {print $1; exit}')
     if [[ -z $pos ]]; then
-      mpc -q insert "$STREAM"
+      printf '%s\n' "$STREAM" | mpc -q insert
       cur=$(mpc -f '%position%' current)
       pos=$(( ${cur:-0} + 1 ))
       [[ -z $cur ]] && pos=$(mpc -f '%position%' playlist | tail -1)

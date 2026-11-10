@@ -1066,7 +1066,7 @@ bridge_stream() {  # BRIDGE TOKENFILE
 step_apple() {
   step "Apple Music"
   explain "For Omarock to play Apple Music, you'll need to have a bridge program running on a Mac signed into Apple Music. The bridge is an app built on your Mac with your own Apple Developer membership (apple-bridge/README.md). Clone omarock on the Mac and run ./install there. Its sound comes here as a stream. Both machines need to reach each other, over Tailscale, say. Nothing between them is encrypted: use a network you trust, or Tailscale."
-  local bridge="" stream="" h
+  local bridge="" stream="" h json
   if [[ -f $config/apple.json ]]; then
     bridge=$(jq -r '.bridge // empty' "$config/apple.json")
     stream=$(jq -r '.stream // empty' "$config/apple.json")
@@ -1110,8 +1110,11 @@ step_apple() {
     # Before 0.9.0 the bridge gives its stream to anyone; from 0.9.0 only with
     # the token, which comes next.
     stream=$(jq -r '.stream // empty' <<<"$h")
-    install -d "$config"
-    jq -n --arg b "$bridge" --arg s "$stream" '{bridge: $b} + (if $s == "" then {} else {stream: $s} end)' >"$config/apple.json"
+    # The stream's address goes to jq on stdin, never on its command line
+    # (which others on this machine can read): it may have a secret in it.
+    json=$(printf '%s' "$stream" \
+      | jq -n --arg b "$bridge" --rawfile s /dev/stdin '{bridge: $b} + (if $s == "" then {} else {stream: $s} end)') \
+      && printf '%s\n' "$json" | write_private "$config/apple.json"
     ok "wrote $config/apple.json"
   fi
   if [[ -n $h ]] && ! jq -e '.authorized' >/dev/null <<<"$h"; then
@@ -1156,7 +1159,8 @@ step_apple() {
   local now
   now=$(bridge_stream "$bridge" "$tokenfile")
   if [[ -n $now && $now != "$stream" ]]; then
-    jq --arg s "$now" '.stream = $s' "$config/apple.json" >"$config/apple.json.new" && mv "$config/apple.json.new" "$config/apple.json"
+    json=$(printf '%s' "$now" | jq --rawfile s /dev/stdin '.stream = $s' "$config/apple.json") \
+      && printf '%s\n' "$json" | write_private "$config/apple.json"
     ok "the bridge's stream: wrote it to $config/apple.json"
   elif [[ -z $now && -z $stream ]]; then
     bad "the bridge didn't say where its stream is"

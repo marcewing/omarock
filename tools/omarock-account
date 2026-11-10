@@ -61,10 +61,13 @@ bridge_url() {  # URL: the bridge's address, checked
   [[ $b =~ ^https?://[^/]+$ ]] || { echo "omarock-account: not a bridge's address: $1" >&2; exit 2; }
   printf '%s' "$b"
 }
-write_apple() {  # BRIDGE STREAM: apple.json
-  install -d "$config"
-  jq -n --arg b "$1" --arg s "$2" '{bridge: $b} + (if $s == "" then {} else {stream: $s} end)' >"$config/apple.json.new" \
-    && mv "$config/apple.json.new" "$config/apple.json"
+write_apple() {  # BRIDGE STREAM: apple.json, readable only by you
+  # The stream's address has a secret in it, so it goes to jq on stdin, never
+  # on its command line (which others on this machine can read).
+  local json
+  json=$(printf '%s' "${2//[$'\n\r']/}" \
+    | jq -n --arg b "$1" --rawfile s /dev/stdin '{bridge: $b} + (if $s == "" then {} else {stream: $s} end)') \
+    && printf '%s\n' "$json" | write_private "$config/apple.json"
 }
 
 case ${1:-} in

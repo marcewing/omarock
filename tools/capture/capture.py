@@ -28,6 +28,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -4017,6 +4018,20 @@ def outages_scenario(host, socket_path, failures):
     host.call("settings", "{}")
 
 
+def argv_logger(work, names):
+    """Stand-ins for the commands named, first on a PATH: each writes down its
+    command line, then runs the real one. Returns their folder and the log."""
+    folder, log = work / "argv-bin", work / "argv.log"
+    folder.mkdir(exist_ok=True)
+    log.write_text("")
+    for name in names:
+        real = shutil.which(name, path=f"{work / 'bin'}:/usr/bin:/bin")
+        (folder / name).write_text(f'#!/bin/sh\nfor a in "$0" "$@"; do printf "%s\\n" "$a"; done >>{shlex.quote(str(log))}\n'
+                                   f'exec {shlex.quote(real)} "$@"\n')
+        (folder / name).chmod(0o755)
+    return folder, log
+
+
 def apple_network_scenario(host, output, socket_path, failures):
     """Marc, 11-04: no Tailscale needed ("I'm OK with telling the user that
     stuff is sent in the clear ... or use tailscale"). Bridge 0.9.0 listens
@@ -4043,6 +4058,29 @@ def apple_network_scenario(host, output, socket_path, failures):
         check("stream" not in health(None) and "stream" not in health("wrong") and health("fake-bridge-token")["stream"] == new
               and health("fake-bridge-token", "studio-mac.local")["stream"] == f"http://studio-mac.local:{port}/omarock-{secret}.ogg",
               "the bridge's health gives the stream only with the token, at the address it was asked by", failures)
+
+        # Saved as the settings and the setup window save them (tools/omarock-
+        # account): the stream's address, secret and all, goes into an
+        # apple.json only you can read, and onto no command line, which others
+        # on this machine can read (the marketplace's review of 1.0.0).
+        work = home.parent
+        folder, log = argv_logger(work, ["jq", "curl", "awk", "sed", "tr", "cat", "head", "install", "mv", "chmod", "systemctl"])
+        env = dict(HOME=str(home), PATH=f"{folder}:{work / 'bin'}:/usr/bin:/bin", LANG="C.UTF-8")
+        tool = str(work / "plugin/tools/omarock-account")
+        BRIDGE["config"].write_text(json.dumps({"bridge": url}))
+        token = token_file.read_text().strip()
+        ran = [subprocess.run([tool, "bridge-token"], input=token + "\n", env=env, text=True, capture_output=True, timeout=30)]
+        after_token = json.loads(BRIDGE["config"].read_text())
+        BRIDGE["config"].unlink()
+        ran.append(subprocess.run([tool, "apple-bridge"], input=url + "\n", env=env, text=True, capture_output=True, timeout=30))
+        after_bridge = json.loads(BRIDGE["config"].read_text())
+        lines = log.read_text()
+        check(all(r.returncode == 0 for r in ran) and after_token == after_bridge == {"bridge": url, "stream": new}
+              and BRIDGE["config"].stat().st_mode & 0o777 == 0o600 and "/argv-bin/jq\n" in lines and "/argv-bin/curl\n" in lines
+              and secret not in lines and token not in lines,
+              "saving the bridge's settings: the stream in an apple.json only you can read, the stream and token on no command line: "
+              + repr([(r.returncode, r.stderr) for r in ran]) + " " + repr(after_bridge) + " "
+              + oct(BRIDGE["config"].stat().st_mode & 0o777) + (" secret on a command line" if secret in lines else ""), failures)
 
         # Installed before 0.9.0: apple.json has the old address, and so has mpd's queue.
         BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": old}))
