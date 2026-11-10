@@ -3864,9 +3864,21 @@ Panel {
     printErrors: false
     onLoaded: {
       try { root.appleConfig = JSON.parse(text()) || {} } catch (e) { root.appleConfig = {} }
+      // The stream's address has a secret in it, and 1.0.0 wrote this file
+      // readable by others: make it yours alone, once for each version of it.
+      if (root.appleConfig.stream && text() !== appleConfigPrivate.made) {
+        appleConfigPrivate.made = text()
+        appleConfigPrivate.running = true
+      }
     }
     onLoadFailed: root.appleConfig = {}
     onFileChanged: reload()
+  }
+
+  Process {
+    id: appleConfigPrivate
+    property string made: ""
+    command: ["chmod", "go=", appleConfigFile.path]
   }
 
   RadioClient {

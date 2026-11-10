@@ -4081,6 +4081,15 @@ def apple_network_scenario(host, output, socket_path, failures):
               "saving the bridge's settings: the stream in an apple.json only you can read, the stream and token on no command line: "
               + repr([(r.returncode, r.stderr) for r in ran]) + " " + repr(after_bridge) + " "
               + oct(BRIDGE["config"].stat().st_mode & 0o777) + (" secret on a command line" if secret in lines else ""), failures)
+        # One 1.0.0 wrote, readable by others: the panel makes it yours alone.
+        BRIDGE["config"].chmod(0o644)
+        BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": new}, indent=1))
+        try:
+            wait_for(lambda: BRIDGE["config"].stat().st_mode & 0o777 == 0o600, "apple.json private", timeout=5)
+            check(True, "an apple.json readable by others (1.0.0's) is made private by the panel", failures)
+        except RuntimeError:
+            check(False, "an apple.json readable by others (1.0.0's) is made private by the panel: "
+                  + oct(BRIDGE["config"].stat().st_mode & 0o777), failures)
 
         # Installed before 0.9.0: apple.json has the old address, and so has mpd's queue.
         BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": old}))
