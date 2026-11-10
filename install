@@ -633,13 +633,16 @@ step_mpd() {
   # Other clients look for mpd on TCP unless MPD_HOST says where it is.
   local envd=${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/omarock-mpd.conf
   if ! mpd_on_tcp "$conf" && [[ ! -f $envd ]] && ! systemctl --user show-environment 2>/dev/null | grep -q '^MPD_HOST='; then
-    explain "Other mpd clients (mpc, ncmpcpp, rmpc and the like) look for mpd on TCP unless MPD_HOST says where it is. A line in $envd sets it for everything you start, from your next login."
+    explain "Other mpd clients (mpc, ncmpcpp, rmpc and the like) look for mpd on TCP unless MPD_HOST says where it is. A line in $envd sets it for everything you start (and Hyprland gets it now, for what it starts until you next log in)."
     if confirm "Point mpd clients at the socket?"; then
       install -d "$(dirname "$envd")"
       printf '# omarock: mpd clients find mpd on its socket\nMPD_HOST=%s\n' "$mpd_socket" >"$envd"
       ok "wrote $envd"
       run systemctl --user set-environment "MPD_HOST=$mpd_socket"
-      note "until you next log in, in a terminal: export MPD_HOST=$mpd_socket"
+      # Apps get their environment from Hyprland, which read it at login.
+      [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] \
+        && hyprctl eval "hl.env(\"MPD_HOST\", \"${mpd_socket//\"/\\\"}\")" >/dev/null 2>&1
+      note "a terminal already open doesn't have it: export MPD_HOST=$mpd_socket there"
     fi
   fi
 
@@ -1023,7 +1026,7 @@ step_spotify() {
   if private_ok "$config/soloist-key"; then
     ok "the Soloist key: $config/soloist-key"
   else
-    explain "Next we need the Soloist key, from the same dashboard. It goes into $config/soloist-key."
+    explain "Next we need the Soloist key, from the same dashboard. It goes into $config/soloist-key, readable only by you. Soloist takes it only on its command line, though, so while Soloist runs, other accounts on this machine can see it (with ps)."
     local key
     key=$(secret "The Soloist key (Blank to stop here):") || exit 1
     [[ -z $key ]] && return 1

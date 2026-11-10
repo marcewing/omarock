@@ -194,6 +194,9 @@ terminal):
 MPD_HOST=/run/user/1000/mpd/socket
 ```
 
+A client set to `localhost:6600` in its own settings needs the socket's path
+there instead. (Plattenalbum's automatic connection finds the socket by itself.)
+
 mpd scans your music the first time it starts. After you add music later, run
 `mpc update`.
 

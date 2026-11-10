@@ -35,10 +35,21 @@ for u in omarock-soloist omarock-spotify; do
 done
 systemctl --user daemon-reload
 echo "omarock's Spotify units installed from ${commit:0:7}"
+# Soloist's folders hold its Spotify sign-in: yours alone, as what it writes
+# from now on is (its unit's UMask). Earlier versions left them readable.
+private_soloist() {
+  local d
+  for d in "$HOME/.local/share/omarock-soloist" "$HOME/.cache/omarock-soloist"; do
+    if [[ -d $d ]]; then chmod -R go= "$d"; fi
+  done
+}
+private_soloist
 if $start; then
   systemctl --user enable omarock-soloist omarock-spotify
   # Restarting Soloist cuts off what it plays: only when its unit changed.
   if $soloist_changed; then systemctl --user restart omarock-soloist; else systemctl --user start omarock-soloist; fi
+  # Again: an older Soloist can still write as it stops.
+  private_soloist
   systemctl --user restart omarock-spotify
   systemctl --user --no-pager --lines=0 status omarock-soloist omarock-spotify | grep -E "^●|Active:"
 fi

@@ -121,6 +121,8 @@ By hand, run the tools from your omarock clone: the plugin's folder,
 - `~/.config/omarock/soloist-key` and `~/.config/omarock/spotify-token.json` hold
   your key and your sign-in. Keep them private (mode 600), and don't paste them
   anywhere. If one leaks, make a new key in the dashboard, or sign in again.
+  Soloist keeps its own sign-in in `~/.local/share/omarock-soloist` and
+  `~/.cache/omarock-soloist`, which are yours alone too.
 - Soloist takes its key only on its command line (`--api-key`), so while it runs,
   another user on this machine can read it with `ps`. On a machine of your own
   that's no one; on a shared one, bear it in mind.

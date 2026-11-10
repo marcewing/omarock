@@ -12,6 +12,8 @@
 # It waits for the network first: Soloist tries to log in once, at start, and a
 # session started before the network (a boot) stayed logged out. A user unit
 # can't wait for network-online.target, which is the system's.
+# Its folders hold its Spotify sign-in, so what it writes is yours alone
+# (UMask); tools/install-spotify makes what's already there the same.
 [Unit]
 Description=Spotify's Soloist for omarock (a Spotify Connect speaker)
 After=pipewire.service omarock-bus.service
@@ -22,6 +24,7 @@ ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { ec
 Restart=on-failure
 RestartSec=5
 RestartPreventExitStatus=10 78
+UMask=0077
 
 [Install]
 WantedBy=default.target
