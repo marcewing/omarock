@@ -225,7 +225,7 @@ Item {
     if (writer.running || root.writes.length === 0) return
     var write = root.writes[0]
     root.writes = root.writes.slice(1)
-    writer.command = ["sh", "-c", 'mkdir -p "$1" && printf "%s" "$3" > "$1/$2.new" && mv "$1/$2.new" "$1/$2"',
+    writer.command = ["sh", "-c", 'umask 077; mkdir -p "$1" && printf "%s" "$3" > "$1/$2.new" && mv "$1/$2.new" "$1/$2"',
       "sh", root.cacheDir, write[0], write[1]]
     writer.running = true
   }

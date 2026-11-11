@@ -15,6 +15,8 @@
 # INSTALLED (the commit). ~/.config/pipewire/client.conf.d/50-omarock-players.conf
 # and the two units in ~/.config/systemd/user/.
 set -euo pipefail
+# What it writes is yours alone: folders 700, files 600.
+umask 077
 start=false
 output=""
 while [[ ${1:-} == --* ]]; do
@@ -38,7 +40,7 @@ fi
 if ! pactl list sinks short 2>/dev/null | awk '{print $2}' | grep -qx -- "$output"; then
   echo "note: $output isn't connected now; the bus will wait for it, silent" >&2
 fi
-install -d "$(dirname "$saved")"
+install -d -m 700 "$(dirname "$saved")"
 echo "$output" > "$saved"
 repo=$(cd "$(dirname "$0")/.." && pwd)
 commit=$(git -C "$repo" rev-parse --verify "${1:-HEAD}^{commit}")
@@ -48,7 +50,8 @@ fi
 dest=$HOME/.local/share/omarock/audio
 units=$HOME/.config/systemd/user
 client=$HOME/.config/pipewire/client.conf.d
-install -d "$dest" "$units" "$client"
+install -d "$units" "$client"
+install -d -m 700 "$(dirname "$dest")" "$dest"
 show() { git -C "$repo" show "$commit:audio/$1"; }
 show omarock-bus.conf | sed "s|@OUTPUT@|$output|" > "$dest/omarock-bus.conf.new"
 if grep -q "@OUTPUT@" "$dest/omarock-bus.conf.new" || ! grep -q "target.object = \"$output\"" "$dest/omarock-bus.conf.new"; then

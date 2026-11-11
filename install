@@ -370,12 +370,63 @@ backup() {  # FILE: a copy beside it, once a run
   backed_up+="|$1|"
 }
 
-# Into a file only you can read, from stdin.
+# Into a file only you can read, from stdin, in a folder only you can open.
 write_private() {
-  install -d "$(dirname "$1")"
+  install -d -m 700 "$(dirname "$1")"
   (umask 077 && cat >"$1.new") && chmod 600 "$1.new" && mv "$1.new" "$1"
 }
 private_ok() { [[ -s $1 && $(stat -c %a "$1") == 600 ]]; }
+# DIR...: those there in which something is open to other accounts.
+open_to_others() {
+  local d
+  for d; do [[ -d $d && -n $(find "$d" -perm /077 ! -type l -print -quit 2>/dev/null) ]] && printf '%s\n' "$d"; done
+}
+# omarock's own folders: its settings, keys and sign-ins, what you've played,
+# the services and programs it installed, its caches.
+own_dirs() {
+  local cache=${XDG_CACHE_HOME:-$HOME/.cache}
+  printf '%s\n' "$config" "$share" "$state_dir" "$cache/omarock" "$HOME/.local/lib/omarock-mpris" \
+    "$HOME/.local/lib/omarock-soloist" "$HOME/.local/share/omarock-soloist" "$cache/omarock-soloist"
+}
+# ... are yours alone: folders 700, files 600 (programs 700), whatever an
+# older omarock left.
+own_private() {
+  local all open
+  mapfile -t all < <(own_dirs)
+  mapfile -t open < <(open_to_others "${all[@]}")
+  ((${#open[@]})) || return 0
+  run chmod -R go= "${open[@]}" && ok "omarock's files are yours alone now"
+}
+# The folders mpd keeps its files in: its config's, and those mpd.conf names
+# for its playlists, database, state and stickers. Only in your home, and
+# never your music or a folder that holds it.
+mpd_dirs() {  # CONF
+  local key p music
+  music=$(conf_value "$1" music_directory)
+  music=${music/#\~/$HOME}
+  {
+    dirname "$1"
+    for key in playlist_directory db_file state_file sticker_file; do
+      p=$(conf_value "$1" "$key")
+      [[ -n $p ]] || continue
+      p=${p/#\~/$HOME}
+      if [[ $key == playlist_directory ]]; then echo "$p"; else dirname "$p"; fi
+    done
+  } | sort -u | while IFS= read -r p; do
+    [[ $p == "$HOME"/* ]] || continue
+    [[ -n $music && ($music == "$p" || $music == "$p"/*) ]] && continue
+    [[ -n ${kept:-} && $p == "$kept"/* ]] && continue  # in the folder before it
+    echo "$p"
+    kept=$p
+  done
+}
+# mpd's umask, as its unit sets it, or as the running mpd has it.
+mpd_umask() { systemctl --user show mpd -p UMask --value 2>/dev/null; }
+mpd_running_umask() {
+  local pid
+  pid=$(systemctl --user show mpd -p MainPID --value 2>/dev/null)
+  [[ ${pid:-0} != 0 ]] && awk '/^Umask:/ {print $2}' "/proc/$pid/status" 2>/dev/null
+}
 
 # A service from this clone is installed, and as this clone has it? Only the
 # files the tools/install-* scripts install count (as tools/omarock-sources).
@@ -564,7 +615,7 @@ step_mpd() {
     confirm "Make these changes?" || { bad "omarock needs mpd's socket and playlists."; stopped; }
     if ((${#lines[@]})); then
       backup "$conf"
-      install -d "$(dirname "$conf")"
+      mkdir -p -m 700 "$(dirname "$conf")"
       { [[ -s $conf ]] && echo; printf '%s\n' "${lines[@]}"; } >>"$conf"
       ok "wrote $conf"
       changed=true
@@ -602,7 +653,48 @@ step_mpd() {
     changed=true
   fi
   active mpd.socket && note "mpd.socket also opens TCP port 6600, on every network interface. For the socket alone: systemctl --user disable --now mpd.socket, then ./install again."
-  mkdir -p ~/.local/share/mpd/playlists ~/.local/state/mpd
+
+  # mpd's files: it writes them with your umask, for every account here to
+  # read, and a playlist saved from the queue while Apple Music plays holds the
+  # private address of the Mac's stream. A drop-in gives mpd a umask of its
+  # own, and its folders become yours alone.
+  local mask need_mask=false mdirs=() open_mpd=()
+  mask=$(mpd_umask)
+  [[ -n $mask ]] && (((8#$mask & 8#077) != 8#077)) && need_mask=true
+  mapfile -t mdirs < <(mpd_dirs "$conf")
+  mapfile -t open_mpd < <(open_to_others "${mdirs[@]}")
+  if $need_mask || ((${#open_mpd[@]})); then
+    local why="A playlist saved from the queue while Apple Music plays holds the private address of the Mac's stream."
+    if $need_mask; then
+      explain "mpd writes its playlists, database and state for every account on this machine to read. $why A drop-in ($dropin_dir/private.conf) has mpd write them for you alone."
+      ((${#open_mpd[@]})) && explain "Its folders become yours alone too (700, and what's in them 600):"
+    else
+      explain "Every account on this machine can read these folders of mpd's. $why They become yours alone (700, and what's in them 600):"
+    fi
+    ((${#open_mpd[@]})) && listing "${open_mpd[@]}"
+    if confirm "Keep mpd's files private?"; then
+      if $need_mask; then
+        install -d "$dropin_dir"
+        printf '# omarock: mpd'"'"'s playlists, database and state are yours alone\n[Service]\nUMask=0077\n' >"$dropin_dir/private.conf"
+        ok "wrote $dropin_dir/private.conf"
+        run systemctl --user daemon-reload
+        changed=true
+      fi
+      if ((${#open_mpd[@]})); then run chmod -R go= "${open_mpd[@]}" && ok "mpd's files are yours alone"; fi
+    else
+      note "mpd's files stay readable by every account here"
+    fi
+  fi
+  # The drop-in there, and mpd still running from before it (a run that
+  # stopped short of the restart): the restart below gives mpd its umask.
+  if ! $changed && ! $need_mask && active mpd; then
+    mask=$(mpd_running_umask)
+    if [[ -n $mask && $mask != "$(mpd_umask)" ]]; then
+      note "mpd still writes its files for every account, from before: a restart ends that"
+      changed=true
+    fi
+  fi
+  mkdir -p -m 700 ~/.local/share/mpd && mkdir -p -m 700 ~/.local/share/mpd/playlists ~/.local/state/mpd
 
   # Running, and answering on the socket.
   if active mpd.socket && ! active mpd; then
@@ -744,7 +836,7 @@ step_plugin() {
   explain "omarock is added from $src, as Omarchy adds any plugin. Later, omarchy plugin update $plugin_id updates it."
   # omarock's own folder, before omarock loads: it watches the files there,
   # and can't watch a folder that doesn't exist yet.
-  install -d "$config"
+  install -d -m 700 "$config"
   t0=$(date +%s)
   if [[ -z $answers ]]; then
     # Omarchy's own questions: its warning that plugins run unsandboxed (so
@@ -983,11 +1075,11 @@ cleanup_firewall() {
 # runs, then done, stopped (Ctrl-C, the terminal closed) or failed.
 record() {  # RESULT [EXIT CODE]
   [[ -n $flow ]] || return 0
-  install -d "$state_dir"
-  jq -n --arg piece "$flow" --arg action "$action" --arg result "$1" --argjson code "${2:-0}" \
+  local json
+  json=$(jq -n --arg piece "$flow" --arg action "$action" --arg result "$1" --argjson code "${2:-0}" \
     --argjson at "$(date +%s)" --argjson pid $$ \
-    '{piece: $piece, action: $action, result: $result, code: $code, at: $at, pid: $pid}' \
-    >"$state_dir/setup.json.new" && mv "$state_dir/setup.json.new" "$state_dir/setup.json"
+    '{piece: $piece, action: $action, result: $result, code: $code, at: $at, pid: $pid}') \
+    && write_private "$state_dir/setup.json" <<<"$json"
 }
 # However the installer ends (done, stopped, Ctrl-C during a command, the
 # terminal closed), the pairing's firewall rules come out again, and
@@ -1019,8 +1111,7 @@ step_spotify() {
       [[ $id =~ ^[0-9a-fA-F]{32}$ ]] && break
       bad "A Client ID is 32 letters and digits."
     done
-    install -d "$config"
-    jq -n --arg id "$id" '{clientId: $id, redirectUri: "http://127.0.0.1:8730/callback"}' >"$config/spotify.json"
+    jq -n --arg id "$id" '{clientId: $id, redirectUri: "http://127.0.0.1:8730/callback"}' | write_private "$config/spotify.json"
     ok "wrote $config/spotify.json"
   fi
   if private_ok "$config/soloist-key"; then
@@ -1313,22 +1404,21 @@ step_apple() {
 # ---- Last: the switches ----
 
 set_setting() {  # KEY JSON: one of omarock's settings, into its settings file
-  local now file=$config/settings.json
+  local now json file=$config/settings.json
   now=$(setting "$1" "")
   [[ $now == "$(jq -r 'if type == "string" then . else tostring end' <<<"$2")" ]] && return 0
-  install -d "$config"
-  { jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$file" 2>/dev/null || jq -n --arg k "$1" --argjson v "$2" '{($k): $v}'; } \
-    >"$file.new" && mv "$file.new" "$file"
+  json=$(jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$file" 2>/dev/null || jq -n --arg k "$1" --argjson v "$2" '{($k): $v}') \
+    && write_private "$file" <<<"$json"
   printf '  %s%s: %s%s\n' "$dim" "$1" "$(jq -r . <<<"$2")" "$reset"
   printed
 }
 
 unset_setting() {  # KEY...: out of omarock's settings file, back to their defaults
-  local file=$config/settings.json k
+  local file=$config/settings.json k json
   [[ -f $file ]] || return 0
   for k; do
     jq -e --arg k "$k" 'has($k)' "$file" >/dev/null 2>&1 || continue
-    jq --arg k "$k" 'del(.[$k])' "$file" >"$file.new" && mv "$file.new" "$file"
+    json=$(jq --arg k "$k" 'del(.[$k])' "$file") && write_private "$file" <<<"$json"
     printf '  %s%s: back to its default%s\n' "$dim" "$k" "$reset"
     printed
   done
@@ -1384,6 +1474,7 @@ setup_local() {
   step_key
   step_radio
   save_pending
+  own_private
   printf '\n%sReady%s\n' "$bold" "$reset"
   explain "Click omarock in the bar (a boombox until something plays)$(key_set && echo ", or press Super+Ctrl+M"). Press ? there for the keys."
   explain "For Spotify, SiriusXM or Apple Music: omarock's settings (press , in the panel) set each one up."
@@ -1406,6 +1497,7 @@ setup_piece() {
   key=$(piece_switch "$piece")
   [[ -n $key ]] && pending[$key]=true
   save_pending
+  own_private
   gap
   if [[ -n $key ]]; then
     printf '%s%s is enabled in omarock.%s\n' "$bold" "$single" "$reset"
@@ -1739,7 +1831,7 @@ un_mpd() {
   local conf gone dropins=() f envd=${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/omarock-mpd.conf
   conf=$(mpd_conf)
   gone=$([[ -f $conf ]] && mpd_socket_undo "$conf" show)
-  for f in "$units/mpd.service.d/runtime-dir.conf" "$units/mpd.service.d/restart.conf" \
+  for f in "$units/mpd.service.d/runtime-dir.conf" "$units/mpd.service.d/restart.conf" "$units/mpd.service.d/private.conf" \
            "$units/mpd-mpris.service.d/follow-mpd.conf" "$units/mpd-mpris.service.d/mpd-socket.conf" "$envd"; do
     head -1 "$f" 2>/dev/null | grep -q '^# omarock:' && dropins+=("$f")
   done
@@ -1747,7 +1839,7 @@ un_mpd() {
   step "omarock's changes to mpd"
   explain "omarock also set mpd up for itself. Other mpd clients can use these too, so they stay unless you say otherwise."
   if [[ -n $gone ]]; then explain "In $conf, mpd's unix socket (and any TCP address it turned off, back on):"; sed 's/^/    /' <<<"$gone"; fi
-  if ((${#dropins[@]})); then explain "Drop-ins (the socket's folder, mpd coming back after a crash, mpd-mpris following mpd and finding it on the socket), and MPD_HOST for other clients:"; listing "${dropins[@]}"; fi
+  if ((${#dropins[@]})); then explain "Drop-ins (the socket's folder, mpd coming back after a crash, mpd writing its files for you alone, mpd-mpris following mpd and finding it on the socket), and MPD_HOST for other clients:"; listing "${dropins[@]}"; fi
   confirm "Take these out too, and restart mpd?" no || { ok "kept them"; return 0; }
   if [[ -n $gone ]]; then
     backup "$conf"

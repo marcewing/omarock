@@ -12,6 +12,8 @@
 # ~/.config/systemd/user/, and creates ~/.config/omarock/siriusxm.json (mode
 # 600) for the account if it isn't there. It never prints the account.
 set -euo pipefail
+# What it writes is yours alone: folders 700, files 600.
+umask 077
 start=false
 [[ ${1:-} == --start ]] && { start=true; shift; }
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -31,7 +33,8 @@ fi
 # The commit's pinned packages, each checked against its hash (tools/pin-sxm).
 "$venv/bin/pip" install --quiet --disable-pip-version-check --require-hashes \
   -r <(git -C "$repo" show "$commit:sxm/requirements.txt")
-install -d "$dest" "$units" "$(dirname "$config")"
+install -d "$units"
+install -d -m 700 "$share" "$dest" "$(dirname "$config")"
 git -C "$repo" show "$commit:sxm/omarock-sxm.py" > "$dest/omarock-sxm.py.new" && mv "$dest/omarock-sxm.py.new" "$dest/omarock-sxm.py"
 git -C "$repo" show "$commit:sxm/omarock-sxm.service" > "$units/omarock-sxm.service"
 echo "$commit" > "$dest/INSTALLED"
@@ -42,6 +45,8 @@ if [[ ! -e $config ]]; then
 fi
 chmod 600 "$config"
 systemctl --user daemon-reload
+# pip gives what it installs modes of its own (755, 711): yours alone too.
+chmod -R go= "$venv" "$dest"
 echo "omarock-sxm installed from ${commit:0:7}"
 if $start; then
   systemctl --user enable omarock-sxm

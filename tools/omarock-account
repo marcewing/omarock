@@ -36,7 +36,7 @@ config=$HOME/.config/omarock
 sxm=$config/siriusxm.json
 
 write_private() {  # FILE: stdin into FILE, mode 600, all at once
-  install -d "$config"
+  install -d -m 700 "$config"
   (umask 077 && cat >"$1.new") && chmod 600 "$1.new" && mv "$1.new" "$1"
 }
 value() {  # the one line on stdin, without its newline

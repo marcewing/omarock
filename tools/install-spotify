@@ -9,6 +9,8 @@
 # It installs omarock-spotify's Python files into ~/.local/share/omarock/spotify/
 # and both units into ~/.config/systemd/user/.
 set -euo pipefail
+# What it writes is yours alone: folders 700, files 600.
+umask 077
 start=false
 [[ ${1:-} == --start ]] && { start=true; shift; }
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,7 +20,8 @@ if ! git -C "$repo" diff --quiet "$commit" -- spotify/; then
 fi
 units=$HOME/.config/systemd/user
 dest=$HOME/.local/share/omarock/spotify
-install -d "$units" "$dest"
+install -d "$units"
+install -d -m 700 "$(dirname "$dest")" "$dest"
 for f in omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py; do
   git -C "$repo" show "$commit:spotify/$f" > "$dest/$f.new" && mv "$dest/$f.new" "$dest/$f"
 done

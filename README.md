@@ -160,11 +160,26 @@ sticker_file        "~/.local/share/mpd/sticker.sql"
 restore_paused      "yes"
 ```
 
-and make the folders: `mkdir -p ~/.local/share/mpd/playlists ~/.local/state/mpd`.
+and make the folders, yours alone:
+`mkdir -p -m 700 ~/.local/share/mpd ~/.local/share/mpd/playlists ~/.local/state/mpd`.
 Without `playlist_directory`, mpd turns stored playlists off, and omarock's
 playlists and radio favorites with them. `restore_paused` makes mpd start
 paused, at login or after a crash, rather than playing on from its last saved
 state, which can be minutes old.
+
+mpd writes its playlists, database and state with your umask, for every account
+on this machine to read, and a playlist saved from the queue while Apple Music
+plays holds the private address of the Mac's stream. A drop-in has mpd write
+them for you alone:
+
+```ini
+# ~/.config/systemd/user/mpd.service.d/private.conf
+[Service]
+UMask=0077
+```
+
+and `chmod -R go= ~/.config/mpd ~/.local/share/mpd ~/.local/state/mpd` makes
+what's there yours alone too.
 
 omarock talks to mpd over a unix socket, and mpd should listen only there. mpd
 has no logins, so whoever can reach a TCP port of mpd's can read the queue (with

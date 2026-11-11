@@ -140,7 +140,7 @@ Item {
     }
     root.titleVotes = all
     if (root.cacheDir === "") return
-    titlesWriter.command = ["sh", "-c", 'mkdir -p "$1" && printf "%s" "$2" > "$1/radio-titles.json.new.$$" && mv "$1/radio-titles.json.new.$$" "$1/radio-titles.json"',
+    titlesWriter.command = ["sh", "-c", 'umask 077; mkdir -p "$1" && printf "%s" "$2" > "$1/radio-titles.json.new.$$" && mv "$1/radio-titles.json.new.$$" "$1/radio-titles.json"',
       "sh", root.cacheDir, JSON.stringify(all)]
     titlesWriter.running = true
   }
@@ -394,7 +394,7 @@ Item {
     })
     root.cached = { text: root.areaText.trim(), legacy: root.legacyArea, zone: root.timeZone, area: root.area, stations: stations,
       made: root.localMade }
-    cacheWriter.command = ["sh", "-c", 'mkdir -p "$1" && printf "%s" "$2" > "$1/radio-local.json.new" && mv "$1/radio-local.json.new" "$1/radio-local.json"',
+    cacheWriter.command = ["sh", "-c", 'umask 077; mkdir -p "$1" && printf "%s" "$2" > "$1/radio-local.json.new" && mv "$1/radio-local.json.new" "$1/radio-local.json"',
       "sh", root.cacheDir, JSON.stringify(root.cached)]
     cacheWriter.running = true
   }

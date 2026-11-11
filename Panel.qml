@@ -1030,6 +1030,7 @@ Panel {
   Component.onCompleted: {
     console.info("omarock " + root.version + " loaded")
     root.readSources()
+    ownPrivate.running = true
   }
   // Which panel keeps the queue to Time Machine's year (Keeper.js).
   readonly property string keeperId: Math.random().toString(36).slice(2)
@@ -3239,7 +3240,7 @@ Panel {
   function writeSettings() {
     if (!root.settingsUnsaved || settingWriter.running) return
     root.settingsUnsaved = false
-    settingWriter.command = ["sh", "-c", 'mkdir -p "$1" && printf "%s" "$2" > "$1/settings.json.new" && mv "$1/settings.json.new" "$1/settings.json"',
+    settingWriter.command = ["sh", "-c", 'umask 077; mkdir -p "$1" && printf "%s" "$2" > "$1/settings.json.new" && mv "$1/settings.json.new" "$1/settings.json"',
       "sh", root.configDir, JSON.stringify(root.fileSettings, null, 2) + "\n"]
     settingWriter.running = true
   }
@@ -3879,6 +3880,19 @@ Panel {
     id: appleConfigPrivate
     property string made: ""
     command: ["chmod", "go=", appleConfigFile.path]
+  }
+
+  // omarock's own folders are yours alone (700, and what's in them 600),
+  // whatever an older omarock or a tool run by hand left: its settings, keys
+  // and sign-ins, what you've played, the services and programs it installed,
+  // its caches. Once, as the panel loads.
+  Process {
+    id: ownPrivate
+    readonly property string home: Quickshell.env("HOME")
+    command: ["sh", "-c", 'for d; do [ -d "$d" ] && [ -n "$(find "$d" -perm /077 ! -type l -print -quit 2>/dev/null)" ] && chmod -R go= "$d"; done; exit 0',
+      "sh", root.configDir, home + "/.local/share/omarock", home + "/.local/state/omarock", home + "/.cache/omarock",
+      home + "/.local/lib/omarock-mpris", home + "/.local/lib/omarock-soloist",
+      home + "/.local/share/omarock-soloist", home + "/.cache/omarock-soloist"]
   }
 
   RadioClient {

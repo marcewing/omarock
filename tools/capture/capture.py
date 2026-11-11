@@ -315,6 +315,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     sources_switch_scenario(host, socket_path, failures)
     fresh_start_scenario(host, socket_path, failures)
     late_config_scenario(host, failures)
+    private_files_scenario(host, failures)
     teardown_scenario(host, socket_path, failures)
 
 
@@ -6103,6 +6104,60 @@ def late_config_scenario(host, failures):
     BRIDGE["config"].unlink()
 
 
+def private_files_scenario(host, failures):
+    """omarock's own folders are yours alone (the marketplace's review of
+    1.0.2, and Marc: "Might as well make everything 700 or 600"). Folders an
+    older omarock left open (755, files 644) are made private as the panel
+    loads, and what the panel writes is written private."""
+    home = BRIDGE["config"].parents[2]
+    dirs = [home / ".config/omarock", home / ".local/share/omarock", home / ".local/state/omarock", home / ".cache/omarock"]
+    def opened():
+        """Paths in omarock's folders that others can read or enter."""
+        found = []
+        for d in dirs:
+            for path in [d, *d.rglob("*")]:
+                if not path.is_symlink() and path.exists() and path.stat().st_mode & 0o077:
+                    found.append(f"{oct(path.stat().st_mode & 0o777)} {path.relative_to(home)}")
+        return found
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+        d.chmod(0o755)
+        (d / "from-an-older-omarock.json").write_text("{}\n")
+        (d / "from-an-older-omarock.json").chmod(0o644)
+    (dirs[1] / "spotify").mkdir(exist_ok=True)
+    (dirs[1] / "spotify").chmod(0o755)
+    check(len(opened()) >= 9, "the test's folders start open to others, as 1.0.2 left them: " + repr(opened()), failures)
+    host.call("reload")
+    wait_for(lambda: host.call("state", quiet=True) != "", "the widget again")
+    try:
+        wait_for(lambda: not opened(), "omarock's folders private", timeout=10)
+    except RuntimeError:
+        pass
+    check(not opened(), "as omarock loads, its folders become yours alone (700, files 600): " + repr(opened()), failures)
+    for d in dirs:
+        (d / "from-an-older-omarock.json").unlink()
+    # A setting saved: settings.json written anew, yours alone.
+    settings = dirs[0] / "settings.json"
+    settings.unlink(missing_ok=True)
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"], "the settings open")
+    settings_cursor_to(host, "closeOnLeave")
+    was = host.state()["settingValues"]["closeOnLeave"]
+    host.call("press", "Space")
+    wait_for(lambda: settings.exists() and json.loads(settings.read_text() or "{}").get("closeOnLeave") == (not was),
+             "the setting saved")
+    host.call("press", "Space")
+    wait_for(lambda: json.loads(settings.read_text() or "{}").get("closeOnLeave") == was, "the setting back")
+    check(settings.stat().st_mode & 0o777 == 0o600, "a setting saved: settings.json is yours alone: "
+          + oct(settings.stat().st_mode & 0o777), failures)
+    host.call("press", "Escape")
+    wait_for(lambda: not host.state()["settingsOpen"], "the settings close")
+    host.call("close")
+    check(not opened(), "nothing the panel wrote is open to others: " + repr(opened()), failures)
+
+
 def fresh_start_scenario(host, socket_path, failures):
     """Each time another plugin reloaded (the shell reloads them all), the bar
     showed only the music note until the panel was opened, while SiriusXM
@@ -6613,6 +6668,7 @@ def main():
                             elif name == "teardown": teardown_scenario(host, socket_path, failures)
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
                             elif name == "late-config": late_config_scenario(host, failures)
+                            elif name == "private-files": private_files_scenario(host, failures)
                             elif name == "sources-switch": sources_switch_scenario(host, socket_path, failures)
                             elif name == "settings": settings_scenario(host, output, failures)
                             elif name == "setup": setup_scenario(host, output, failures)

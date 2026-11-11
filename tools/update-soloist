@@ -5,6 +5,8 @@
 # with 10), so run this at least every couple of months. Spotify's terms: the
 # archive and binary aren't redistributed; this fetches it from Spotify.
 set -euo pipefail
+# What it writes is yours alone: folders 700, files 600.
+umask 077
 dest=$HOME/.local/lib/omarock-soloist
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -20,8 +22,8 @@ if [[ $new == "$old" ]]; then
   echo "up to date"
   exit 0
 fi
-install -d "$dest"
-install -m 755 "$work/x/soloist" "$dest/soloist.new" && mv "$dest/soloist.new" "$dest/soloist"
+install -d -m 700 "$dest"
+install -m 700 "$work/x/soloist" "$dest/soloist.new" && mv "$dest/soloist.new" "$dest/soloist"
 cp "$work/x/CHANGELOG.md" "$work/x/THIRD_PARTY_LICENSES.txt" "$dest/"
 if systemctl --user is-active --quiet omarock-soloist; then
   systemctl --user restart omarock-soloist

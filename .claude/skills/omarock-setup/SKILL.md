@@ -79,6 +79,13 @@ below.
   setting may be simpler than changing mpd.
 - **The media keys** need `mpd-mpris` running, with README.md's `follow-mpd.conf`
   drop-in: without it, mpd-mpris dies the first time mpd restarts and stays down.
+- **mpd's files, private.** mpd writes its playlists, database and state with the
+  user's umask, readable by every account, and a playlist saved from the queue
+  while Apple Music plays holds the stream's private address. `./install` offers a
+  `mpd.service.d/private.conf` drop-in (`UMask=0077`, then a restart of mpd) and
+  makes mpd's folders 700 (README.md, Install by hand). omarock's own folders
+  (`~/.config/omarock` and the rest) are 700 too: the installer and the panel see
+  to it.
 - **A crash:** mpd's own unit has `Restart=no`, so a crashed mpd stays down.
   `./install` offers a drop-in, `mpd.service.d/restart.conf` (`Restart=on-failure`,
   `RestartSec=2`). With `restore_paused "yes"` in mpd.conf it comes back paused,

@@ -16,6 +16,12 @@ private_file() {  # FILE WHAT [WHERE IT COMES FROM]: present and mode 600?
   if [[ $mode != 600 ]]; then bad "$2: $1 is mode $mode (chmod 600 it)"; return 1; fi
   ok "$2: $1 (mode 600)"
 }
+# DIR...: those there in which something is open to other accounts.
+open_to_others() {
+  local d
+  for d; do [[ -d $d && -n $(find "$d" -perm /077 ! -type l -print -quit 2>/dev/null) ]] && printf '%s\n' "${d/#"$HOME"/\~}"; done
+}
+conf_value() { grep -E "^[[:space:]]*$2[[:space:]]" "$1" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*[a-z_]+[[:space:]]+"?([^"]*)"?.*/\1/'; }
 # X-Omarock: omarock's own services answer only requests that carry it.
 health() { curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
 
@@ -69,14 +75,14 @@ if [[ -S $sock ]]; then
 else
   bad "no mpd socket at $sock: README.md, Install, 1. mpd"
 fi
+conf=${XDG_CONFIG_HOME:-$HOME/.config}/mpd/mpd.conf
+for f in "$conf" "$HOME/.mpdconf" "$HOME/.mpd/mpd.conf"; do [[ -f $f ]] && { conf=$f; break; }; done
 # mpd has no logins: on TCP, every account here can read its queue (with
 # Apple Music, the private address of the Mac's stream) and change it.
 tcp=$(ss -ltnpH 2>/dev/null | awk '/"mpd"/ {print $4}' | sort -u | paste -sd' ' -)
 if active mpd.socket; then
   note "mpd.socket opens TCP port 6600 on every network interface, where every account here, and your network, can reach mpd: systemctl --user disable --now mpd.socket, then ./install"
 elif [[ -n $tcp ]]; then
-  conf=${XDG_CONFIG_HOME:-$HOME/.config}/mpd/mpd.conf
-  for f in "$conf" "$HOME/.mpdconf" "$HOME/.mpd/mpd.conf"; do [[ -f $f ]] && { conf=$f; break; }; done
   if grep -qE '^[[:space:]]*bind_to_address[[:space:]]+"?[^"/~@[:space:]]' "$conf" 2>/dev/null \
      || ! grep -qE '^[[:space:]]*bind_to_address' "$conf" 2>/dev/null; then
     fix="./install offers to turn that off"
@@ -92,6 +98,37 @@ else
     bad "mpd-mpris looks for mpd on TCP, so the media keys don't reach it: ./install gives it the socket"
   fi
 fi
+# mpd's files: a playlist saved from the queue while Apple Music plays holds
+# the private address of the Mac's stream.
+mask=$(systemctl --user show mpd -p UMask --value 2>/dev/null)
+pid=$(systemctl --user show mpd -p MainPID --value 2>/dev/null)
+running=""
+[[ ${pid:-0} != 0 ]] && running=$(awk '/^Umask:/ {print $2}' "/proc/$pid/status" 2>/dev/null)
+mdirs=("$(dirname "$conf")")
+for key in playlist_directory db_file state_file sticker_file; do
+  p=$(conf_value "$conf" "$key")
+  [[ -n $p ]] || continue
+  p=${p/#\~/$HOME}
+  [[ $key == playlist_directory ]] || p=$(dirname "$p")
+  [[ $p == "$HOME"/* ]] && mdirs+=("$p")
+done
+music=$(conf_value "$conf" music_directory)
+music=${music/#\~/$HOME}
+for i in "${!mdirs[@]}"; do
+  [[ -n $music && (${mdirs[$i]} == "$music" || $music == "${mdirs[$i]}"/*) ]] && unset 'mdirs[i]'
+done
+mapfile -t mdirs < <(printf '%s\n' "${mdirs[@]}" | sort -u | awk 'kept == "" || index($0, kept "/") != 1 {print; kept = $0}')
+mapfile -t open < <(open_to_others "${mdirs[@]}")
+if [[ -n $mask ]] && (((8#$mask & 8#077) != 8#077)); then
+  note "mpd writes its playlists, database and state for every account here to read (a playlist saved from the queue while Apple Music plays holds the stream's private address): ./install offers a drop-in (mpd.service.d/private.conf)"
+elif [[ -n $running && $running != "$mask" ]]; then
+  note "mpd still writes its files for every account, from before its drop-in: systemctl --user restart mpd"
+fi
+if ((${#open[@]})); then
+  note "mpd's files are readable by every account here, in ${open[*]}: ./install makes them yours alone"
+elif [[ -n $mask ]] && (((8#$mask & 8#077) == 8#077)); then
+  ok "mpd's files are yours alone"
+fi
 if active mpd-mpris; then ok "mpd-mpris is running (media keys)"; else note "mpd-mpris isn't running: the media keys won't reach mpd (systemctl --user enable --now mpd-mpris)"; fi
 
 head2 "The plugin"
@@ -105,6 +142,11 @@ loaded=$(journalctl --user -b --no-pager 2>/dev/null | grep -o "omarock [0-9.]* 
 [[ -n $loaded ]] && ok "the shell says: $loaded" || note "the shell hasn't logged omarock loading this boot"
 printf '  sources: radio %s, spotify %s, appleMusic %s, siriusXM %s\n' \
   "$(setting radio true)" "$(setting spotify false)" "$(setting appleMusic false)" "$(setting siriusXM false)"
+mapfile -t open < <(open_to_others "$HOME/.config/omarock" "$HOME/.local/share/omarock" "$HOME/.local/state/omarock" \
+  "$HOME/.cache/omarock" "$HOME/.local/lib/omarock-mpris" "$HOME/.local/lib/omarock-soloist" \
+  "$HOME/.local/share/omarock-soloist" "$HOME/.cache/omarock-soloist")
+if ((${#open[@]})); then note "omarock's files are readable by every account here, in ${open[*]}: omarock makes them yours alone as it loads (or ./install)"
+else ok "omarock's files are yours alone"; fi
 
 head2 "omarock's sound output (the audio bus; optional)"
 if [[ -f $HOME/.local/share/omarock/audio/omarock-bus.conf ]]; then
