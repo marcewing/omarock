@@ -3240,9 +3240,8 @@ Panel {
   function writeSettings() {
     if (!root.settingsUnsaved || settingWriter.running) return
     root.settingsUnsaved = false
-    settingWriter.command = ["sh", "-c", 'umask 077; mkdir -p "$1" && printf "%s" "$2" > "$1/settings.json.new" && mv "$1/settings.json.new" "$1/settings.json"',
-      "sh", root.configDir, JSON.stringify(root.fileSettings, null, 2) + "\n"]
-    settingWriter.running = true
+    settingWriter.feed(["sh", "-c", 'umask 077; mkdir -p "$1" && cat > "$1/settings.json.new" && mv "$1/settings.json.new" "$1/settings.json"',
+      "sh", root.configDir], JSON.stringify(root.fileSettings, null, 2) + "\n")
   }
 
   // An account, a key or the music folder (tools/omarock-account): the value
@@ -3703,7 +3702,7 @@ Panel {
   }
 
   // Writes the settings file (writeSettings), and says why if it couldn't.
-  Process {
+  StdinProcess {
     id: settingWriter
     stderr: StdioCollector { id: settingWriterErrors; waitForEnd: true }
     onExited: function(exitCode) {

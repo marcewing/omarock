@@ -45,7 +45,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "TrackRow.qml", "CoverArt.qml", "KeysHelp.qml", "PlaylistPicker.qml", "manifest.json",
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
-                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js",
+                "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js", "StdinProcess.qml",
                 "tools/omarock-account", "tools/omarock-sources"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -94,6 +94,9 @@ def prepare(work):
     # them), and should something start to, it fails rather than reach one.
     (fakes / "ssh").symlink_to("/usr/bin/false")
     (fakes / "scp").symlink_to("/usr/bin/false")
+    # The real sh and jq, which log their command lines while a scenario asks.
+    (fakes / "sh").symlink_to(TOOLS / "argv-log")
+    (fakes / "jq").symlink_to(TOOLS / "argv-log")
     env = dict(HOME=str(home), PATH=f"{fakes}:/usr/bin:/bin", LANG="C.UTF-8",
                XDG_RUNTIME_DIR=str(runtime), OMARCHY_PATH="/usr/share/omarchy")
     subprocess.run(["omarchy-theme-set-templates"], env=env, check=True, stdout=subprocess.DEVNULL)
@@ -4460,11 +4463,14 @@ def history_scenario(host, output, socket_path, failures):
     host.call("open")
     wait_for(lambda: host.state()["opened"], "open")
     to_source(host, "local")
-    play_local("Glasswork")
-    wait_for(lambda: any(e["title"] == "Glasswork" for e in entries()), "Glasswork in the history", timeout=8)
+    lines = logged_argv(home, lambda: (
+        play_local("Glasswork"),
+        wait_for(lambda: any(e["title"] == "Glasswork" for e in entries()), "Glasswork in the history", timeout=8)))
     e = next(e for e in entries() if e["title"] == "Glasswork")
     check(e["source"] == "local" and e["file"] == file_of("Glasswork") and e["artist"] and e["album"] and e["at"] > 0,
           "a song of yours, once heard: its file, artist and album: " + json.dumps(e), failures)
+    check(str(file) in lines and e["file"] not in lines and "Glasswork" not in lines,
+          "History's file written through stdin: the entry on no command line", failures)
 
     to_source(host, "radio")
     mpd_client(socket_path, 'fake_stream_title "The Rolling Stones - Gimme Shelter"')
@@ -5760,8 +5766,11 @@ def setup_scenario(host, output, failures):
     wait_for(lambda: window()["canStart"], "Start setup, ready")
     check(window()["values"]["soloistKey"] == "•" and window()["footer"] == "Ready",
           "Enter goes on to the Soloist key; with both, Start setup is ready", failures)
-    host.call("press", "Return")
-    wait_for(lambda: launched().endswith("/install' spotify"), "the setup's terminal")
+    lines = logged_argv(home, lambda: (
+        host.call("press", "Return"),
+        wait_for(lambda: launched().endswith("/install' spotify"), "the setup's terminal")))
+    check("/bin/jq\n" in lines and client_id not in lines and "soloist-test-key" not in lines,
+          "the Client ID and the Soloist key saved through stdin, on no command line", failures)
     key_file = config / "soloist-key"
     check(json.loads((config / "spotify.json").read_text())["clientId"] == client_id
           and key_file.read_text() == "soloist-test-key\n" and key_file.stat().st_mode & 0o777 == 0o600
@@ -6152,10 +6161,43 @@ def private_files_scenario(host, failures):
     wait_for(lambda: json.loads(settings.read_text() or "{}").get("closeOnLeave") == was, "the setting back")
     check(settings.stat().st_mode & 0o777 == 0o600, "a setting saved: settings.json is yours alone: "
           + oct(settings.stat().st_mode & 0o777), failures)
+    # The settings can hold the Apple Music stream's private address (the
+    # file-only appleStream): a setting saved writes the file through stdin,
+    # never on a command line, which other accounts here can read (the
+    # marketplace's review of 1.0.3). History's scenario checks its file too.
+    secret = hashlib.sha256(b"private-files").hexdigest()[:32]
+    stream = f"http://127.0.0.1:9/omarock-{secret}.ogg"
+    saved = json.loads(settings.read_text() or "{}")
+    settings.write_text(json.dumps(dict(saved, appleStream=stream)))
+    wait_for(lambda: host.state()["appleStream"] == stream, "the stream's address in the settings")
+    lines = logged_argv(home, lambda: (
+        host.call("press", "Space"),
+        wait_for(lambda: json.loads(settings.read_text() or "{}").get("closeOnLeave") == (not was), "the setting saved again"),
+        host.call("press", "Space"),
+        wait_for(lambda: json.loads(settings.read_text() or "{}").get("closeOnLeave") == was, "and back")))
+    kept = json.loads(settings.read_text() or "{}").get("appleStream")
+    check("settings.json.new" in lines and secret not in lines and kept == stream,
+          "a setting saved with the stream's address in the settings: the address kept, and on no command line"
+          + (" (it was on one)" if secret in lines else "") + ("" if "settings.json.new" in lines else " (no write logged)"), failures)
+    settings.write_text(json.dumps(saved))
+    wait_for(lambda: host.state()["appleStream"] != stream, "the settings without the stream's address")
     host.call("press", "Escape")
     wait_for(lambda: not host.state()["settingsOpen"], "the settings close")
     host.call("close")
     check(not opened(), "nothing the panel wrote is open to others: " + repr(opened()), failures)
+
+
+def logged_argv(home, steps):
+    """Every command line the panel's sh and jq are given while steps() runs
+    (the harness's argv-log writes them down while $HOME/argv.log exists)."""
+    log = home / "argv.log"
+    log.write_text("")
+    try:
+        steps()
+        time.sleep(.5)
+        return log.read_text()
+    finally:
+        log.unlink(missing_ok=True)
 
 
 def fresh_start_scenario(host, socket_path, failures):

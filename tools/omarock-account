@@ -97,7 +97,7 @@ login[sys.argv[2]] = sys.stdin.read()
 print(json.dumps({"username": login.get("username", ""), "password": login.get("password", "")}))' "$sxm" "$field" \
       | write_private "$sxm" && restart omarock-sxm ;;
   spotify-client)
-    id=$(value) && jq -n --arg id "$id" '{clientId: $id, redirectUri: "http://127.0.0.1:8730/callback"}' \
+    id=$(value) && jq -Rn '{clientId: input, redirectUri: "http://127.0.0.1:8730/callback"}' <<<"$id" \
       | write_private "$config/spotify.json" && restart omarock-spotify ;;
   soloist-key)
     value | { cat; echo; } | write_private "$config/soloist-key" && restart omarock-soloist ;;

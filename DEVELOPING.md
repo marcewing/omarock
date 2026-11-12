@@ -26,6 +26,7 @@
 | `ScrollingText.qml` | One line that scrolls when it doesn't fit: the bar's song (a setting) and the now playing card's song, artist and album |
 | `Places.js`, `places.tsv` | Where "Your area" is, and the regions near it, from GeoNames' cities of 15,000 people or more (`tools/build-places` makes the file) |
 | `TimeMachine.js`, `ChartClient.qml`, `YearPicker.qml`, `Keeper.js` | Time Machine: the year filter for Apple Music and Spotify (mpd's is `Mpd.yearPattern`), Billboard's year-end chart read from Wikipedia's wikitext, its songs found on Apple Music or Spotify (cached in `~/.cache/omarock/charts`), and the box that asks for the year (`t`); the panel keeps the queue to the year (`Panel.keepQueueInYear`, `MpdClient.removeAfterYear`); with a panel on each bar, one keeps the queue (`Keeper.js`, shared by them all) |
+| `StdinProcess.qml` | A command given its input on stdin, never its command line: how the panel writes its files (the settings, History, its caches) |
 | `History.js`, `HistoryClient.qml` | History (`H`): what's been played here, from every source, in `~/.local/share/omarock/history.jsonl` (a line of JSON a play), for `historyDays`. `Panel.tickHistory` counts how long the song playing has been heard (half of it or 4 minutes; a station's song 30 s; the file-only `historyAfter` for tests); one panel adds plays (`Keeper.js`'s "history" job). Rows replay by where they were heard (`Panel.activateHistory`); `tools/omarock-history` reads it |
 | `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard: "omarock's sound output" in the settings |
 | `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit, the Web API client, MPRIS |
@@ -73,6 +74,15 @@
 - **Opt-in sources.** A source's switch (`spotify`, `appleMusic`, `siriusXM`,
   `radio`) gives it a button and lets omarock talk to its service; switched off,
   omarock doesn't contact it.
+- **Nothing private where other accounts can see it.** Any account on the
+  machine can read every process's command line (`ps`), so keys, tokens, the
+  pairing code, the Apple Music stream's address (it has a secret in it) and
+  whatever the panel writes to a file go to commands on stdin: `StdinProcess`,
+  `tools/omarock-account`, `curl -K -`. omarock's files are 0600 in 0700
+  folders, and mpd's too (`./install`). The harness writes command lines down
+  (`argv-log`, standing in for the panel's sh and jq; `argv_logger`, for the
+  tools), and the private-files, history, setup and apple-network scenarios
+  check that none of these is on one.
 
 ## Tests
 

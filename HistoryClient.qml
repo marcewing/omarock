@@ -38,12 +38,12 @@ Item {
       root.tidiedAt = Date.now()
       root.run(["cat", root.path], function(text) {
         var kept = History.prune(History.parse(text), Date.now(), root.days).concat([entry])
-        root.run(["sh", "-c", 'umask 077; mkdir -p "$(dirname "$1")" && printf "%s" "$2" > "$1.new" && mv "$1.new" "$1"',
-          "sh", root.path, kept.map(History.line).join("\n") + "\n"])
+        root.run(["sh", "-c", 'umask 077; mkdir -p "$(dirname "$1")" && cat > "$1.new" && mv "$1.new" "$1"', "sh", root.path],
+          null, kept.map(History.line).join("\n") + "\n")
       })
       return
     }
-    root.run(["sh", "-c", 'umask 077; mkdir -p "$(dirname "$1")" && printf "%s\\n" "$2" >> "$1"', "sh", root.path, History.line(entry)])
+    root.run(["sh", "-c", 'umask 077; mkdir -p "$(dirname "$1")" && cat >> "$1"', "sh", root.path], null, History.line(entry) + "\n")
   }
 
   function clear(callback) {
@@ -53,20 +53,21 @@ Item {
   }
 
   // ---------- One command at a time; callback(its output) ----------
+  // What's written goes on the command's stdin (input), never its command
+  // line (StdinProcess).
 
   property var queue: []
-  function run(command, callback) {
-    root.queue = root.queue.concat([{ command: command, callback: callback || null }])
+  function run(command, callback, input) {
+    root.queue = root.queue.concat([{ command: command, callback: callback || null, input: input || "" }])
     root.next()
   }
   function next() {
     if (process.running || root.queue.length === 0) return
     process.current = root.queue[0]
     root.queue = root.queue.slice(1)
-    process.command = process.current.command
-    process.running = true
+    process.feed(process.current.command, process.current.input)
   }
-  Process {
+  StdinProcess {
     id: process
     property var current: null
     stdout: StdioCollector {

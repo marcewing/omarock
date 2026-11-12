@@ -1111,7 +1111,7 @@ step_spotify() {
       [[ $id =~ ^[0-9a-fA-F]{32}$ ]] && break
       bad "A Client ID is 32 letters and digits."
     done
-    jq -n --arg id "$id" '{clientId: $id, redirectUri: "http://127.0.0.1:8730/callback"}' | write_private "$config/spotify.json"
+    jq -Rn '{clientId: input, redirectUri: "http://127.0.0.1:8730/callback"}' <<<"$id" | write_private "$config/spotify.json"
     ok "wrote $config/spotify.json"
   fi
   if private_ok "$config/soloist-key"; then
