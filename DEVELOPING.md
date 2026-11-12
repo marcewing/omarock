@@ -29,7 +29,7 @@
 | `StdinProcess.qml` | A command given its input on stdin, never its command line: how the panel writes its files (the settings, History, its caches) |
 | `History.js`, `HistoryClient.qml` | History (`H`): what's been played here, from every source, in `~/.local/share/omarock/history.jsonl` (a line of JSON a play), for `historyDays`. `Panel.tickHistory` counts how long the song playing has been heard (half of it or 4 minutes; a station's song 30 s; the file-only `historyAfter` for tests); one panel adds plays (`Keeper.js`'s "history" job). Rows replay by where they were heard (`Panel.activateHistory`); `tools/omarock-history` reads it |
 | `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard: "omarock's sound output" in the settings |
-| `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit, the Web API client, MPRIS |
+| `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit and the shim that gives Soloist its key (`omarock-soloist-key.c`), the Web API client, MPRIS |
 | `sxm/` | omarock-sxm, the SiriusXM relay |
 | `apple-bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
 | `patches/` | The mpd-mpris patch that makes Apple Music's stream play well, and the mpd one (merged upstream) |
@@ -79,10 +79,14 @@
   pairing code, the Apple Music stream's address (it has a secret in it) and
   whatever the panel writes to a file go to commands on stdin: `StdinProcess`,
   `tools/omarock-account`, `curl -K -`. omarock's files are 0600 in 0700
-  folders, and mpd's too (`./install`). The harness writes command lines down
-  (`argv-log`, standing in for the panel's sh and jq; `argv_logger`, for the
-  tools), and the private-files, history, setup and apple-network scenarios
-  check that none of these is on one.
+  folders, and mpd's too (`./install`). Soloist takes its key only as an
+  argument, so its unit gives it `@key`, and `omarock-soloist-key.so`, loaded
+  into Soloist alone, hands it the key from its file. The harness writes
+  command lines down (`argv-log`, standing in for the panel's sh and jq;
+  `argv_logger`, for the tools), and the private-files, history, setup and
+  apple-network scenarios check that none of these is on one. Before a
+  release, `tools/capture/argv-survey` logs every program started, everywhere
+  (below).
 
 ## Tests
 
@@ -95,7 +99,10 @@ tools/capture/capture.py --real-mpd [out-dir]           # read-only, your mpd
 tools/capture/capture.py --bus --only bus-volume        # with a private PipeWire
 python3 -I audio/test-bus.py
 python3 -I spotify/test_service.py
+python3 -I spotify/test_soloist_key.py
 dbus-run-session -- python3 -I spotify/test_mpris.py
+tools/capture/argv-survey capture [out-dir]             # before a release (long)
+OMAROCK_THROWAWAY=yes tools/capture/argv-installer      # in a test VM only
 ```
 
 `capture.py` runs the real panel in Quickshell, offscreen, with a temporary HOME,
@@ -203,6 +210,21 @@ verified "Update unverified" until that one is verified too. A release bumps the
 version (`manifest.json` and `Panel.qml`), merges `dev` into `main`, tags it
 `vX.Y.Z`, and asks the marketplace to verify that commit (its Plugin verification
 form).
+
+Before a release, nothing private may be on a command line, which any account
+on the machine can read. Two runs check it, logging every program started
+with its whole command line (`tools/capture/execlog.c`, loaded with
+`LD_PRELOAD`), then searching the log for the made-up secrets the tests plant:
+- `tools/capture/argv-survey capture`: the whole harness, the panel and its
+  fakes (as long as the harness takes).
+- `tools/capture/argv-installer`, in a test VM, never on a machine you use:
+  `./install`, every piece set up and taken out, `--uninstall`, and the tools,
+  with Spotify's and SiriusXM's hosts pointed at the VM itself and a stand-in
+  Soloist (the real one announces itself on the network).
+
+Each ends with "Planted secrets on a command line: none", or fails. Each also
+lists arguments shaped like a file's contents (several lines, long, JSON):
+read them, since jq's and python3's own programs look like that too.
 
 ## Findings worth knowing
 

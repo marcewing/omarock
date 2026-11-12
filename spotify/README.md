@@ -123,9 +123,13 @@ By hand, run the tools from your omarock clone: the plugin's folder,
   anywhere. If one leaks, make a new key in the dashboard, or sign in again.
   Soloist keeps its own sign-in in `~/.local/share/omarock-soloist` and
   `~/.cache/omarock-soloist`, which are yours alone too.
-- Soloist takes its key only on its command line (`--api-key`), so while it runs,
-  another user on this machine can read it with `ps`. On a machine of your own
-  that's no one; on a shared one, bear it in mind.
+- Soloist takes its key only as an argument (`--api-key`), and any account on
+  the machine can read a program's arguments (`ps`). So its unit gives it a
+  stand-in, `--api-key @key`, and a small library loaded into Soloist alone
+  (`omarock-soloist-key.so`, built from `omarock-soloist-key.c` by
+  `tools/install-spotify`, which needs a C compiler: Omarchy's `base-devel` has
+  one) hands Soloist the key from `soloist-key` as it starts. `ps` shows only
+  `@key`. `tools/omarock-doctor` checks it.
 - omarock-spotify and Soloist's control API listen on 127.0.0.1 only.
   omarock-spotify answers only omarock's own requests (`X-Omarock: 1`), so a web
   page you visit can't drive it.

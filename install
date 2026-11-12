@@ -31,8 +31,9 @@
 # Secrets (the Soloist key, the SiriusXM login) are typed into hidden prompts,
 # and the bridge's token comes from pairing with it; they go straight into
 # files only you can read (~/.config/omarock, mode 600). None is printed, and none is passed on a
-# command line here. Soloist itself takes its key only as an option
-# (--api-key), so while it runs, others on this machine can see it (ps).
+# command line, which others on this machine can read (ps). Soloist takes its
+# key only as an argument, so it's given a stand-in, "@key", and
+# omarock-soloist-key.so (built by tools/install-spotify) hands it the key.
 #
 # Each run says how it went in ~/.local/state/omarock/setup.json, which
 # omarock's settings follow: what it set up or removed, and whether it's still
@@ -435,7 +436,7 @@ mpd_running_umask() {
 installed_commit() { cat "$share/$1/INSTALLED" 2>/dev/null; }
 installs() {  # DIR: its files that get installed
   case $1 in
-    spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist.service omarock-spotify.service ;;
+    spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist-key.c omarock-soloist.service omarock-spotify.service ;;
     sxm) echo omarock-sxm.py omarock-sxm.service requirements.txt ;;
     audio) echo omarock-bus.conf omarock-guard.py omarock-players.conf omarock-bus.service omarock-guard.service ;;
   esac
@@ -1119,7 +1120,7 @@ step_spotify() {
   if private_ok "$config/soloist-key"; then
     ok "the Soloist key: $config/soloist-key"
   else
-    explain "Next we need the Soloist key, from the same dashboard. It goes into $config/soloist-key, readable only by you. Soloist takes it only on its command line, though, so while Soloist runs, other accounts on this machine can see it (with ps)."
+    explain "Next we need the Soloist key, from the same dashboard. It goes into $config/soloist-key, readable only by you, and Soloist gets it from there, never on its command line."
     local key
     key=$(secret "The Soloist key (Blank to stop here):") || exit 1
     [[ -z $key ]] && return 1

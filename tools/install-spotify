@@ -7,7 +7,10 @@
 #   tools/install-spotify --start [COMMIT]  ... then enable and (re)start them
 #
 # It installs omarock-spotify's Python files into ~/.local/share/omarock/spotify/
-# and both units into ~/.config/systemd/user/.
+# and both units into ~/.config/systemd/user/. There too, it builds
+# omarock-soloist-key.so (spotify/omarock-soloist-key.c), which gives Soloist
+# its key without the key on Soloist's command line: that needs a C compiler
+# (cc, in Omarchy's base-devel).
 set -euo pipefail
 # What it writes is yours alone: folders 700, files 600.
 umask 077
@@ -20,13 +23,23 @@ if ! git -C "$repo" diff --quiet "$commit" -- spotify/; then
 fi
 units=$HOME/.config/systemd/user
 dest=$HOME/.local/share/omarock/spotify
+command -v cc >/dev/null || { echo "install-spotify: building omarock-soloist-key.so needs a C compiler: sudo pacman -S --needed base-devel" >&2; exit 1; }
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
 install -d "$units"
 install -d -m 700 "$(dirname "$dest")" "$dest"
 for f in omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py; do
   git -C "$repo" show "$commit:spotify/$f" > "$dest/$f.new" && mv "$dest/$f.new" "$dest/$f"
 done
-echo "$commit" > "$dest/INSTALLED"
 soloist_changed=false
+# Built the same way each time, so a Soloist restarts only when it changed.
+git -C "$repo" show "$commit:spotify/omarock-soloist-key.c" > "$work/omarock-soloist-key.c"
+cc -O2 -Wall -shared -fPIC -o "$work/omarock-soloist-key.so" "$work/omarock-soloist-key.c" -ldl
+if ! cmp -s "$work/omarock-soloist-key.so" "$dest/omarock-soloist-key.so"; then
+  mv "$work/omarock-soloist-key.so" "$dest/omarock-soloist-key.so"
+  soloist_changed=true
+fi
+echo "$commit" > "$dest/INSTALLED"
 for u in omarock-soloist omarock-spotify; do
   git -C "$repo" show "$commit:spotify/$u.service" > "$units/$u.service.new"
   if cmp -s "$units/$u.service.new" "$units/$u.service"; then

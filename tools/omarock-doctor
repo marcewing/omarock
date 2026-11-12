@@ -173,6 +173,13 @@ if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/om
   else
     for u in omarock-soloist omarock-spotify; do active $u && ok "$u is running" || bad "$u isn't running: journalctl --user -u $u"; done
   fi
+  # Soloist's command line, which every account here can read, should hold
+  # "@key" in place of its key (omarock-soloist-key.so). Read, never shown.
+  if active omarock-soloist; then
+    pid=$(systemctl --user show -p MainPID --value omarock-soloist)
+    if tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null | grep -qx -- '@key'; then ok "Soloist's key isn't on its command line"
+    else bad "Soloist's key is on its command line, where every account here can read it: Update… in omarock's settings (Spotify), or tools/install-spotify --start"; fi
+  fi
   h=$(health "$(setting spotifyService http://127.0.0.1:8730)")
   if [[ -n $h ]]; then
     python3 -I -c '

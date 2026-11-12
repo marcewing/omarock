@@ -1,0 +1,124 @@
+#!/bin/bash
+# argv-installer: tools/capture/argv-survey for ./install and the tools, on a
+# THROWAWAY Omarchy machine (a test VM): it installs omarock from this clone,
+# sets up every piece with made-up secrets, takes them out again and
+# uninstalls, with every program started logged, then searches the log.
+#
+#   OMAROCK_THROWAWAY=yes tools/capture/argv-installer [WORK-DIR]
+#
+# Nothing leaves the machine or is advertised: Spotify's and SiriusXM's hosts
+# point at this machine (/etc/hosts, with sudo; taken out at the end), the
+# Apple Music bridge is tools/capture/fake_bridge.py on 127.0.0.1, mpd is on
+# its socket only, and Soloist is a stand-in (the real one announces itself
+# on the network). Logs are in WORK-DIR (default a new ~/omarock-argv.XXXXXX).
+set -uo pipefail
+if [[ ${OMAROCK_THROWAWAY:-} != yes ]]; then
+  echo "argv-installer: only on a throwaway machine (it installs and removes everything, and edits /etc/hosts)." >&2
+  echo "  OMAROCK_THROWAWAY=yes $0 [WORK-DIR]" >&2
+  exit 2
+fi
+repo=$(cd "$(dirname "$0")/../.." && pwd)
+if [[ -n ${1:-} ]]; then
+  work=$1
+  [[ -d $work && -n $(ls -A "$work") ]] && { echo "argv-installer: $work isn't empty" >&2; exit 2; }
+else
+  work=$(mktemp -d "$HOME/omarock-argv.XXXXXX")
+fi
+log=$work/execlog
+mkdir -p "$log" "$work/logs" "$HOME/Music"
+so=$("$repo/tools/capture/argv-survey" build "$work") || exit 1
+set -a; eval "$(systemctl --user show-environment)"; set +a
+export LANG=C.UTF-8
+
+hosts="apresolve.spotify.com accounts.spotify.com api.spotify.com login5.spotify.com clienttoken.spotify.com
+  spclient.wg.spotify.com api.edge-gateway.siriusxm.com imgsrv-sxm-prod-device.streaming.siriusxm.com
+  lookaround-cache-prod.streaming.siriusxm.com www.siriusxm.com"
+# Both families: with an IPv4 line alone, a name's real IPv6 address still answers.
+{ printf '127.0.0.1 %s # omarock-argv\n' $hosts; printf '::1 %s # omarock-argv\n' $hosts; } | sudo tee -a /etc/hosts >/dev/null
+trap 'sudo sed -i "/# omarock-argv\$/d" /etc/hosts; systemctl --user unset-environment LD_PRELOAD OMAROCK_EXECLOG' EXIT
+sleep 2
+for h in api.edge-gateway.siriusxm.com apresolve.spotify.com; do
+  getent ahosts "$h" | awk '{print $1}' | sort -u | grep -qvE '^(127\.0\.0\.1|::1)$' && { echo "argv-installer: $h still resolves elsewhere" >&2; exit 1; }
+done
+# A stand-in Soloist: it dates itself as Soloist does, and waits, keeping its
+# command line (what the doctor reads).
+mkdir -p ~/.local/lib/omarock-soloist
+printf '%s\n' '#!/bin/bash' \
+  'case $1 in --version|-V) echo "soloist 1.3.10.6 build 1792627290 (20261022) (standin) (linux/x86_64)"; exit 0;; esac' \
+  'while :; do sleep 3600; done' >~/.local/lib/omarock-soloist/soloist
+chmod 755 ~/.local/lib/omarock-soloist/soloist
+# Services started from here on are logged too.
+systemctl --user set-environment LD_PRELOAD="$so" OMAROCK_EXECLOG="$log"
+
+logged() { OMAROCK_EXECLOG=$log LD_PRELOAD=$so "$@"; }
+run() {  # NAME ARGS...: ./install in answers mode ($work/answers-NAME)
+  local name=$1; shift
+  touch "$work/answers-$name"
+  (cd "$repo" && OMAROCK_INSTALL_ANSWERS=$work/answers-$name logged ${limit:+timeout $limit} ./install "$@") >"$work/logs/$name.log" 2>&1
+  local rc=$?
+  echo "exit=$rc" >>"$work/logs/$name.log"
+  return $rc
+}
+run_y() {  # the same, answering y to each yes/no question it stops on
+  local name=$1 q; shift
+  for _ in $(seq 16); do
+    run "$name" "$@" && return 0
+    q=$(grep -o "no answer for: .*" "$work/logs/$name.log" | sed "s/no answer for: //")
+    [[ -z $q ]] && return 1
+    [[ $q == *"?"* ]] || { echo "  $name needs: $q"; return 1; }
+    echo "$q=y" >>"$work/answers-$name"
+  done
+}
+said() { echo "  $1: $(sed 's/\x1b\[[0-9;]*m//g' "$work/logs/$1.log" | grep -E '✗|exit=' | tr '\n' ' ')"; }
+acct() { logged "$repo/tools/omarock-account" "$@"; }
+fake() { curl -s -m 5 -H "Authorization: Bearer fake-bridge-token" -H "Content-Type: application/json" -d "$2" "http://127.0.0.1:8710/v1/fake/$1" >/dev/null; }
+
+echo "== omarock, local music and the radio"
+printf '%s\n' "Where's your music?=$HOME/Music" "Where on the bar?=left" "Your area=Portland, Maine" \
+  "Keep that as your music folder?=y" "Open omarock with Super+Ctrl+M?=y" "Bring mpd back after a crash?=y" \
+  "Point mpd clients at the socket?=y" "Keep mpd's files private?=y" >"$work/answers-base"
+run_y base; said base
+cp "$work/answers-base" "$work/answers-rerun"; run_y rerun; said rerun
+
+echo "== the accounts, as the settings save them"
+printf 'me@example.com\n' | acct sxm-user; printf 'hunter 2\n' | acct sxm-password
+printf '0123456789abcdef0123456789abcdef\n' | acct spotify-client
+printf 'soloist-test-key\n' | acct soloist-key
+acct show >/dev/null
+
+echo "== SiriusXM (its sign-in fails here)"
+printf '%s\n' "Set it up anyway?=y" "Enter the SiriusXM login again?=n" >"$work/answers-sxm"
+limit=180 run_y sxm siriusxm --yes terms; said sxm
+
+echo "== Spotify (cut off at the pairing)"
+printf '%s\n' "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" "Fetch the latest from Spotify?=n" >"$work/answers-spotify"
+limit=150 run_y spotify spotify; said spotify
+logged "$repo/tools/omarock-sp" status >/dev/null 2>&1
+
+echo "== Apple Music (a fake bridge on 127.0.0.1:8710)"
+systemd-run --user -q --unit=omarock-argv-bridge env FAKE_BRIDGE_PORT=8710 \
+  python3 -I "$repo/tools/capture/fake_bridge.py" "$work/bridge.port" fake-bridge-token "$work/bridge.log"
+sleep 2; fake secretstream '{"on":true}'; fake pair '{"code":"048213"}'
+printf '%s\n' "Is the bridge built and running on your Mac?=y" "Which Mac?=other" "The Mac's address (Blank to stop here):=127.0.0.1:8710" \
+  "The pairing code the Mac shows (Blank to stop here):=048213" "Smooth=n" >"$work/answers-apple"
+run_y apple apple-music --no mpris; said apple
+acct bridge-check http://127.0.0.1:8710
+printf 'http://127.0.0.1:8710\n' | acct apple-bridge; printf 'fake-bridge-token\n' | acct bridge-token
+fake pair '{"code":"654321"}'; printf '654321\n' | acct bridge-pair http://127.0.0.1:8710 2>/dev/null
+for a in status "search zen arcade" "raw GET /v1/health"; do logged "$repo/tools/omarock-am" $a >/dev/null 2>&1; done
+
+echo "== the doctor, the sources, History"
+logged "$repo/tools/omarock-doctor" >"$work/logs/doctor.log" 2>&1
+logged "$repo/tools/omarock-sources" state >/dev/null 2>&1
+logged "$repo/tools/omarock-sources" stop siriusxm >/dev/null 2>&1; logged "$repo/tools/omarock-sources" start siriusxm >/dev/null 2>&1
+logged "$repo/tools/omarock-history" >/dev/null 2>&1
+
+echo "== each piece taken out, then omarock"
+for p in apple-music siriusxm spotify; do : >"$work/answers-rm-$p"; run_y rm-$p --remove $p; said rm-$p; done
+systemctl --user stop omarock-argv-bridge 2>/dev/null
+printf '%s\n' "Take omarock off=y" >"$work/answers-uninstall"; run_y uninstall --uninstall; said uninstall
+systemctl --user unset-environment LD_PRELOAD OMAROCK_EXECLOG
+sleep 3
+
+echo
+"$repo/tools/capture/argv-survey" scan "$log"

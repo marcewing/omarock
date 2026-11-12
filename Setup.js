@@ -50,7 +50,7 @@ var pages = {
           placeholder: "32 letters and digits", required: true, needs: "the app's Client ID", pattern: "^[0-9A-Fa-f]{32}$",
           wrong: "A Client ID is 32 letters and digits", account: "spotify-client" }] },
       { title: "The Soloist key",
-        text: ["Soloist's API key, from its page in the developer dashboard. It's kept in a file only you can read, and never shown here. Soloist takes it only on its command line, though, so while Soloist runs, other accounts on this machine can see it (with ps)."],
+        text: ["Soloist's API key, from its page in the developer dashboard. It's kept in a file only you can read, and never shown here. Soloist gets it from there, never on its command line."],
         links: [{ label: "Soloist's API key, in the dashboard", url: "https://developer.spotify.com/dashboard/soloist" }],
         fields: [{ key: "soloistKey", type: "secret", label: "The Soloist key", required: true, needs: "the Soloist key",
           account: "soloist-key" }] },

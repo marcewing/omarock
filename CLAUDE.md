@@ -50,7 +50,10 @@ Rules while setting up or fixing someone's system:
   mpd, fake services and a fake Radio Browser; it saves screenshots and fails on any
   QML warning. `--only NAME,…` runs some scenarios.
 - `audio/test-bus.py`: the audio bus on a throwaway PipeWire.
-- `spotify/test_service.py`, and `dbus-run-session -- python3 -I spotify/test_mpris.py`.
+- `spotify/test_service.py`, `spotify/test_soloist_key.py`, and `dbus-run-session -- python3 -I spotify/test_mpris.py`.
+- Before a release, `tools/capture/argv-survey capture` and, in a test VM,
+  `tools/capture/argv-installer`: nothing private on any command line
+  (DEVELOPING.md, "Branches and releases").
 
 Tests never touch the user's real mpd, PipeWire or services. Keep it that way:
 fakes, a scratch mpd with mpd's `null` output, or a private PipeWire.
