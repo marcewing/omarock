@@ -74,7 +74,9 @@ flow() {
 
 case ${1:-} in
   state)
-    jq -n \
+    # The last run (setup.json) goes to jq on stdin: a file's contents never
+    # go on a command line, which others on this machine can read.
+    flow | jq -n \
       --argjson mpd "$(bool command -v mpd)" \
       --argjson spotify "$(bool installed spotify)" --argjson spotifyCurrent "$(bool up_to_date spotify)" \
       --argjson spotifyOn "$(bool enabled omarock-spotify)" --argjson soloistDays "$(soloist_days)" \
@@ -83,7 +85,7 @@ case ${1:-} in
       --argjson apple "$(bool apple_set_up)" \
       --argjson bus "$(bool test -f "$share/audio/omarock-bus.conf")" --argjson busCurrent "$(bool up_to_date audio)" \
       --arg output "$(bus_output)" \
-      --argjson flow "$(flow)" '{
+      'input as $flow | {
         local: { setUp: $mpd },
         spotify: { setUp: $spotify, upToDate: $spotifyCurrent, running: $spotifyOn, soloistDays: $soloistDays },
         siriusxm: { setUp: $sxm, upToDate: $sxmCurrent, running: $sxmOn },

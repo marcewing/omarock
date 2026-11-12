@@ -172,7 +172,9 @@ ask() {
     printf '%s' "$a"
     return
   fi
-  gum input --header "$1" --value "${2:-}" --placeholder "${3:-}" --width 72 || stopped
+  # The value it starts with goes to gum on stdin, not on its command line
+  # (which others on this machine can read): it may be a login.
+  printf '%s' "${2:-}" | gum input --header "$1" --placeholder "${3:-}" --width 72 || stopped
 }
 
 # secret PROMPT: a line of text that isn't shown.
@@ -588,7 +590,7 @@ step_mpd() {
   if [[ -n $other && $other != "$mpd_socket" ]]; then
     ok "mpd listens on $other; omarock will use it (its socket setting)"
     mpd_socket=$other
-    pending[socket]=$(jq -cn --arg s "$other" '$s')
+    pending[socket]=$(json_string <<<"$other")
   elif [[ -z $other ]] && ! mpd_answers; then
     # A blank line after what this adds above it (an existing file gets one anyway).
     ((${#lines[@]})) && lines+=("")
@@ -936,7 +938,7 @@ step_radio() {
   if [[ -n $area ]]; then ok "local stations for $area"; done_[radio]=1; return; fi
   explain "Radio comes from Radio Browser, a free directory of stations; mpd plays them. With your area, the list starts with your local stations, those nearest first."
   area=$(ask "Your area, a city or your state, region or country (Enter to skip):" "" "Portland, Maine") || exit 1
-  [[ -n $area ]] && pending[radioArea]=$(jq -cn --arg s "$area" '$s')
+  [[ -n $area ]] && pending[radioArea]=$(json_string <<<"$area")
   done_[radio]=1
 }
 
@@ -1363,7 +1365,7 @@ step_apple() {
     code=$(bridge_status "$bridge" "$tokenfile")
     if [[ $code == 200 ]]; then ok "the bridge accepts the token"; else bad "the bridge refused the token (HTTP $code)"; return 1; fi
   fi
-  [[ $tokenfile == "$config/bridge-token" ]] || pending[appleTokenFile]=$(jq -cn --arg s "$tokenfile" '$s')
+  [[ $tokenfile == "$config/bridge-token" ]] || pending[appleTokenFile]=$(json_string <<<"$tokenfile")
 
   # The stream, now that the bridge has the token (from 0.9.0 it's given only
   # with it); an address from before (a new token, an older bridge) is updated.
@@ -1403,11 +1405,16 @@ step_apple() {
 
 # ---- Last: the switches ----
 
+# Values go to jq on stdin, never on its command line, which others on this
+# machine can read: your area, say.
+json_string() { jq -cRn input; }  # stdin's line, as a JSON string
+
 set_setting() {  # KEY JSON: one of omarock's settings, into its settings file
   local now json file=$config/settings.json
   now=$(setting "$1" "")
   [[ $now == "$(jq -r 'if type == "string" then . else tostring end' <<<"$2")" ]] && return 0
-  json=$(jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$file" 2>/dev/null || jq -n --arg k "$1" --argjson v "$2" '{($k): $v}') \
+  json=$({ [[ -s $file ]] && jq --arg k "$1" '.[$k] = input' "$file" - <<<"$2"; } 2>/dev/null \
+    || jq -n --arg k "$1" '{($k): input}' <<<"$2") \
     && write_private "$file" <<<"$json"
   printf '  %s%s: %s%s\n' "$dim" "$1" "$(jq -r . <<<"$2")" "$reset"
   printed
