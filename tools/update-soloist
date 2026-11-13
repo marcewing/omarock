@@ -23,7 +23,8 @@
 #
 # Checking it: omarock-soloist starts it with the shim, and within 30 s its log
 # has to say that the shim handed Soloist its key and guards its control port
-# (this connects to the port once, to see). Then its hash goes into
+# and its Spotify Connect discovery port (this connects to each once, from
+# this machine, to see). Then its hash goes into
 # soloist.sha256 (omarock-soloist starts that build and no other) and a copy is
 # kept as soloist.last-good. If it doesn't pass, the last good build goes back.
 set -euo pipefail
@@ -178,28 +179,48 @@ record() {  # VERSION: soloist.json and soloist.last-good, for the build that pa
   fi
 }
 
+# The port Soloist's Spotify Connect discovery listens on (every interface:
+# not a loopback address), or nothing.
+discovery_port() {
+  local pid
+  pid=$(systemctl --user show -p MainPID --value omarock-soloist)
+  [[ -n $pid && $pid != 0 ]] || return 0
+  ss -ltnpH 2>/dev/null | awk -v p="pid=$pid," 'index($0, p) && $4 !~ /^(127\.|\[::1\]|\[::ffff:127\.)/ {n = split($4, a, ":"); print a[n]; exit}'
+}
+# This machine's own address (not a loopback one), to reach that port as a
+# program here does.
+own_address() { ip -4 -o addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}'; }
+# A connection of ours to PORT at ADDRESS, held open a moment, so the shim has
+# one to guard and finds who it's from (one closed at once has no owner left
+# to check, and is refused as such).
+reach() { (exec 3<>"/dev/tcp/$1/$2" && sleep 0.5) 2>/dev/null || true; }
+
 # Start the build installed under the shim and watch its log: 0 when it
-# passed (version, signed set), 1 when it didn't (why set).
+# passed (version, signed set), 1 when it didn't (why set). It has to say
+# that it handed over the key and guards the control port, and its discovery
+# port too (which only this check reaches from here at once).
 try_it() {
-  local id lines="" state code i
+  local id lines="" state code i port="" at
   printf '%s  soloist\n' "$(hash_of "$dest/soloist")" >"$dest/soloist.sha256"
   systemctl --user reset-failed omarock-soloist 2>/dev/null || true
   systemctl --user restart omarock-soloist
   id=$(systemctl --user show -p InvocationID --value omarock-soloist)
+  at=$(own_address)
   for ((i = 0; i < 60; i++)); do
     sleep 0.5
     lines=$(log_of "$id")
     if grep -q '^omarock-soloist: handed Soloist its key' <<<"$lines"; then
-      # Its control port: a connection of ours, so the shim has one to guard.
-      if grep -q '^omarock-soloist: guards 127\.0\.0\.1:'"$ws"':' <<<"$lines"; then
+      [[ -n $port ]] || port=$(discovery_port)
+      if grep -q '^omarock-soloist: guards 127\.0\.0\.1:'"$ws"':' <<<"$lines" \
+        && { [[ -z $port || -z $at ]] || grep -q '^omarock-soloist: guards [^ ]*:'"$port"': of this machine' <<<"$lines"; }; then
         version=$(grep -m1 -oE 'soloist [0-9]+(\.[0-9]+)+ build' <<<"$lines" | cut -d' ' -f2 || true)
         grep -q 'logged in as' <<<"$lines" && signed=yes
         grep -q 'login failed' <<<"$lines" && signed=no
+        discovery=$port
         return 0
       fi
-      # Held open a moment, so the shim finds who it's from (one closed at
-      # once has no owner left to check, and is refused as such).
-      (exec 3<>"/dev/tcp/127.0.0.1/$ws" && sleep 0.5) 2>/dev/null || true
+      reach 127.0.0.1 "$ws"
+      [[ -n $port && -n $at ]] && reach "$at" "$port"
     fi
     state=$(systemctl --user show -p ActiveState --value omarock-soloist)
     if [[ $state == failed || $state == inactive ]]; then
@@ -212,7 +233,9 @@ try_it() {
       return 1
     fi
   done
-  if grep -q '^omarock-soloist: handed Soloist its key' <<<"$lines"; then
+  if grep -q '^omarock-soloist: handed Soloist its key' <<<"$lines" && grep -q '^omarock-soloist: guards 127\.0\.0\.1:'"$ws"':' <<<"$lines"; then
+    why="omarock's shim didn't see it take a connection on its discovery port ($port), so it can't guard it"
+  elif grep -q '^omarock-soloist: handed Soloist its key' <<<"$lines"; then
     why="omarock's shim didn't see it take a connection on its control port, so it can't guard it"
   else
     why="omarock's shim didn't load into it, so it can't give it its key"
@@ -223,7 +246,7 @@ try_it() {
 # check: the build installed, with the shim. Restores the last good one when
 # it fails. Leaves Soloist running if Spotify is switched on in omarock.
 check() {
-  local why="" version="" signed="" on=true
+  local why="" version="" signed="" discovery="" on=true
   [[ -f $dest/soloist ]] || { wrong "there's no Soloist installed: download it from $page"; return 1; }
   [[ -f $shim ]] || { wrong "omarock's shim isn't installed: run tools/install-spotify first"; return 1; }
   network || { wrong "no network: Soloist starts only with one, so it can't be checked now; try again when you're online"; return 1; }
@@ -231,7 +254,7 @@ check() {
   say "Checking Soloist with omarock's shim (up to 30 s)…"
   if try_it; then
     record "$version"
-    good "Soloist${version:+ $version}$(built_on "$dest/soloist") works with omarock: it got its key off its command line, and only your account reaches its control port"
+    good "Soloist${version:+ $version}$(built_on "$dest/soloist") works with omarock: it got its key off its command line, and of this machine's programs only yours reach its control port${discovery:+ and its Spotify Connect discovery}"
     [[ $signed == yes ]] && good "it signed in to your Spotify account"
     [[ $signed == no ]] && wrong "it couldn't sign in: check the Soloist key (omarock's settings, Spotify)"
     $on || systemctl --user stop omarock-soloist
@@ -282,5 +305,5 @@ case ${1:-} in
   status) shift; status "$@" ;;
   install) shift; install_build "$@" ;;
   check) check ;;
-  *) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+  *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac

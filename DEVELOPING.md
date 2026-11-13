@@ -95,10 +95,12 @@
   that has already closed (listed with no inode, or as uid 0 in TIME_WAIT: no
   owner left to check) is refused too, and logged as such. The `X-Omarock: 1` header
   and the Host check are for web pages, which run as you. Soloist's control
-  port (8731) has no sign-in, so the shim does the same in Soloist's `accept`:
-  on a listener bound to a loopback address it closes another account's
-  connection before Soloist sees it. Soloist's Connect discovery listens on
-  every interface, for the Spotify apps on the network, and is left alone.
+  port (8731) has no sign-in, and its Connect discovery (every interface)
+  takes a sign-in from whoever pairs, so the shim does the same in Soloist's
+  `accept`: a connection from this machine (from a loopback address, or one of
+  its interfaces' own: `getifaddrs`) reaches Soloist only if it's this
+  account's. One from another machine (a phone pairing) isn't in this
+  machine's socket table, and is handed over as before.
 - **No download-and-run.** Nothing omarock runs fetches a program and runs it.
   Soloist, the one program it doesn't get from Arch or this clone, you download
   from Spotify's page (Spotify publishes only an unversioned "latest" build,
@@ -108,7 +110,8 @@
   the shim needs; its build number, the time it was built, says whether it's
   expired), installs it, and checks it: Soloist's unit starts it with the shim,
   and its log has to say within 30 s that the shim handed over the key and
-  guards the control port. Then its hash goes into `soloist.sha256`, which the
+  guards the control port and the discovery port (it reaches each once from
+  this machine). Then its hash goes into `soloist.sha256`, which the
   unit checks at every start (exit 79 for anything else), and a copy is kept;
   a build that fails is swapped back for the last good one.
 
@@ -254,7 +257,9 @@ read them, since jq's and python3's own programs look like that too.
 
 And `tools/capture/vm-checks`, in a test VM too, for what takes a second
 account and a Soloist that comes and goes: another account is refused by
-omarock-spotify, omarock-sxm and Soloist's control port, and this one isn't; a
+omarock-spotify, omarock-sxm and Soloist's control and discovery ports, and
+this one isn't, nor (on the discovery port) another machine, which a network
+namespace plays; a
 Soloist put in by hand isn't started until it's checked; builds that can't work
 with the shim are turned down, by reading them or by running them (and the
 last good one put back); an expired one is turned down; and a newer download

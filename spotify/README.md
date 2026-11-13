@@ -154,9 +154,12 @@ By hand, run the tools from your omarock clone: the plugin's folder,
     `soloist-key` as it starts. `ps` shows only `@key`.
   - Soloist's control API (127.0.0.1:8731: what's playing, the queue, play,
     volume) has no sign-in of its own, and every account on the machine can
-    reach 127.0.0.1. The shim hands Soloist only the connections whose other end
-    belongs to your account, by the kernel's socket table (`/proc/net/tcp`), and
-    closes the rest before Soloist sees them.
+    reach 127.0.0.1. Its Spotify Connect discovery (below) takes a sign-in from
+    whoever pairs. Of the connections from this machine, the shim hands Soloist
+    only those whose other end belongs to your account, by the kernel's socket
+    table (`/proc/net/tcp`), and closes the rest before Soloist sees them.
+    Phones and computers on your network still reach the discovery port, to
+    pair.
 
   `tools/omarock-doctor` checks both.
 - omarock-spotify listens on 127.0.0.1 only, and checks each connection's other
@@ -164,7 +167,10 @@ By hand, run the tools from your omarock clone: the plugin's folder,
   answers only omarock's own requests (`X-Omarock: 1`), so a web page you visit
   can't drive it.
 - Soloist's Connect discovery listens on every interface (mDNS, and a random TCP
-  port), as any Spotify speaker does. Soloist has no setting to turn it off.
+  port), as any Spotify speaker does, and Soloist has no setting to turn it off.
+  Anything that reaches it can pair, signing Soloist in to its own account. Your
+  firewall (Omarchy's ufw) keeps the network out except while you pair, and the
+  shim keeps this machine's other accounts out.
 
 ## Remove it
 
@@ -187,7 +193,7 @@ Then delete the app in Spotify's developer dashboard.
 | File | What it does |
 | --- | --- |
 | `omarock-soloist.service` | Soloist, as a Connect speaker named after the machine, playing into the bus if it's set up, else the default output; only the build `tools/update-soloist` checked |
-| `omarock-soloist-shim.c` | The shim loaded into Soloist: its key off its command line, its control port for your account alone |
+| `omarock-soloist-shim.c` | The shim loaded into Soloist: its key off its command line, its ports for your account alone among this machine's programs |
 | `omarock-spotify.py`, `.service` | The service on 127.0.0.1:8730: status (a long poll), search, albums, artists, playlists, info, transport, saving to your library (`/me/library`), and Spotify's sign-in |
 | `spotify_web.py` | The Web API client (PKCE: no client secret). Also a CLI: `spotify_web.py get /me/player/devices` |
 | `soloist_ws.py` | A small WebSocket client for Soloist's API |

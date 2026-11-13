@@ -5,7 +5,8 @@
 # own volume is the volume. It picks as it starts: ./install sound and
 # ./install --remove sound restart it.
 # Its WebSocket API (no authentication of its own) listens on this machine only,
-# and the shim (below) lets only your account's connections reach it.
+# and its Spotify Connect discovery on every interface: of this machine's
+# programs, the shim (below) lets only your account's reach either.
 # Installed by tools/install-spotify from a commit. Soloist itself is the build
 # you downloaded from Spotify, which tools/update-soloist installed and checked
 # with the shim: this starts only that build (its hash, in soloist.sha256), and

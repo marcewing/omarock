@@ -8,16 +8,19 @@
 //    argument "@key". What the system shows as Soloist's command line is the
 //    original one, with only "@key" in it.
 //
-// 2. Its control port for this account alone. Soloist's WebSocket API (--ws
-//    127.0.0.1:8731: what's playing, the queue, play, volume...) has no
-//    authentication, and every account here can reach 127.0.0.1. Soloist
-//    takes connections through accept(): on a socket listening on a loopback
-//    address, this hands Soloist only those whose far end belongs to the
-//    account Soloist runs as (the kernel's socket table, /proc/net/tcp and
-//    tcp6, lists every socket with its owner), and closes the others before
-//    Soloist sees them. A far end that's gone, or isn't listed, is refused.
-//    Soloist's Spotify Connect discovery listens on every interface, for the
-//    Spotify apps on the network: that's left as it is.
+// 2. Its ports for this account alone, among the programs on this machine.
+//    Soloist's WebSocket API (--ws 127.0.0.1:8731: what's playing, the queue,
+//    play, volume...) has no authentication, and every account here can
+//    reach 127.0.0.1. Its Spotify Connect discovery listens on every
+//    interface, for the Spotify apps on the network, and takes a sign-in
+//    from whoever pairs. Soloist takes connections through accept(): this
+//    hands Soloist a connection from this machine (from a loopback address,
+//    or one of its own) only if its far end belongs to the account Soloist
+//    runs as (the kernel's socket table, /proc/net/tcp and tcp6, lists every
+//    socket here with its owner), and closes the others before Soloist sees
+//    them; a far end that has closed already is refused too, as its owner
+//    can't be checked. A connection from another machine, a phone pairing
+//    say, reaches the discovery port as before.
 //
 // It says in Soloist's log that it handed over the key, and once per port
 // that it guards it: tools/update-soloist checks a new Soloist build by those
@@ -27,6 +30,7 @@
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <ifaddrs.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -89,6 +93,30 @@ static int loopback(const address *a) {
     return IN6_IS_ADDR_LOOPBACK(&a->in6.sin6_addr) ||
            (IN6_IS_ADDR_V4MAPPED(&a->in6.sin6_addr) && a->in6.sin6_addr.s6_addr[12] == 127);
   return 0;
+}
+
+static int inet(const address *a) { return a->sa.sa_family == AF_INET || a->sa.sa_family == AF_INET6; }
+
+// Whether an address is this machine's own: a loopback address, or one of
+// its interfaces' (an IPv4 one in its IPv6 form too). A connection from it
+// is a program's on this machine. When the interfaces can't be read, it
+// counts as this machine's, so the connection is checked.
+static int this_machine(const address *a) {
+  if (loopback(a)) return 1;
+  struct ifaddrs *all;
+  if (getifaddrs(&all) != 0) return 1;
+  const unsigned char *v4 = a->sa.sa_family == AF_INET ? (const unsigned char *)&a->in.sin_addr
+    : IN6_IS_ADDR_V4MAPPED(&a->in6.sin6_addr) ? a->in6.sin6_addr.s6_addr + 12 : NULL;
+  int mine = 0;
+  for (struct ifaddrs *i = all; i && !mine; i = i->ifa_next) {
+    if (!i->ifa_addr) continue;
+    if (v4 && i->ifa_addr->sa_family == AF_INET)
+      mine = !memcmp(&((struct sockaddr_in *)i->ifa_addr)->sin_addr, v4, 4);
+    else if (!v4 && a->sa.sa_family == AF_INET6 && i->ifa_addr->sa_family == AF_INET6)
+      mine = !memcmp(&((struct sockaddr_in6 *)i->ifa_addr)->sin6_addr, &a->in6.sin6_addr, 16);
+  }
+  freeifaddrs(all);
+  return mine;
 }
 
 static unsigned short port_of(const address *a) {
@@ -171,7 +199,11 @@ static void say_guarded(const address *listening) {
     char host[INET6_ADDRSTRLEN] = "?";
     if (listening->sa.sa_family == AF_INET) inet_ntop(AF_INET, &listening->in.sin_addr, host, sizeof host);
     else inet_ntop(AF_INET6, &listening->in6.sin6_addr, host, sizeof host);
-    fprintf(stderr, "omarock-soloist: guards %s:%u: only this account's connections reach Soloist\n", host, port);
+    if (loopback(listening))
+      fprintf(stderr, "omarock-soloist: guards %s:%u: only this account's connections reach Soloist\n", host, port);
+    else
+      fprintf(stderr, "omarock-soloist: guards %s:%u: of this machine's programs, only this account's reach Soloist "
+              "(other machines', a phone pairing say, as before)\n", host, port);
   }
 }
 
@@ -190,19 +222,20 @@ static void say_refused(int listener, int why) {
   else fprintf(stderr, "omarock-soloist: refused a connection to port %u that closed before its owner could be checked\n", port);
 }
 
-// A connection Soloist may have: on a loopback listener, only this account's.
-// 1 when it may, else why not (as ours_alone).
+// A connection Soloist may have: from this machine, only this account's;
+// from another machine, any (Connect discovery; a loopback listener gets
+// none). 1 when it may, else why not (as ours_alone).
 static int allowed(int listener, int conn) {
   address listening, peer, ours;
   socklen_t len = sizeof listening;
-  if (getsockname(listener, &listening.sa, &len) != 0 || !loopback(&listening)) return 1;
+  if (getsockname(listener, &listening.sa, &len) != 0 || !inet(&listening)) return 1;
   say_guarded(&listening);
   len = sizeof peer;
   if (getpeername(conn, &peer.sa, &len) != 0) return -1;
   len = sizeof ours;
   if (getsockname(conn, &ours.sa, &len) != 0) return -1;
-  if (peer.sa.sa_family != ours.sa.sa_family || (peer.sa.sa_family != AF_INET && peer.sa.sa_family != AF_INET6))
-    return 0;
+  if (peer.sa.sa_family != ours.sa.sa_family || !inet(&peer)) return 0;
+  if (!loopback(&listening) && !this_machine(&peer)) return 1;
   return ours_alone(&peer, &ours);
 }
 

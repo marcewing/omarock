@@ -131,6 +131,7 @@ def main():
         for how in ("accept", "accept4"):
             control_port(standin, env, how)
         other_listeners(standin, env, tmp)
+        discovery_port(standin, env)
 
         unit = (HERE / "omarock-soloist.service").read_text()
         start = next(line for line in unit.splitlines() if line.startswith("ExecStart="))
@@ -220,5 +221,70 @@ def other_listeners(standin, env, tmp):
     check("and nothing about it in the log", "guards" not in log and "refused" not in log, log)
 
 
+NETNS = r"""
+set -e
+ip link set lo up
+ip link add d0 type dummy; ip addr add 10.99.0.1/24 dev d0; ip link set d0 up
+# Another machine: a second namespace, joined by a veth pair.
+unshare -n sleep 30 & other=$!
+sleep 0.2
+ip link add v0 type veth peer name v1
+ip link set v1 netns $other
+ip addr add 10.98.0.1/24 dev v0; ip link set v0 up
+nsenter -t $other -n sh -c 'ip link set lo up; ip addr add 10.98.0.2/24 dev v1; ip link set v1 up'
+exec python3 -I "$TEST" --in-netns $other
+"""
+
+
+def discovery_port(standin, env):
+    """A listener on every interface, as Soloist's Spotify Connect discovery:
+    a connection from this machine is checked as on the control port, one
+    from another machine is handed over as it comes. In a private network
+    namespace (unshare -rn), so nothing listens on your network: this
+    machine is 10.99.0.1 there, another machine 10.98.0.2."""
+    run = subprocess.run(["unshare", "-rn", "sh", "-c", NETNS], capture_output=True, text=True, timeout=60,
+                         env=dict(env, LD_PRELOAD="", TEST=__file__, STANDIN=str(standin), SHIM=env["LD_PRELOAD"]))
+    try:
+        got = json.loads(run.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        check("the discovery port, in a private network namespace", False, run.stdout + run.stderr)
+        return
+    check("discovery port: this machine's connection (this account's) reaches Soloist", got["mine"] == "accepted", got)
+    check("discovery port: one from this machine whose far end has gone is refused; Soloist gets the next",
+          got["gone"] == "accepted" and "closed before its owner could be checked" in got["log"], got)
+    check("discovery port: another machine's is handed over as it comes, even closed (a phone pairing)",
+          got["other"] == "accepted", got)
+    check("and its log says once how the port is guarded",
+          got["log"].count(f"guards 0.0.0.0:{got['port']}: of this machine's programs, only this account's") == 1, got["log"])
+
+
+def in_netns(other_pid):
+    """discovery_port's half inside the namespace: prints what happened, as JSON."""
+    env = dict(os.environ, LD_PRELOAD=os.environ["SHIM"])
+    soloist = Listening(Path(os.environ["STANDIN"]), env, "0.0.0.0", "accept")
+    out = {"port": soloist.port}
+    try:
+        mine = socket.create_connection(("10.99.0.1", soloist.port))
+        out["mine"] = soloist.go()
+        mine.close()
+        gone = socket.create_connection(("10.99.0.1", soloist.port))
+        gone.close()
+        time.sleep(0.2)
+        mine = socket.create_connection(("10.99.0.1", soloist.port))
+        out["gone"] = soloist.go()
+        mine.close()
+        subprocess.run(["nsenter", "-t", str(other_pid), "-n", "python3", "-I", "-c",
+                        f"import socket; socket.create_connection(('10.98.0.1', {soloist.port}), timeout=5).close()"],
+                       check=True, timeout=10)
+        time.sleep(0.2)
+        out["other"] = soloist.go()
+    finally:
+        out["log"] = soloist.stop()
+    print(json.dumps(out))
+
+
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["--in-netns"]:
+        in_netns(sys.argv[2])
+    else:
+        main()

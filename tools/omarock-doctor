@@ -197,10 +197,24 @@ if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/om
     if tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null | grep -qx -- '@key'; then ok "Soloist's key isn't on its command line"
     else bad "Soloist's key is on its command line, where every account here can read it: Update… in omarock's settings (Spotify), or tools/install-spotify --start"; fi
     run=$(systemctl --user show -p InvocationID --value omarock-soloist)
-    if journalctl --user --no-pager -q -o cat "_SYSTEMD_INVOCATION_ID=$run" 2>/dev/null | grep -q '^omarock-soloist: guards 127\.0\.0\.1:'; then
+    said() { journalctl --user --no-pager -q -o cat "_SYSTEMD_INVOCATION_ID=$run" 2>/dev/null | grep -q "$1"; }
+    if said '^omarock-soloist: guards 127\.0\.0\.1:'; then
       ok "only your account reaches Soloist's control port"
     else
       bad "Soloist's control port isn't guarded (no word from omarock's shim): Update… in omarock's settings (Spotify), or tools/install-spotify --start"
+    fi
+    # Its Spotify Connect discovery: reached once from this machine (held a
+    # moment, so the shim can tell whose it is), as a program here would.
+    dport=$(ss -ltnpH 2>/dev/null | awk -v p="pid=$pid," 'index($0, p) && $4 !~ /^(127\.|\[::1\])/ {n = split($4, a, ":"); print a[n]; exit}')
+    at=$(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')
+    if [[ -n $dport && -n $at ]]; then
+      (exec 3<>"/dev/tcp/$at/$dport" && sleep 0.5) 2>/dev/null
+      sleep 0.3
+      if said "^omarock-soloist: guards [^ ]*:$dport: of this machine"; then
+        ok "of this machine's programs, only yours reach Soloist's Spotify Connect discovery (other machines' do, for pairing)"
+      else
+        bad "Soloist's Spotify Connect discovery isn't guarded from this machine's other accounts: Update… in omarock's settings (Spotify), or tools/install-spotify --start"
+      fi
     fi
   fi
   h=$(health "$(setting spotifyService http://127.0.0.1:8730)")

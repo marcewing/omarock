@@ -2,8 +2,9 @@
 # vm-checks: what only a throwaway machine (a test VM) can check, before a
 # release:
 #   - another account on the machine can't use omarock's services:
-#     omarock-spotify, omarock-sxm and Soloist's control port turn its
-#     connections away, and take this account's;
+#     omarock-spotify, omarock-sxm and Soloist's control port and discovery
+#     port turn its connections away, and take this account's (and the
+#     discovery port another machine's);
 #   - a new Soloist build is taken, or turned down, as it should be: one put in
 #     by hand isn't started until it's checked, one that can't work with
 #     omarock's shim is turned down by reading it or by running it (and the
@@ -41,7 +42,7 @@ hosts="apresolve.spotify.com accounts.spotify.com api.spotify.com login5.spotify
   spclient.wg.spotify.com api.edge-gateway.siriusxm.com imgsrv-sxm-prod-device.streaming.siriusxm.com
   lookaround-cache-prod.streaming.siriusxm.com www.siriusxm.com"
 { printf '127.0.0.1 %s # omarock-vm-checks\n' $hosts; printf '::1 %s # omarock-vm-checks\n' $hosts; } | sudo tee -a /etc/hosts >/dev/null
-trap 'sudo sed -i "/# omarock-vm-checks\$/d" /etc/hosts; sudo userdel -r "$other" 2>/dev/null' EXIT
+trap 'sudo sed -i "/# omarock-vm-checks\$/d" /etc/hosts; sudo userdel -r "$other" 2>/dev/null; sudo ip netns del omarock-other-machine 2>/dev/null; sudo ip link del omv0 2>/dev/null' EXIT
 sleep 2
 for h in api.edge-gateway.siriusxm.com apresolve.spotify.com; do
   getent ahosts "$h" | awk '{print $1}' | sort -u | grep -qvE '^(127\.0\.0\.1|::1)$' && { echo "vm-checks: $h still resolves elsewhere" >&2; exit 1; }
@@ -93,8 +94,8 @@ printf '%s\n' "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" >"$work
 limit=120 run_y spotify spotify
 check "./install spotify installed the downloaded Soloist, checked with omarock" \
   [ "$(installed checked)" = true -a "$(installed built)" = $((now - 7200)) ]
-guarded=$(since_start | grep -c '^omarock-soloist: guards 127\.0\.0\.1:8731:')
-check "Soloist runs under the shim, which guards its control port" [ "$(soloist_state)" = "active 0" -a "$guarded" = 1 ]
+guarded=$(since_start | grep -c '^omarock-soloist: guards ')
+check "Soloist runs under the shim, which guards its control port and its discovery port ($guarded)" [ "$(soloist_state)" = "active 0" -a "$guarded" = 2 ]
 refused=$(since_start | grep -c 'omarock-soloist: refused')
 check "and refused none of this account's connections, the install's own check included ($refused)" [ "$refused" = 0 ]
 
@@ -108,11 +109,29 @@ mine=$(code http://127.0.0.1:8720/v1/health) theirs=$(as_other curl -s -o /dev/n
 check "omarock-sxm answers this account ($mine) and refuses another's ($theirs)" [ "$mine" != 403 -a "$mine" != 000 -a "$theirs" = 403 ]
 theirs=$(as_other curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1:8720/stream/x)
 check "and its streams too ($theirs)" [ "$theirs" = 403 ]
-greet='import socket; s = socket.create_connection(("127.0.0.1", 8731), timeout=5); s.settimeout(5); print(s.recv(16).decode().strip() or "closed")'
-mine=$(python3 -I -c "$greet" 2>&1) theirs=$(as_other python3 -I -c "$greet" 2>&1)
+greet='import socket, sys; s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5); s.settimeout(5); print(s.recv(16).decode().strip() or "closed")'
+mine=$(python3 -I -c "$greet" 127.0.0.1 8731 2>&1) theirs=$(as_other python3 -I -c "$greet" 127.0.0.1 8731 2>&1)
 check "Soloist's control port takes this account's connection ($mine) and closes another's ($theirs)" \
   [ "$mine" = soloist -a "$theirs" = closed ]
 check "and the shim says so in Soloist's log" bash -c "journalctl --user --no-pager -q -o cat -u omarock-soloist | grep -q 'refused a connection to port 8731 from another account'"
+# Its Spotify Connect discovery, on every interface: this machine's other
+# accounts are turned away, another machine isn't (a network namespace with
+# a veth pair plays the other machine: nothing outside the VM is involved).
+pid=$(systemctl --user show -p MainPID --value omarock-soloist)
+dport=$(ss -ltnpH | awk -v p="pid=$pid," 'index($0, p) && $4 !~ /^127\./ {n = split($4, a, ":"); print a[n]; exit}')
+own=$(ip -4 -o addr show scope global | awk '{split($4, a, "/"); print a[1]; exit}')
+mine=$(python3 -I -c "$greet" "$own" "$dport" 2>&1) theirs=$(as_other python3 -I -c "$greet" "$own" "$dport" 2>&1)
+check "Soloist's discovery port (${dport:-none}) takes this account's connection from this machine ($mine) and closes another account's ($theirs)" \
+  [ -n "$dport" -a "$mine" = zeroconf -a "$theirs" = closed ]
+sudo ip netns add omarock-other-machine
+sudo ip link add omv0 type veth peer name omv1
+sudo ip link set omv1 netns omarock-other-machine
+sudo ip addr add 10.98.0.1/24 dev omv0; sudo ip link set omv0 up
+sudo ip netns exec omarock-other-machine sh -c 'ip link set lo up; ip addr add 10.98.0.2/24 dev omv1; ip link set omv1 up'
+sudo ufw allow in on omv0 >/dev/null 2>&1
+theirs=$(sudo ip netns exec omarock-other-machine python3 -I -c "$greet" 10.98.0.1 "$dport" 2>&1)
+check "and another machine's, as before (a phone pairing): $theirs" [ "$theirs" = zeroconf ]
+sudo ufw delete allow in on omv0 >/dev/null 2>&1; sudo ip link del omv0 2>/dev/null; sudo ip netns del omarock-other-machine
 
 echo "== a Soloist put in by hand"
 standin "$work/by-hand.tar.gz" $((now - 3600))
