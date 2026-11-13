@@ -87,8 +87,9 @@
   apple-network scenarios check that none of these is on one. The commands
   the docs and setup windows show people follow the same rule:
   `tests/docs.test.js` fails on one that would put a token, a key, a login or a
-  file's contents (`$(cat FILE)`) on a command line. Before a release,
-  `tools/capture/argv-survey` logs every program started, everywhere (below).
+  file's contents (read into an argument with `$(…)`) on a command line. Before
+  a release, `tools/capture/argv-survey` logs every program started, everywhere
+  (below).
 - **Your account's alone.** Every account on the machine can reach 127.0.0.1,
   so omarock-spotify (8730) and omarock-sxm (8720) look up who owns the other
   end of each connection in the kernel's socket table (`/proc/net/tcp`, `tcp6`:
