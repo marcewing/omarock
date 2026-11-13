@@ -4,18 +4,20 @@ import Foundation
 /// so the Mac doesn't stream Apple Music for nobody.
 ///
 /// The mount is hidden (and Icecast serves no status pages); /admin/stats (admin password)
-/// still reports its listeners.
+/// still reports its listeners, asked through StreamService, which checks it's our Icecast.
 @MainActor
 final class ListenerWatch {
     private static let grace: TimeInterval = 30
 
     private let player: Player
+    private let stream: StreamService
     private let onPause: () -> Void
     private var timer: Timer?
     private var silentSince: Date?
 
-    init(player: Player, onPause: @escaping () -> Void) {
+    init(player: Player, stream: StreamService, onPause: @escaping () -> Void) {
         self.player = player
+        self.stream = stream
         self.onPause = onPause
     }
 
@@ -31,7 +33,7 @@ final class ListenerWatch {
             return
         }
         Task {
-            guard let listeners = await Self.listeners() else { return }  // Icecast unreachable: don't guess
+            guard let listeners = await listeners() else { return }  // Icecast unreachable: don't guess
             if listeners > 0 {
                 silentSince = nil
             } else if let since = silentSince {
@@ -46,14 +48,8 @@ final class ListenerWatch {
         }
     }
 
-    private static func listeners() async -> Int? {
-        guard let password = try? String(contentsOf: Paths.adminPassword, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:8000/admin/stats")!)
-        request.timeoutInterval = 2
-        request.setValue("Basic " + Data("admin:\(password)".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
-              let xml = String(data: data, encoding: .utf8) else { return nil }
+    private func listeners() async -> Int? {
+        guard let xml = await stream.icecastAdmin("/admin/stats") else { return nil }
         // <source mount="/omarock-SECRET.ogg">…<listeners>N</listeners>…</source>
         guard let name = try? Secrets.streamMount() else { return nil }
         guard let mount = xml.range(of: "<source mount=\"\(name)\">") else { return 0 }  // no source: nobody hears it

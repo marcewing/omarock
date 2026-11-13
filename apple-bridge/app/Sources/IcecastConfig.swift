@@ -29,7 +29,7 @@ enum IcecastConfig {
         let sockets = (listenHost.map { [$0, "127.0.0.1"] } ?? [nil]).map { host in
             """
                 <listen-socket>
-                    <port>8000</port>\(host.map { "\n        <bind-address>\(escape($0))</bind-address>" } ?? "")
+                    <port>\(Icecast.port)</port>\(host.map { "\n        <bind-address>\(escape($0))</bind-address>" } ?? "")
                 </listen-socket>
             """
         }.joined(separator: "\n")

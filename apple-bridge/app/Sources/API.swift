@@ -259,6 +259,9 @@ final class API {
             "bonjour": bonjour.state,
             "capturing": stream.capturing,
             "encoding": stream.encoderRunning,
+            // running, starting, taken (port 8000 answered by something that isn't this
+            // account's Icecast: sent nothing), or failed (from 0.12.0; StreamService).
+            "icecast": stream.icecastState,
             // libFLAC's limit_min_bitrate: silence streams at about 6 KB/s (StreamService).
             "minBitrate": true,
             // Seconds from a status's position to its audio reaching Icecast (StreamService).
@@ -267,7 +270,7 @@ final class API {
             "pairing": true,
         ]
         if let storefront = music.storefront { health["storefront"] = storefront }
-        if authorized(request) { health["stream"] = config.streamURL ?? "http://\(request.host):8000\(mount)" }
+        if authorized(request) { health["stream"] = config.streamURL ?? "http://\(request.host):\(Icecast.port)\(mount)" }
         return health
     }
 
@@ -344,7 +347,7 @@ final class Bridge {
         let token = try Secrets.token()
         try IcecastConfig.prepare(listenHost: config.listenHost, icecast: config.icecast)
         stream = try StreamService(config: config)
-        listeners = ListenerWatch(player: player) { [player] in player.pause() }
+        listeners = ListenerWatch(player: player, stream: stream) { [player] in player.pause() }
         player.ensureMuted = { [stream] in await stream.waitUntilPlaybackIsTapped() }
         let artwork = ArtworkServer(token: token)
         Normalize.artworkServer = artwork

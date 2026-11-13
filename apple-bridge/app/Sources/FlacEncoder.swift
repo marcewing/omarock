@@ -2,8 +2,9 @@ import FLAC
 import Foundation
 
 /// `OmarockBridge --encode RATE [MOUNT]`: s16le stereo PCM on stdin → Ogg FLAC, sent to
-/// Icecast as the mount's source (IcecastSource), or to stdout if MOUNT is `-`. It ends when
-/// the connection does, and StreamService starts a new one, with new headers.
+/// our Icecast as the mount's source (IcecastSource), or to stdout if MOUNT is `-`. It ends
+/// when the connection does, and StreamService starts a new one, with new headers. Exits
+/// with Icecast.notOursStatus if something other than our Icecast took the connection.
 ///
 /// libFLAC rather than ffmpeg's FLAC encoder for its limit_min_bitrate: a frame is never
 /// all constant subframes, so digital silence costs at least 1 bit a sample (about 6 KB/s)
@@ -27,7 +28,11 @@ enum FlacEncoder {
             out = STDOUT_FILENO
         } else {
             do {
-                out = try IcecastSource.connect(mount: mount)
+                let icecast = (try? Config.load())?.icecast ?? Config.homebrew("icecast")
+                out = try IcecastSource.connect(mount: mount, executable: icecast)
+            } catch let error as Icecast.NotOurs {
+                _ = fail("\(error)")
+                return Icecast.notOursStatus
             } catch {
                 return fail("\(error)")
             }
@@ -126,83 +131,6 @@ enum FlacEncoder {
     private static func fail(_ message: String) -> Int32 {
         FileHandle.standardError.write(Data("omarock bridge --encode: \(message)\n".utf8))
         return 1
-    }
-}
-
-/// Icecast's source protocol, as libshout speaks it: an HTTP PUT to the mount with the
-/// source password, then the stream as the request's body for as long as it lasts.
-enum IcecastSource {
-    /// A socket to 127.0.0.1:8000 that Icecast has taken as the mount's source.
-    static func connect(mount: String) throws -> Int32 {
-        let password = try Secrets.sourcePassword()
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw BridgeError("socket(): \(String(cString: strerror(errno)))") }
-        var on: Int32 = 1
-        // A closed connection is EPIPE, not SIGPIPE; and each page goes out as it's written.
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, socklen_t(MemoryLayout<Int32>.size))
-        var timeout = timeval(tv_sec: 5, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = in_port_t(8000).bigEndian
-        address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let connected = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        guard connected == 0 else {
-            let reason = String(cString: strerror(errno))
-            close(fd)
-            throw BridgeError("cannot connect to Icecast on 127.0.0.1:8000: \(reason)")
-        }
-        let request = [
-            "PUT \(mount) HTTP/1.1",
-            "Host: 127.0.0.1:8000",
-            "Authorization: Basic " + Data("source:\(password)".utf8).base64EncodedString(),
-            "User-Agent: omarock-bridge",
-            "Content-Type: application/ogg",
-            "Ice-Name: omarock",
-            "Ice-Public: 0",
-            "Expect: 100-continue",
-            "", "",
-        ].joined(separator: "\r\n")
-        // Icecast answers 100 Continue once it takes the source; 401 for a wrong password,
-        // 403 when the mount already has one.
-        var response: [UInt8] = []
-        var byte: UInt8 = 0
-        if writeAll(fd, Array(request.utf8)) {
-            while !response.ends(with: [13, 10, 13, 10]), response.count < 4096, read(fd, &byte, 1) == 1 {
-                response.append(byte)
-            }
-        }
-        let status = String(decoding: response, as: UTF8.self).split(separator: "\r\n").first.map(String.init) ?? ""
-        let code = status.split(separator: " ").dropFirst().first
-        guard code == "100" || code == "200" else {
-            close(fd)
-            throw BridgeError("Icecast refused the source for \(mount.hasPrefix("/omarock-") ? "the stream's mount" : mount): \(status.isEmpty ? "no answer" : status)")
-        }
-        return fd
-    }
-}
-
-private extension Array where Element == UInt8 {
-    func ends(with suffix: [UInt8]) -> Bool { count >= suffix.count && Array(self[(count - suffix.count)...]) == suffix }
-}
-
-/// Writes all of `bytes`, retrying after signals; false once the fd fails.
-func writeAll(_ fd: Int32, _ bytes: [UInt8]) -> Bool {
-    bytes.withUnsafeBytes { buffer in
-        var at = 0
-        while at < buffer.count {
-            let n = Darwin.write(fd, buffer.baseAddress! + at, buffer.count - at)
-            if n < 0, errno == EINTR { continue }
-            guard n > 0 else { return false }
-            at += n
-        }
-        return true
     }
 }
 

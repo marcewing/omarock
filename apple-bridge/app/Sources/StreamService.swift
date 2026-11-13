@@ -7,8 +7,8 @@ import ProcessTap
 /// The pipe outlives the encoder: we keep its read end open too, so when the encoder exits
 /// the writer just blocks (the tap side drops audio) instead of failing with EPIPE, and the
 /// restarted encoder reads from the same pipe. (Not Foundation's Pipe: Process closes the
-/// parent's copy of a Pipe it hands to a child.) Icecast is started as our child unless one is
-/// already serving on 127.0.0.1:8000.
+/// parent's copy of a Pipe it hands to a child.) Icecast is started as our child unless this
+/// account's is already on 127.0.0.1:8000; nothing is sent to anything else there (Icecast).
 final class StreamService {
     private let config: Config
     private let sampleRate: Double
@@ -96,7 +96,7 @@ final class StreamService {
                 }
             }
         }
-        startIcecastIfNeeded { [self] in
+        ensureIcecast { [self] in
             startEncoder()
             writer.start()
             supervisor.start()
@@ -112,27 +112,56 @@ final class StreamService {
 
     // MARK: Icecast
 
-    private func startIcecastIfNeeded(then next: @escaping () -> Void) {
-        icecastAnswers { [self] up in
-            if up, let pid = staleIcecast() {
+    /// For /v1/health: `running` (an Icecast of this account took the last connection),
+    /// `starting`, `taken` (something else answers on 127.0.0.1:8000 and gets nothing; see
+    /// Icecast) or `failed` (it can't be started).
+    private(set) var icecastState = "starting"
+
+    /// Makes sure our Icecast is the one on 127.0.0.1:8000, then `next`: starts one if the
+    /// port is free, uses this account's if one is already there, and while anything else
+    /// answers, waits (checking every 5 s) rather than start a second one beside it.
+    private func ensureIcecast(then next: @escaping () -> Void) {
+        let executable = config.icecast
+        offMain({ Icecast.holder(executable: executable) }) { [self] holder in
+            guard !stopping else { return }
+            switch holder {
+            case .ours(let pid) where isStale(pid):
                 // Say, one that outlived a bridge before 0.9.0, still on the old addresses and mount.
                 Log.info("icecast: pid \(pid) started before icecast.xml last changed; restarting it")
                 kill(pid, SIGTERM)
-                waitForIcecastToGo { [self] in
+                waitForExit(pid) { [self] in
                     launchIcecast()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: next)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.ensureIcecast(then: next) }
                 }
-            } else if up {
-                Log.info("icecast: already running on 127.0.0.1:8000, using it")
+            case .ours(let pid):
+                icecastIsOurs()
+                guard pid != icecast?.processIdentifier else { return next() }
+                Log.info("icecast: this account's Icecast (pid \(pid)) is already on 127.0.0.1:8000; using it")
                 // Icecast only notices a dead source (say, ours before a restart) at its
                 // source-timeout, and refuses a new one until then; the mount is ours, so clear it.
                 killStaleSource(then: next)
-            } else {
-                launchIcecast()
-                // Give a fresh Icecast a moment to bind before the encoder connects (it's restarted if it can't).
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: next)
+            case .free:
+                if icecast?.isRunning != true { launchIcecast() }
+                // Give a fresh Icecast a moment to bind, then check it's the one answering.
+                let wait: TimeInterval = icecastState == "failed" ? 5 : 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { self.ensureIcecast(then: next) }
+            case .taken:
+                icecastIsTaken()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.ensureIcecast(then: next) }
             }
         }
+    }
+
+    private func icecastIsOurs() {
+        if icecastState == "taken" { Log.info("icecast: 127.0.0.1:8000 is this account's Icecast again") }
+        icecastState = "running"
+    }
+
+    private func icecastIsTaken() {
+        if icecastState != "taken" {
+            Log.error("icecast: \(Icecast.NotOurs()); checking again every 5 s")
+        }
+        icecastState = "taken"
     }
 
     private func launchIcecast() {
@@ -154,57 +183,67 @@ final class StreamService {
             icecast = process
             Log.info("icecast: started, pid \(process.processIdentifier)")
         } catch {
+            icecastState = "failed"
             Log.error("icecast: cannot start \(config.icecast): \(error)")
         }
     }
 
-    /// The Icecast on our icecast.xml (by its pid file), if it started before the file's
-    /// last change and so runs on an older one.
-    private func staleIcecast() -> pid_t? {
-        guard let text = try? String(contentsOf: Paths.icecastPid, encoding: .utf8),
-              let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1,
-              let written = (try? FileManager.default.attributesOfItem(atPath: Paths.icecastConfig.path))?[.modificationDate] as? Date
-        else { return nil }
-        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+    /// Whether Icecast `pid` started before icecast.xml's last change, and so runs on an older one.
+    private func isStale(_ pid: pid_t) -> Bool {
+        guard let written = (try? FileManager.default.attributesOfItem(atPath: Paths.icecastConfig.path))?[.modificationDate] as? Date
+        else { return false }
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0,
-              URL(fileURLWithPath: String(cString: path)).lastPathComponent == "icecast",
-              proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return false }
         let started = Date(timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1e6)
-        return started < written ? pid : nil
+        return started < written
     }
 
-    private func waitForIcecastToGo(tries: Int = 50, then next: @escaping () -> Void) {
-        icecastAnswers { [self] up in
-            guard up, tries > 0 else { return next() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.waitForIcecastToGo(tries: tries - 1, then: next) }
-        }
+    private func waitForExit(_ pid: pid_t, tries: Int = 50, then next: @escaping () -> Void) {
+        guard kill(pid, 0) == 0, tries > 0 else { return next() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.waitForExit(pid, tries: tries - 1, then: next) }
     }
 
     private func killStaleSource(then next: @escaping () -> Void) {
-        guard let password = try? String(contentsOf: Paths.adminPassword, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines) else { return next() }
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:8000/admin/killsource?mount=\(mount)")!)
-        request.timeoutInterval = 2
-        request.setValue("Basic " + Data("admin:\(password)".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
-        URLSession.shared.dataTask(with: request) { data, response, _ in
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let path = "/admin/killsource?mount=\(mount)"
+        let executable = config.icecast
+        offMain({ Result { try Icecast.admin(path, executable: executable) } }) { [self] result in
+            switch result {
             // 200 with "Source Removed" if there was one; 400 if the mount was free.
-            if status == 200, body.contains("Removed") { Log.info("icecast: removed a stale source from the stream's mount") }
-            DispatchQueue.main.async(execute: next)
-        }.resume()
+            case .success(let (status, body)) where status == 200 && body.contains("Removed"):
+                Log.info("icecast: removed a stale source from the stream's mount")
+            case .failure(is Icecast.NotOurs):
+                icecastIsTaken()
+            default:
+                break
+            }
+            next()
+        }
     }
 
-    /// Whether anything answers HTTP on 127.0.0.1:8000. Ours serves no pages, so any status.
-    private func icecastAnswers(_ done: @escaping (Bool) -> Void) {
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:8000/")!)
-        request.timeoutInterval = 1
-        URLSession.shared.dataTask(with: request) { _, response, _ in
-            let up = response is HTTPURLResponse
-            DispatchQueue.main.async { done(up) }
-        }.resume()
+    /// An admin page from our Icecast (Icecast.admin), or nil: not 200, or not our Icecast.
+    func icecastAdmin(_ path: String) async -> String? {
+        let executable = config.icecast
+        return await withCheckedContinuation { continuation in
+            offMain({ Result { try Icecast.admin(path, executable: executable) } }) { [self] result in
+                switch result {
+                case .success(let (status, body)):
+                    icecastIsOurs()
+                    continuation.resume(returning: status == 200 ? body : nil)
+                case .failure(let error):
+                    if error is Icecast.NotOurs { icecastIsTaken() }
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    /// Runs `work` off the main thread (it blocks on sockets), then `done` with its result on it.
+    private func offMain<T>(_ work: @escaping () -> T, then done: @escaping (T) -> Void) {
+        DispatchQueue.global(qos: .utility).async {
+            let result = work()
+            DispatchQueue.main.async { done(result) }
+        }
     }
 
     // MARK: Encoder
@@ -224,16 +263,14 @@ final class StreamService {
             DispatchQueue.main.async {
                 guard let self, !self.stopping else { return }
                 // A new connection needs the stream's headers again, so a new encoder.
-                Log.error("encoder: exited (\(p.terminationReason == .exit ? "status" : "signal") \(p.terminationStatus), see encoder.log); restarting in 1 s")
-                // If Icecast is what went away (say, one started by hand before the bridge),
-                // run our own before the encoder reconnects.
-                self.icecastAnswers { up in
-                    if !up, self.icecast?.isRunning != true {
-                        Log.error("icecast: not answering on 127.0.0.1:8000; starting it")
-                        self.launchIcecast()
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.startEncoder() }
+                if p.terminationReason == .exit, p.terminationStatus == Icecast.notOursStatus {
+                    self.icecastIsTaken()
+                } else {
+                    Log.error("encoder: exited (\(p.terminationReason == .exit ? "status" : "signal") \(p.terminationStatus), see encoder.log); restarting in 1 s")
                 }
+                // If Icecast is what went away (say, one started by hand before the bridge),
+                // run our own before the encoder reconnects; if something else took the port, wait.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.ensureIcecast { self.startEncoder() } }
             }
         }
         do {
