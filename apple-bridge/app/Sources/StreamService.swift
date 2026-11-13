@@ -238,6 +238,21 @@ final class StreamService {
         }
     }
 
+    /// Listeners on the stream's mount, or nil if unknown (our Icecast isn't running, or
+    /// didn't answer). The mount is hidden (and Icecast serves no status pages); /admin/stats
+    /// (admin password) still reports them. For ListenerWatch and /v1/health.
+    func listeners() async -> Int? {
+        guard icecastState == "running", let xml = await icecastAdmin("/admin/stats") else { return nil }
+        // <source mount="/omarock-SECRET.ogg">…<listeners>N</listeners>…</source>
+        guard let source = xml.range(of: "<source mount=\"\(mount)\">") else { return 0 }  // no source: nobody hears it
+        let rest = xml[source.upperBound...]
+        let end = rest.range(of: "</source>")?.lowerBound ?? rest.endIndex
+        let body = rest[..<end]
+        guard let open = body.range(of: "<listeners>"), let close = body.range(of: "</listeners>", range: open.upperBound..<body.endIndex)
+        else { return nil }
+        return Int(body[open.upperBound..<close.lowerBound])
+    }
+
     /// Runs `work` off the main thread (it blocks on sockets), then `done` with its result on it.
     private func offMain<T>(_ work: @escaping () -> T, then done: @escaping (T) -> Void) {
         DispatchQueue.global(qos: .utility).async {

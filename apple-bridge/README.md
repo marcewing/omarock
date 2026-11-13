@@ -299,8 +299,9 @@ git pull && ./install
 ```
 
 or `git pull && apple-bridge/app/build.sh --run`. Both wait until nothing is listening to the
-stream, because restarting the bridge under mpd gives mpd errors until it's back.
-`build.sh --run-now` restarts right away.
+stream, because restarting the bridge under mpd gives mpd errors until it's back. (They ask
+the running bridge, and one before 0.13.0 can't say, so updating from it restarts right
+away.) `build.sh --run-now` restarts right away.
 
 ## 3. The Linux side
 

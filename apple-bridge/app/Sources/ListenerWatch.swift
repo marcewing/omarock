@@ -3,8 +3,7 @@ import Foundation
 /// Pauses playback when the Icecast mount has had no listener for 30 s while playing,
 /// so the Mac doesn't stream Apple Music for nobody.
 ///
-/// The mount is hidden (and Icecast serves no status pages); /admin/stats (admin password)
-/// still reports its listeners, asked through StreamService, which checks it's our Icecast.
+/// The count comes from StreamService.listeners(), which asks our Icecast.
 @MainActor
 final class ListenerWatch {
     private static let grace: TimeInterval = 30
@@ -33,7 +32,7 @@ final class ListenerWatch {
             return
         }
         Task {
-            guard let listeners = await listeners() else { return }  // Icecast unreachable: don't guess
+            guard let listeners = await stream.listeners() else { return }  // Icecast unreachable: don't guess
             if listeners > 0 {
                 silentSince = nil
             } else if let since = silentSince {
@@ -46,18 +45,5 @@ final class ListenerWatch {
                 silentSince = Date()
             }
         }
-    }
-
-    private func listeners() async -> Int? {
-        guard let xml = await stream.icecastAdmin("/admin/stats") else { return nil }
-        // <source mount="/omarock-SECRET.ogg">…<listeners>N</listeners>…</source>
-        guard let name = try? Secrets.streamMount() else { return nil }
-        guard let mount = xml.range(of: "<source mount=\"\(name)\">") else { return 0 }  // no source: nobody hears it
-        let rest = xml[mount.upperBound...]
-        let end = rest.range(of: "</source>")?.lowerBound ?? rest.endIndex
-        let source = rest[..<end]
-        guard let open = source.range(of: "<listeners>"), let close = source.range(of: "</listeners>", range: open.upperBound..<source.endIndex)
-        else { return nil }
-        return Int(source[open.upperBound..<close.lowerBound])
     }
 }

@@ -45,16 +45,13 @@ timed() {
   return $st
 }
 
-# Listeners on the bridge's Icecast mount, from its admin list (0 if Icecast isn't up). The
-# mount is /omarock.ogg before 0.9.0, /omarock-SECRET.ogg from then on.
-listeners() {
-  local conf=$support/icecast.xml user pass
-  [[ -f $conf ]] || { print 0; return; }
-  user=$(sed -n 's:.*<admin-user>\(.*\)</admin-user>.*:\1:p' $conf)
-  pass=$(sed -n 's:.*<admin-password>\(.*\)</admin-password>.*:\1:p' $conf)
-  curl -s -m 5 -K - 'http://127.0.0.1:8000/admin/listmounts' <<<"user = \"$user:$pass\"" \
-    | xmllint --xpath 'string(//source[starts-with(@mount,"/omarock")]/listeners)' - 2>/dev/null
+# Listeners on the stream, as the running bridge counts them (its /v1/health, from 0.13.0,
+# which tells this Mac). Nothing if it can't tell: no bridge, an older one, or its Icecast
+# isn't up. Never Icecast's admin password: whatever holds 127.0.0.1:8000 would get it.
+bridge_health() {
+  curl -s -m 5 "http://127.0.0.1:${$(plutil -extract port raw -o - "$support/config.json" 2>/dev/null || true):-8710}/v1/health" 2>/dev/null || true
 }
+listeners() { bridge_health | plutil -extract listeners raw -o - - 2>/dev/null || true; }
 
 # Forgets the installed app's launch agent through SMAppService, which stops it too: a
 # bootout alone leaves SMAppService's record enabled, and the next install's bridge then
@@ -177,9 +174,13 @@ info=$("$built/Contents/MacOS/OmarockBridge" --setup)
 field() { sed -n "s/^ *\"$1\" *: *\"\(.*\)\".*/\1/p" <<<"$info"; }
 
 if [[ $mode == --run ]]; then
-  while (( ${$(listeners):-0} > 0 )); do
+  count=$(listeners)
+  [[ -z $count && -n $(bridge_health) ]] &&
+    print "  The bridge doesn't say whether anything is listening to the stream (before 0.13.0 it can't); restarting it now."
+  while (( ${count:-0} > 0 )); do
     print "  The stream has a listener (mpd); waiting for it to leave (or use --run-now)."
     sleep 30
+    count=$(listeners)
   done
 fi
 

@@ -713,18 +713,11 @@ pair_only() {
 
 # ---- ./install --uninstall ----
 
-# Listeners on the bridge's Icecast mount, from its admin list (0 if Icecast isn't
-# up): /omarock.ogg before 0.9.0, /omarock-SECRET.ogg from then on. The admin
-# password goes to curl on stdin.
-listeners() {
-  local conf=$support/icecast.xml user pass
-  [[ -f $conf ]] || { print 0; return; }
-  user=$(sed -n 's:.*<admin-user>\(.*\)</admin-user>.*:\1:p' "$conf")
-  pass=$(sed -n 's:.*<admin-password>\(.*\)</admin-password>.*:\1:p' "$conf")
-  print -r -- "user = \"$user:$pass\"" \
-    | curl -s -m 5 -K - 'http://127.0.0.1:8000/admin/listmounts' \
-    | xmllint --xpath 'string(//source[starts-with(@mount,"/omarock")]/listeners)' - 2>/dev/null
-}
+# Listeners on the stream, as the running bridge counts them (its /v1/health, from
+# 0.13.0, which tells this Mac). Nothing if it can't tell: no bridge, an older one, or
+# its Icecast isn't up. Never Icecast's admin password: whatever holds 127.0.0.1:8000
+# would get it.
+listeners() { health_value listeners; }
 # The bridge's Icecast: it can outlive a bridge, so by its config.
 icecast_pattern() { print -r -- "icecast -c $support/icecast.xml"; }
 gone() { ! kill -0 $1 2>/dev/null; }

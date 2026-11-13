@@ -77,7 +77,7 @@ final class API {
 
         if route == ["health"] {
             guard method == "GET" else { throw APIError(status: 405, message: "Use GET.") }
-            return respond(.json(200, health(request)))
+            return respond(.json(200, await health(request)))
         }
         if method == "GET", route.count == 4, route[0] == "artwork" {
             // Keyed by k in the URL, not the bearer token (see apple-bridge/API.md, Objects).
@@ -111,7 +111,7 @@ final class API {
                 LibraryIndex.shared.startMembership()
             }
             Log.info("MusicKit authorization: \(status)")
-            return respond(.json(200, health(request)))
+            return respond(.json(200, await health(request)))
         default:
             break
         }
@@ -248,7 +248,9 @@ final class API {
 
     /// `stream` only for the right token: its address is the secret that keeps the stream
     /// to token holders. Built from the request's Host, so it works by the name used.
-    private func health(_ request: HTTPRequest) -> [String: Any] {
+    /// `listeners` for the token or a request from this Mac (the install scripts ask it, so
+    /// they never send Icecast its admin password), and only while it's known.
+    private func health(_ request: HTTPRequest) async -> [String: Any] {
         var health: [String: Any] = [
             "ok": true,
             "version": Self.version,
@@ -271,6 +273,7 @@ final class API {
         ]
         if let storefront = music.storefront { health["storefront"] = storefront }
         if authorized(request) { health["stream"] = config.streamURL ?? "http://\(request.host):\(Icecast.port)\(mount)" }
+        if request.fromLoopback || authorized(request), let listeners = await stream.listeners() { health["listeners"] = listeners }
         return health
     }
 
