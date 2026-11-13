@@ -1,5 +1,5 @@
 """The relay's listeners, the login's wait for the network, and that only
-omarock's own requests are answered: run with the service's venv,
+omarock's own requests, from this account, are answered: run with the service's venv,
 ~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py"""
 import asyncio
 import importlib.util
@@ -82,9 +82,22 @@ async def web_pages():
                 "another name for this address is refused (DNS rebinding)"
             assert await status("/stream") == 404, "a stream or cover needs no header (mpd and the panel's images)"
             assert await status("/stream", {"Host": f"rebind.example:{sxm.PORT}"}) == 403, "but the right address"
+            # Another account's programs: by who owns the connection's far end.
+            # Every connection here is this account's, so "another account" is
+            # this one with the service told it runs as another.
+            me = sxm.ME
+            sxm.ME = me + 4242
+            try:
+                async with http.get(base + "/v1/nosuch", headers=omarock) as reply:
+                    assert reply.status == 403 and "Only the account running omarock-sxm" in await reply.text(), \
+                        "another account's request is refused"
+                assert await status("/stream") == 403, "and its stream (mpd's would be this account's)"
+            finally:
+                sxm.ME = me
+            assert await status("/v1/nosuch", omarock) == 404, "this account's gets past it again"
     finally:
         await runner.cleanup()
-    print("ok: only omarock's own requests")
+    print("ok: only omarock's own requests, from this account")
 
 
 asyncio.run(main())

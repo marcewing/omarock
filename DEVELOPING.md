@@ -29,7 +29,7 @@
 | `StdinProcess.qml` | A command given its input on stdin, never its command line: how the panel writes its files (the settings, History, its caches) |
 | `History.js`, `HistoryClient.qml` | History (`H`): what's been played here, from every source, in `~/.local/share/omarock/history.jsonl` (a line of JSON a play), for `historyDays`. `Panel.tickHistory` counts how long the song playing has been heard (half of it or 4 minutes; a station's song 30 s; the file-only `historyAfter` for tests); one panel adds plays (`Keeper.js`'s "history" job). Rows replay by where they were heard (`Panel.activateHistory`); `tools/omarock-history` reads it |
 | `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard: "omarock's sound output" in the settings |
-| `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit and the shim that gives Soloist its key (`omarock-soloist-key.c`), the Web API client, MPRIS |
+| `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit and the shim loaded into Soloist (`omarock-soloist-shim.c`: its key off its command line, its control port for your account alone), the Web API client, MPRIS |
 | `sxm/` | omarock-sxm, the SiriusXM relay |
 | `apple-bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
 | `patches/` | The mpd-mpris patch that makes Apple Music's stream play well, and the mpd one (merged upstream) |
@@ -80,13 +80,36 @@
   whatever the panel writes to a file go to commands on stdin: `StdinProcess`,
   `tools/omarock-account`, `curl -K -`. omarock's files are 0600 in 0700
   folders, and mpd's too (`./install`). Soloist takes its key only as an
-  argument, so its unit gives it `@key`, and `omarock-soloist-key.so`, loaded
+  argument, so its unit gives it `@key`, and `omarock-soloist-shim.so`, loaded
   into Soloist alone, hands it the key from its file. The harness writes
   command lines down (`argv-log`, standing in for the panel's sh and jq;
   `argv_logger`, for the tools), and the private-files, history, setup and
   apple-network scenarios check that none of these is on one. Before a
   release, `tools/capture/argv-survey` logs every program started, everywhere
   (below).
+- **Your account's alone.** Every account on the machine can reach 127.0.0.1,
+  so omarock-spotify (8730) and omarock-sxm (8720) look up who owns the other
+  end of each connection in the kernel's socket table (`/proc/net/tcp`, `tcp6`:
+  the far end's line, local and remote addresses swapped, and its uid) and
+  refuse any account but their own, before reading the request; a far end
+  that's gone (listed as no one's) is refused too. The `X-Omarock: 1` header
+  and the Host check are for web pages, which run as you. Soloist's control
+  port (8731) has no sign-in, so the shim does the same in Soloist's `accept`:
+  on a listener bound to a loopback address it closes another account's
+  connection before Soloist sees it. Soloist's Connect discovery listens on
+  every interface, for the Spotify apps on the network, and is left alone.
+- **No download-and-run.** Nothing omarock runs fetches a program and runs it.
+  Soloist, the one program it doesn't get from Arch or this clone, you download
+  from Spotify's page (Spotify publishes only an unversioned "latest" build,
+  with no checksums or signatures, and doesn't allow passing it on).
+  `tools/update-soloist` reads the download without running it (an x86-64
+  program importing glibc's `__libc_start_main` and `accept`/`accept4`, which
+  the shim needs; its build number, the time it was built, says whether it's
+  expired), installs it, and checks it: Soloist's unit starts it with the shim,
+  and its log has to say within 30 s that the shim handed over the key and
+  guards the control port. Then its hash goes into `soloist.sha256`, which the
+  unit checks at every start (exit 79 for anything else), and a copy is kept;
+  a build that fails is swapped back for the last good one.
 
 ## Tests
 
@@ -99,10 +122,11 @@ tools/capture/capture.py --real-mpd [out-dir]           # read-only, your mpd
 tools/capture/capture.py --bus --only bus-volume        # with a private PipeWire
 python3 -I audio/test-bus.py
 python3 -I spotify/test_service.py
-python3 -I spotify/test_soloist_key.py
+python3 -I spotify/test_soloist_shim.py
 dbus-run-session -- python3 -I spotify/test_mpris.py
 tools/capture/argv-survey capture [out-dir]             # before a release (long)
 OMAROCK_THROWAWAY=yes tools/capture/argv-installer      # in a test VM only
+OMAROCK_THROWAWAY=yes tools/capture/vm-checks           # in a test VM only
 ```
 
 `capture.py` runs the real panel in Quickshell, offscreen, with a temporary HOME,
@@ -220,11 +244,20 @@ with its whole command line (`tools/capture/execlog.c`, loaded with
 - `tools/capture/argv-installer`, in a test VM, never on a machine you use:
   `./install`, every piece set up and taken out, `--uninstall`, and the tools,
   with Spotify's and SiriusXM's hosts pointed at the VM itself and a stand-in
-  Soloist (the real one announces itself on the network).
+  Soloist (`soloist-standin.c`: the real one announces itself on the network),
+  downloaded into `~/Downloads`.
 
 Each ends with "Planted secrets on a command line: none", or fails. Each also
 lists arguments shaped like a file's contents (several lines, long, JSON):
 read them, since jq's and python3's own programs look like that too.
+
+And `tools/capture/vm-checks`, in a test VM too, for what takes a second
+account and a Soloist that comes and goes: another account is refused by
+omarock-spotify, omarock-sxm and Soloist's control port, and this one isn't; a
+Soloist put in by hand isn't started until it's checked; builds that can't work
+with the shim are turned down, by reading them or by running them (and the
+last good one put back); an expired one is turned down; and a newer download
+is installed by `./install spotify`. It ends with "0 failure(s)".
 
 ## Findings worth knowing
 

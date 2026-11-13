@@ -46,7 +46,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
                 "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js", "StdinProcess.qml",
-                "tools/omarock-account", "tools/omarock-sources"]
+                "tools/omarock-account", "tools/omarock-sources", "tools/update-soloist"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
 # The fake Apple Music bridge, when one runs: { port, log }.
@@ -5763,9 +5763,26 @@ def setup_scenario(host, output, failures):
     retype("spotifyClient", "abc123", client_id)
     host.call("press", "Return")
     host.call("typeKeys", "soloist-test-key")
+    # Soloist itself: downloaded from Spotify into the Downloads folder by
+    # you (omarock doesn't download it), found there, read but not run.
+    wait_for(lambda: window()["notes"].get("soloistDownload", "").startswith("Waiting for it"), "Soloist looked for")
+    check(window()["values"]["soloistKey"] == "•" and not window()["canStart"]
+          and window()["blocker"] == "Needs Soloist, downloaded from Spotify",
+          "Enter goes on to the Soloist key; then Soloist is waited for, in the Downloads folder: "
+          + window()["blocker"] + " / " + window()["notes"].get("soloistDownload", ""), failures)
+    downloads = home / "Downloads"
+    (downloads / "soloist_release_x86_64.tar.gz").parent.mkdir(exist_ok=True)
+    (downloads / "soloist_release_x86_64.tar.gz").write_bytes(b"not an archive")
+    wait_for(lambda: "can't be used" in window()["notes"].get("soloistDownload", ""), "a broken download")
+    check(not window()["canStart"] and "it isn't an archive tar can read" in window()["notes"]["soloistDownload"],
+          "a download that isn't Soloist is said to be unusable: " + window()["notes"]["soloistDownload"], failures)
+    fake_soloist_download(downloads / "soloist_release_x86_64 (1).tar.gz")
     wait_for(lambda: window()["canStart"], "Start setup, ready")
-    check(window()["values"]["soloistKey"] == "•" and window()["footer"] == "Ready",
-          "Enter goes on to the Soloist key; with both, Start setup is ready", failures)
+    check(window()["notes"]["soloistDownload"].startswith("Found it in your Downloads folder, built ")
+          and window()["footer"] == "Ready",
+          "the newest download, read without running it: found; with all three, Start setup is ready: "
+          + window()["notes"]["soloistDownload"], failures)
+    host.call("setupFocus", "soloistKey")
     lines = logged_argv(home, lambda: (
         host.call("press", "Return"),
         wait_for(lambda: launched().endswith("/install' spotify"), "the setup's terminal")))
@@ -5784,6 +5801,25 @@ def setup_scenario(host, output, failures):
     check(all(k in s["settingsAllRows"] for k in ("spotifyClient", "soloistKey", "spotifyLogin", "spotifyRemove"))
           and s["settingValues"]["spotify"] is True and "spotify" in s["sources"],
           "Set up… runs ./install spotify; done, the section has its switch, on, and its settings", failures)
+    # A newer Soloist waiting in the Downloads folder (the one just found, as
+    # this harness installs nothing): a dot on Spotify in the header and on the
+    # gear, saying why, as on its settings tab.
+    fake_soloist_download(downloads / "soloist_release_x86_64.tar.gz")
+    host.call("close")
+    host.call("open")
+    wait_for(lambda: "spotify" in host.state()["needsYou"], "Spotify's dot")
+    s = host.state()
+    check("newer Soloist is in your Downloads folder" in s["needsYou"]["spotify"]
+          and s["settingsButton"] and s["settingsButton"]["text"] == "•" and "Spotify: A newer Soloist" in s["settingsButton"]["tip"],
+          "a newer Soloist downloaded: Spotify and the gear get a dot, saying why: " + str(s["settingsButton"]), failures)
+    shutil.rmtree(downloads)
+    host.call("hide")
+    host.call("open")
+    wait_for(lambda: "spotify" not in host.state()["needsYou"], "no dot")
+    check("Spotify" not in host.state()["settingsButton"]["tip"],
+          "nothing waiting: Spotify's dot goes (the gear keeps any other source's)", failures)
+    host.call("close")
+    open_settings()
 
     # A setup that doesn't finish: the Set up button stays, and says so.
     press_row("sxmRemove")
@@ -5931,10 +5967,13 @@ def setup_scenario(host, output, failures):
           and [r["body"] for r in pair_posts()[posts:]] == [{"code": "048213"}, {"code": "111111"}, {"code": "048213"}],
           "the right code: paired, the token in its file (mode 600), the code used up, the Mac told this machine's name; "
           "each code sent once, as digits: " + str(pair_state()) + " " + str([r["body"] for r in pair_posts()[posts:]]), failures)
-    # Closed and opened again: a token the bridge takes needs no code.
+    # Closed and opened again: a token the bridge takes needs no code. (The
+    # token saved makes Apple Music set up, so its row is a switch now: the
+    # window opens as Fix… would open it.)
     host.call("setupClick", "setupCancel")
     wait_for(lambda: not window()["open"], "closed")
-    open_window("appleMusic", "apple-music")
+    host.call("openSetup", "apple-music")
+    wait_for(lambda: window()["open"] and window()["piece"] == "apple-music", "apple-music's setup window")
     host.call("setupClick", "setupMacOther")
     host.call("setupFocus", "appleMac")
     host.call("typeKeys", f"127.0.0.1:{BRIDGE['port']}")
@@ -5945,7 +5984,8 @@ def setup_scenario(host, output, failures):
     fake_bridge("pairing", {"on": False})
     host.call("setupClick", "setupCancel")
     wait_for(lambda: not window()["open"], "closed")
-    open_window("appleMusic", "apple-music")
+    host.call("openSetup", "apple-music")
+    wait_for(lambda: window()["open"] and window()["piece"] == "apple-music", "apple-music's setup window")
     host.call("setupClick", "setupMacOther")
     host.call("setupFocus", "appleMac")
     host.call("typeKeys", f"127.0.0.1:{BRIDGE['port']}")
@@ -6051,12 +6091,18 @@ def setup_scenario(host, output, failures):
     check(launched() == runs, "Esc closes it too", failures)
     open_settings()
 
-    # Update: a Soloist build 85 days old (they stop at 90).
+    # Update: a Soloist build 85 days old (they stop at 90), checked with
+    # omarock. omarock reads its age from it (its build number is when it was
+    # built), never running it: a stand-in, built as Soloist is.
     soloist = home / ".local/lib/omarock-soloist/soloist"
     soloist.parent.mkdir(parents=True, exist_ok=True)
-    built = time.strftime("%Y%m%d", time.localtime(time.time() - 85 * 86400))
-    soloist.write_text(f"#!/bin/sh\necho 'soloist 1.3.10 ({built})'\n")
-    soloist.chmod(0o755)
+
+    def soloist_built(days_ago):
+        subprocess.run(["cc", "-O2", f'-DBUILD="{int(time.time() - days_ago * 86400)}"', "-o", str(soloist),
+                        str(TOOLS / "soloist-standin.c")], check=True)
+    soloist_built(85)
+    sha = hashlib.sha256(soloist.read_bytes()).hexdigest()
+    (soloist.parent / "soloist.sha256").write_text(f"{sha}  soloist\n")
     host.call("press", "Escape")
     host.call("press", ",")
     wait_for(lambda: "spotifyUpdate:action:Update…" in host.state()["settingKinds"], "Update", timeout=10)
@@ -6067,7 +6113,17 @@ def setup_scenario(host, output, failures):
     check(host.state()["settingsTab"] == "omarock" and host.state()["settingsTabs"][3] == "Spotify •"
           and host.state()["settingsTabs"][2] == "SiriusXM" and host.state()["settingsTabs"][4] == "Sound",
           "the Spotify tab is marked, so Update is seen from the first tab: " + str(host.state()["settingsTabs"]), failures)
-    soloist.unlink()
+    need = host.state()["needsYou"].get("spotify", "")
+    check("stops working in 5 days. Download a new one from Spotify" in need,
+          "and Spotify's button in the header has a dot saying so: " + need, failures)
+    # One put in by hand: not the build omarock checked, so it isn't started.
+    soloist_built(2)
+    host.call("press", "Escape")
+    host.call("press", ",")
+    wait_for(lambda: "was replaced outside omarock" in host.state()["needsYou"].get("spotify", ""), "replaced", timeout=10)
+    check(True, "a Soloist put in by hand: Update… says it was replaced, and checks it", failures)
+    for f in ("soloist", "soloist.sha256"):
+        (soloist.parent / f).unlink()
 
     # Fix: omarock-spotify can't be reached.
     host.call("settings", json.dumps({"spotifyService": "http://127.0.0.1:9"}))
@@ -6185,6 +6241,16 @@ def private_files_scenario(host, failures):
     wait_for(lambda: not host.state()["settingsOpen"], "the settings close")
     host.call("close")
     check(not opened(), "nothing the panel wrote is open to others: " + repr(opened()), failures)
+
+
+def fake_soloist_download(archive):
+    """Soloist's download as Spotify's archive has it, but with a stand-in in
+    it (soloist-standin.c), never Soloist itself: built now, so it's fresh."""
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["cc", "-O2", f'-DBUILD="{int(time.time())}"', "-o", f"{tmp}/soloist",
+                        str(TOOLS / "soloist-standin.c")], check=True)
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["tar", "-czf", str(archive), "-C", tmp, "soloist"], check=True)
 
 
 def logged_argv(home, steps):

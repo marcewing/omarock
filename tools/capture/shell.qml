@@ -397,7 +397,12 @@ ShellRoot {
         settingKinds: p.settingsOpen ? host.settingsView().allRows.map(function(r) { return r.key + ":" + r.type + (r.button ? ":" + r.button : "") }) : [],
         // The secrets showing their dots, on every tab.
         settingMasked: p.settingsOpen ? host.settingsView().allRows.filter(function(r) { return host.settingsView().masked(r) }).map(function(r) { return r.key }) : [],
-        sourcesState: p.sourcesState, setupLaunched: p.setupLaunched,
+        sourcesState: p.sourcesState, setupLaunched: p.setupLaunched, needsYou: p.needsYou,
+        settingsButton: (function() {
+          var pp = host.popup()
+          var b = pp ? host.findNamed(pp.contentItem[0].parent.parent, "settingsButton") : null
+          return b ? { text: b.text, tip: b.tooltipText } : null
+        })(),
         playerVolume: p.player.status.volume, ownVolume: p.player.ownVolume === true,
         settingValues: p.settingValues, settingNotes: p.settingNotes, widgetSettings: host.widget.settings,
         appleReady: p.player.ready === true && p.appleMode, appleSeq: p.appleMode ? (p.player.bridgeStatus.seq || 0) : -1,

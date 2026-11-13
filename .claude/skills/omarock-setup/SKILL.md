@@ -131,8 +131,16 @@ Follow `spotify/README.md`. What trips people up:
 - **Pairing:** it needs the phone to find Soloist on the local network. With ufw
   on, allow Soloist's current TCP port for the pairing only (the user runs the
   sudo commands), then remove the rule.
-- **Soloist stops when its build expires** (90 days; exit status 10):
-  `tools/update-soloist`.
+- **Soloist comes from the user's own download.** omarock never downloads it:
+  the user gets `soloist_release_x86_64.tar.gz` from Spotify's Soloist page
+  (Reference, Downloads and updates) into `~/Downloads`, and
+  `tools/update-soloist install` installs it and checks it with omarock's shim
+  (it restarts Soloist: ask first if Spotify is playing). Don't fetch it for
+  them. `tools/update-soloist status` reads what's there without running it.
+- **Soloist stops when its build expires** (90 days; exit status 10), and
+  isn't started if it isn't the build omarock checked (79: replaced by hand,
+  say): a new download and `tools/update-soloist install`, or
+  `tools/update-soloist check` for the one there.
 - **The Web API sign-in lasts 6 months:** `tools/omarock-sp login` again.
 - **Check:** `tools/omarock-sp health` shows `"authorized": true`.
 - **Then the switch:** `spotify` on.

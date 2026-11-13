@@ -33,6 +33,7 @@ import json
 import os
 import re
 import socket
+import struct
 import sys
 import threading
 import time
@@ -45,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 # omarock's sound output (audio/, ./install sound): Soloist plays into it
@@ -747,8 +748,70 @@ def device_id():
 
 # ---------- the HTTP API ----------
 
+# Only the account running this service. Every account here can reach
+# 127.0.0.1, so a header alone (below) keeps out web pages but not another
+# account's programs: the kernel's socket table says who owns the other end.
+ME = os.getuid()
+_refused_logged = 0.0
+
+
+def proc_address(ip, port):
+    """An address as /proc/net/tcp and tcp6 show it: each 32-bit word of the
+    address in hex, in this machine's byte order, then the port."""
+    raw = socket.inet_pton(socket.AF_INET6 if ":" in ip else socket.AF_INET, ip)
+    return "".join("%08X" % w for w in struct.unpack("=%dI" % (len(raw) // 4), raw)) + ":%04X" % port
+
+
+def socket_owners(peer, ours):
+    """The accounts owning the far end of a loopback connection (peer, ours:
+    (address, port) as seen here), from /proc/net/tcp and tcp6: [] when it's
+    gone (closed already: then it's listed, if at all, as no one's)."""
+    pairs = [(peer[0], ours[0])]
+    if ":" not in peer[0]:  # an IPv6 socket connected to 127.0.0.1
+        pairs.append(("::ffff:" + peer[0], "::ffff:" + ours[0]))
+    wanted = {(proc_address(a, peer[1]), proc_address(b, ours[1])) for a, b in pairs}
+    owners = []
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = Path(table).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()
+            if len(f) > 7 and (f[1], f[2]) in wanted:
+                owners.append(int(f[7]))
+    return owners
+
+
+def from_another_account(sock):
+    """Why a connection is refused, or None: it has to be this account's."""
+    global _refused_logged
+    try:
+        owners = socket_owners(sock.getpeername()[:2], sock.getsockname()[:2])
+    except OSError:
+        owners = []
+    if owners and all(uid == ME for uid in owners):
+        return None
+    if time.monotonic() - _refused_logged > 60:
+        _refused_logged = time.monotonic()
+        log(f"refused a connection from another account ({owners or 'gone'})")
+    return "Only the account running omarock-spotify can use it."
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
+
+    # Another account's connection gets this, before anything it sent is read.
+    def handle(self):
+        why = from_another_account(self.connection)
+        if why is None:
+            return super().handle()
+        body = json.dumps({"error": why}).encode()
+        try:
+            self.wfile.write(b"HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n"
+                             b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(body) + body)
+        except OSError:
+            pass
 
     def reply(self, code, data, kind="application/json"):
         body = data if isinstance(data, bytes) else json.dumps(data).encode()
@@ -762,7 +825,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self): self.handle_any("GET")
     def do_POST(self): self.handle_any("POST")
 
-    # Only omarock's own clients, never a web page. A page can't send a
+    # Only omarock's own clients, never a web page (another account's are
+    # refused in handle()). A page can't send a
     # header of its own here without asking first (CORS), which this never
     # allows, and a page that points a name of its own at 127.0.0.1 (DNS
     # rebinding) arrives with that name as its Host. The sign-in comes back

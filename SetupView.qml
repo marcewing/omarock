@@ -206,6 +206,9 @@ Rectangle {
       if (p === "" || p.indexOf("Needs ") === 0 || p === "Pairing…") return { kind: "", text: "" }
       return { kind: "bad", text: p }
     }
+    // Soloist's download: what was found, or that it's still looked for.
+    if (field.type === "soloist")
+      return l ? { kind: l.kind === "waiting" ? "" : l.kind, text: l.text } : { kind: "", text: "Looking in your Downloads folder…" }
     if (l && l.kind === "checking") return { kind: "", text: "Checking…" }
     if (!l && (field.type === "mac" || root.values[field.key] === "")) return { kind: "", text: "" }
     if (p !== "" && p.indexOf("Needs ") !== 0) return { kind: "bad", text: p }

@@ -33,7 +33,12 @@
 # files only you can read (~/.config/omarock, mode 600). None is printed, and none is passed on a
 # command line, which others on this machine can read (ps). Soloist takes its
 # key only as an argument, so it's given a stand-in, "@key", and
-# omarock-soloist-key.so (built by tools/install-spotify) hands it the key.
+# omarock-soloist-shim.so (built by tools/install-spotify) hands it the key.
+#
+# Nothing here downloads a program and runs it. Soloist, Spotify's player, is
+# the one omarock doesn't get from Arch or this clone: you download it from
+# Spotify's page, and tools/update-soloist installs it from your Downloads
+# folder and checks it with omarock's shim.
 #
 # Each run says how it went in ~/.local/state/omarock/setup.json, which
 # omarock's settings follow: what it set up or removed, and whether it's still
@@ -436,7 +441,7 @@ mpd_running_umask() {
 installed_commit() { cat "$share/$1/INSTALLED" 2>/dev/null; }
 installs() {  # DIR: its files that get installed
   case $1 in
-    spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist-key.c omarock-soloist.service omarock-spotify.service ;;
+    spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist-shim.c omarock-soloist.service omarock-spotify.service ;;
     sxm) echo omarock-sxm.py omarock-sxm.service requirements.txt ;;
     audio) echo omarock-bus.conf omarock-guard.py omarock-players.conf omarock-bus.service omarock-guard.service ;;
   esac
@@ -1043,10 +1048,55 @@ PY
 # ---- 5. Spotify ----
 
 sp_health() { health http://127.0.0.1:8730; }
-soloist_age() {  # days since the installed Soloist was built, or nothing
-  local built
-  built=$("$HOME/.local/lib/omarock-soloist/soloist" --version 2>/dev/null | grep -oE '\(20[0-9]{6}\)' | tr -d '()')
-  [[ -n $built ]] && echo $((($(date +%s) - $(date -d "$built" +%s)) / 86400))
+soloist_status() { "$repo/tools/update-soloist" status; }
+# A Soloist download that omarock can use, newer than the one installed.
+soloist_downloaded() { soloist_status | jq -e '.download.ok and .download.newer' >/dev/null; }
+soloist_page=https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates
+# Soloist itself: the build you download from Spotify, installed and checked
+# with omarock's shim by tools/update-soloist. A newer download is installed;
+# a build that's getting old asks for a new download, and one never checked
+# (replaced by hand, or from before 1.0.5) is checked.
+step_soloist() {
+  local st installed days checked
+  st=$(soloist_status) || { bad "couldn't read Soloist's state: tools/update-soloist status"; return 1; }
+  installed=$(jq -r '.installed != null' <<<"$st")
+  days=$(jq -r '.installed.days // 0' <<<"$st")
+  checked=$(jq -r '.installed.checked // false' <<<"$st")
+  if jq -e '.download.ok and .download.newer' <<<"$st" >/dev/null; then
+    if [[ $installed == true ]]; then
+      explain "There's a Soloist in your Downloads folder newer than the one here: it's installed now, and checked with omarock."
+    else
+      explain "Found Soloist in your Downloads folder: it's installed now, and checked with omarock."
+    fi
+    run "$repo/tools/update-soloist" install "$(jq -r .download.path <<<"$st")" || return 1
+    return 0
+  fi
+  if [[ $installed == true ]] && ((days < 80)); then
+    if [[ $checked == true ]]; then
+      ok "Soloist, built $days days ago (builds last 90 days)"
+    else
+      explain "This Soloist hasn't been checked with omarock yet (it's new, or was replaced by hand), and Soloist's unit won't start it until it is."
+      run "$repo/tools/update-soloist" check || return 1
+    fi
+    return 0
+  fi
+  if [[ $installed == true ]]; then
+    explain "Soloist's build is $days days old, and builds stop working at 90: download a new one from Spotify (Linux x86_64, the soloist_release_x86_64.tar.gz file) into your Downloads folder."
+  else
+    explain "Soloist is Spotify's own player. It comes from Spotify, and you download it yourself: on Spotify's Soloist page, pick Linux x86_64 (the soloist_release_x86_64.tar.gz file), and save it in your Downloads folder. omarock installs it from there, and checks it works with omarock before it runs."
+    jq -e '.download != null and (.download.ok | not)' <<<"$st" >/dev/null \
+      && note "The one in your Downloads folder can't be used: $(jq -r .download.why <<<"$st")"
+  fi
+  block "$soloist_page"
+  if [[ -z $answers ]] && confirm "Open that page in your browser?"; then xdg-open "$soloist_page" >/dev/null 2>&1 & fi
+  if wait_until "Waiting for Soloist in your Downloads folder (Ctrl-C stops waiting)…" 900 soloist_downloaded; then
+    run "$repo/tools/update-soloist" install || return 1
+  elif [[ $installed == true ]] && ((days < 90)); then
+    note "Carrying on with the Soloist you have; it stops working in $((90 - days)) days"
+  else
+    bad "No Soloist to use yet: once it's downloaded, run $again spotify again"
+    return 1
+  fi
 }
 sp_paired() { sp_health | jq -e '.soloist.loggedIn' >/dev/null; }
 sp_signed_in() { sp_health | jq -e '.web.signedIn' >/dev/null; }
@@ -1128,26 +1178,14 @@ step_spotify() {
     key=""
     ok "saved the Soloist key"
   fi
-  # Soloist builds stop working 90 days after they're made: fetch one only
-  # when there's none, or this one is getting old.
-  local age
-  age=$(soloist_age)
-  if [[ -z $age || $age -ge 90 ]]; then
-    [[ -n $age ]] && note "Soloist's build is $age days old, and has stopped working."
-    run "$repo/tools/update-soloist" || { bad "couldn't fetch Soloist from Spotify"; return 1; }
-  elif ((age >= 60)); then
-    explain "Soloist's build is $age days old; builds stop working at 90."
-    if confirm "Fetch the latest from Spotify?"; then run "$repo/tools/update-soloist"; fi
-  else
-    ok "Soloist, built $age days ago (builds last 90 days)"
-  fi
   if [[ ! -f $share/spotify/INSTALLED ]]; then
     run "$repo/tools/install-spotify" --start || return 1
   elif ! up_to_date spotify && confirm "This clone has a newer omarock-spotify. Update it?"; then
     run "$repo/tools/install-spotify" --start || return 1
-  elif ! active omarock-spotify; then
-    run systemctl --user start omarock-soloist omarock-spotify
   fi
+  step_soloist || return 1
+  active omarock-spotify || run systemctl --user start omarock-spotify
+  active omarock-soloist || run systemctl --user start omarock-soloist
   wait_until "Waiting for omarock-spotify…" 20 sp_up || { bad "omarock-spotify doesn't answer: journalctl --user -u omarock-spotify -u omarock-soloist"; return 1; }
   ok "omarock-spotify and Soloist run"
 

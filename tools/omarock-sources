@@ -34,7 +34,7 @@ services() {
 installed() { [[ -f $share/$1/INSTALLED ]]; }
 installs() {  # DIR: its files that get installed
   case $1 in
-    spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist-key.c omarock-soloist.service omarock-spotify.service ;;
+    spotify) echo omarock-spotify.py soloist_ws.py spotify_web.py spotify_mpris.py omarock-soloist-shim.c omarock-soloist.service omarock-spotify.service ;;
     sxm) echo omarock-sxm.py omarock-sxm.service requirements.txt ;;
     audio) echo omarock-bus.conf omarock-guard.py omarock-players.conf omarock-bus.service omarock-guard.service ;;
   esac
@@ -50,10 +50,21 @@ up_to_date() {  # DIR (spotify, sxm, audio)
 enabled() { systemctl --user is-enabled --quiet "$1" 2>/dev/null; }
 bool() { if "$@" >/dev/null 2>&1; then echo true; else echo false; fi; }
 
-soloist_days() {  # days since the installed Soloist was built, or -1
-  local built
-  built=$("$HOME/.local/lib/omarock-soloist/soloist" --version 2>/dev/null | grep -oE '\(20[0-9]{6}\)' | tr -d '()')
-  if [[ -n $built ]]; then echo $((($(date +%s) - $(date -d "$built" +%s)) / 86400)); else echo -1; fi
+# Soloist, Spotify's player, read without running it (tools/update-soloist):
+# {days (since built; -1 none), checked (with omarock's shim, so its unit
+# will start it), why ("unchecked", "replaced"), stopped (its unit stopped
+# because it "expired" or isn't "unchecked"), download (a newer one usable in
+# your Downloads folder)}.
+soloist() {
+  local st code=""
+  st=$("$repo/tools/update-soloist" status 2>/dev/null) || st='{"installed": null, "download": null}'
+  if [[ $(systemctl --user show -p ActiveState --value omarock-soloist 2>/dev/null) == failed ]]; then
+    code=$(systemctl --user show -p ExecMainStatus --value omarock-soloist 2>/dev/null)
+  fi
+  jq -c --arg code "$code" '{
+    days: (.installed.days // -1), checked: (.installed.checked // false), why: (.installed.why // ""),
+    stopped: ({"10": "expired", "79": "unchecked"}[$code] // ""),
+    download: (.download != null and .download.ok and .download.newer) }' <<<"$st"
 }
 
 apple_set_up() { [[ -s $config/apple.json || -s $config/bridge-token ]]; }
@@ -74,20 +85,20 @@ flow() {
 
 case ${1:-} in
   state)
-    # The last run (setup.json) goes to jq on stdin: a file's contents never
-    # go on a command line, which others on this machine can read.
-    flow | jq -n \
+    # The last run (setup.json) and Soloist go to jq on stdin: a file's
+    # contents never go on a command line, which others on this machine can read.
+    { flow; soloist; } | jq -n \
       --argjson mpd "$(bool command -v mpd)" \
       --argjson spotify "$(bool installed spotify)" --argjson spotifyCurrent "$(bool up_to_date spotify)" \
-      --argjson spotifyOn "$(bool enabled omarock-spotify)" --argjson soloistDays "$(soloist_days)" \
+      --argjson spotifyOn "$(bool enabled omarock-spotify)" \
       --argjson sxm "$(bool installed sxm)" --argjson sxmCurrent "$(bool up_to_date sxm)" \
       --argjson sxmOn "$(bool enabled omarock-sxm)" \
       --argjson apple "$(bool apple_set_up)" \
       --argjson bus "$(bool test -f "$share/audio/omarock-bus.conf")" --argjson busCurrent "$(bool up_to_date audio)" \
       --arg output "$(bus_output)" \
-      'input as $flow | {
+      'input as $flow | input as $soloist | {
         local: { setUp: $mpd },
-        spotify: { setUp: $spotify, upToDate: $spotifyCurrent, running: $spotifyOn, soloistDays: $soloistDays },
+        spotify: { setUp: $spotify, upToDate: $spotifyCurrent, running: $spotifyOn, soloistDays: $soloist.days, soloist: $soloist },
         siriusxm: { setUp: $sxm, upToDate: $sxmCurrent, running: $sxmOn },
         "apple-music": { setUp: $apple },
         sound: { setUp: $bus, upToDate: $busCurrent, output: $output },

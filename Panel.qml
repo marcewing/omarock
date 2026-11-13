@@ -300,14 +300,23 @@ Panel {
     var s = root.sourcesState || {}
     var sp = s.spotify, xm = s.siriusxm, am = s["apple-music"], so = s.sound
     var days = sp ? sp.soloistDays : -1
+    // Soloist itself (tools/update-soloist, read without running it): one
+    // replaced by hand isn't started until it's checked; a newer one may be
+    // waiting in the Downloads folder; builds stop working at 90 days.
+    var solo = sp && sp.soloist ? sp.soloist : {}
     var soloist = spotify.health.soloist || {}
     return {
       local: { setUp: client.ready },
       spotify: {
         setUp: sp ? sp.setUp : root.spotifyEnabled,
         update: !sp || !sp.setUp ? false
-          : days >= 80 ? "Soloist, Spotify's player, stops working " + (days >= 90 ? "now: its build is " + days + " days old" : "in " + (90 - days) + " days")
-          : !sp.upToDate,
+          : solo.why === "replaced" ? "Soloist, Spotify's player, was replaced outside omarock, so it doesn't start: Update… checks it with omarock"
+          : solo.download === true ? "A newer Soloist is in your Downloads folder: Update… installs it, and checks it with omarock"
+          : days >= 80 ? "Soloist, Spotify's player, " + (days >= 90 ? "has stopped working: its build is " + days + " days old" : "stops working in " + (90 - days) + " days")
+            + ". Download a new one from Spotify into your Downloads folder, then Update… installs it"
+          : !sp.upToDate ? true
+          : solo.why === "unchecked" ? "Soloist, Spotify's player, hasn't been checked with omarock yet, so it doesn't start: Update… checks it"
+          : false,
         signedIn: !!spotify.health.web && spotify.health.web.signedIn === true,
         attention: !root.spotifyEnabled || !spotify.healthKnown ? ""
           : !spotify.reachable ? "Can't reach omarock-spotify"
@@ -327,11 +336,25 @@ Panel {
           : !apple.healthKnown ? ""
           : !apple.reachable ? "Can't reach the bridge at " + root.appleBridge
           : apple.tokenRefused ? "The bridge refused omarock's token"
+          : apple.health && apple.health.icecast === "taken" ? "Something else on the Mac holds Icecast's port (8000), so the bridge sends it nothing, and can't play: quit it there"
           : !apple.healthAuthorized ? "The bridge can't use Apple Music yet" : ""
       },
       sound: { setUp: !!so && so.setUp, update: !!so && so.setUp && !so.upToDate, attention: "" }
     }
   }
+  // What each source needs from you (a Fix or an Update in the settings),
+  // by the header's source names: the dots on its button and the gear.
+  readonly property var needsYou: {
+    var st = root.settingStates, out = {}
+    var names = { spotify: "Spotify", sxm: "SiriusXM", apple: "Apple Music", sound: "Sound" }
+    for (var key in names) {
+      var s = st[key]
+      if (!s || !s.setUp || !(s.attention || s.update)) continue
+      out[key] = names[key] + ": " + (s.attention || (typeof s.update === "string" ? s.update : "an update is waiting"))
+    }
+    return out
+  }
+  readonly property string needsYouAll: Object.keys(root.needsYou).map(function(k) { return root.needsYou[k] }).join("\n")
   // Accounts and keys as tools/omarock-account shows them: names, and
   // whether each secret is set, never a secret.
   property var accounts: ({})
@@ -1037,6 +1060,8 @@ Panel {
   Component.onDestruction: Keeper.release(root.keeperId)
 
   onOpenedChanged: {
+    // What's set up, for the header's dots (a Soloist getting old, say).
+    if (root.opened) root.readSources()
     client.ticking = root.opened
     apple.ticking = root.opened
     spotify.ticking = root.opened
@@ -4389,8 +4414,11 @@ Panel {
     visible: root.sources.length > 1
     focusable: false
     spacing: Style.space(4)
+    // A source that needs you (root.needsYou) has a dot, as its settings tab does.
     options: sourceSwitch.all.filter(function(o) { return root.sources.indexOf(o.value) >= 0 }).map(function(o) {
-      return { value: o.value, label: sourceSwitch.iconsOnly ? "" : o.label, icon: o.icon, tooltip: o.tooltip }
+      var need = root.needsYou[o.value]
+      return { value: o.value, label: (sourceSwitch.iconsOnly ? "" : o.label) + (need ? (sourceSwitch.iconsOnly ? "•" : " •") : ""),
+        icon: o.icon, tooltip: o.tooltip + (need ? "\n• " + need + " (settings: ,)" : "") }
     })
     value: root.source
     foreground: root.foreground
@@ -5336,6 +5364,25 @@ Panel {
     }
   }
 
+  // Soloist, for Spotify's setup window: looked for in the Downloads folder
+  // every 2 s while the window is open (read, never run: tools/update-soloist).
+  readonly property string soloistTool: decodeURIComponent(String(Qt.resolvedUrl("tools/update-soloist")).replace(/^file:\/\//, ""))
+  Timer {
+    interval: 2000
+    repeat: true
+    triggeredOnStart: true
+    running: setupFloat.visible && setupView.piece === "spotify" && !setupView.busy
+    onTriggered: if (!soloistReader.running) soloistReader.running = true
+  }
+  Process {
+    id: soloistReader
+    command: [root.soloistTool, "status"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (setupView.piece === "spotify") setupView.setLive("soloistDownload", Setup.soloistState(text))
+    }
+  }
+
   // PipeWire's outputs and the default one, for the sound output's setup
   // window: the default on the first line, then the outputs as JSON.
   Process {
@@ -5405,12 +5452,13 @@ Panel {
           anchors.verticalCenter: parent.verticalCenter
           iconText: "󰒓"
           iconSize: fontSize
+          text: root.needsYouAll !== "" ? "•" : ""
           implicitHeight: expandButton.implicitHeight
           bordered: true
           foreground: root.foreground
           fontFamily: root.fontFamily
           fontSize: Style.font.caption
-          tooltipText: "Settings (,)"
+          tooltipText: "Settings (,)" + (root.needsYouAll !== "" ? "\n• " + root.needsYouAll.replace(/\n/g, "\n• ") : "")
           onClicked: root.openSettings()
         }
 
@@ -5541,12 +5589,13 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             iconText: "󰒓"
             iconSize: fontSize
+            text: root.needsYouAll !== "" ? "•" : ""
             implicitHeight: compactButton.implicitHeight
             bordered: true
             foreground: root.foreground
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
-            tooltipText: "Settings (,)"
+            tooltipText: "Settings (,)" + (root.needsYouAll !== "" ? "\n• " + root.needsYouAll.replace(/\n/g, "\n• ") : "")
             onClicked: root.openSettings()
           }
 

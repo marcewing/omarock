@@ -276,7 +276,9 @@ o.bind("SUPER + CTRL + M", "omarock", "omarchy-shell shell toggle marcewing.omar
 Each has a Set up… button in omarock's settings (above), and a guide for doing it
 by hand:
 
-- **Spotify:** [spotify/README.md](spotify/README.md)
+- **Spotify:** [spotify/README.md](spotify/README.md). Soloist, Spotify's
+  player, you download from Spotify yourself; its setup window links to the
+  page, and omarock installs it from your Downloads folder.
 - **Apple Music:** [apple-bridge/README.md](apple-bridge/README.md)
 - **SiriusXM:** [sxm/README.md](sxm/README.md)
 - **omarock's sound output** (one volume, and one pinned output, for
@@ -474,8 +476,9 @@ Everything is there, on tabs: **omarock** (your music folder, the
 radio, Time Machine, the panel and the bar), then **Apple Music**,
 **SiriusXM**, **Spotify** and **Sound**, each with its switch and how its
 service is doing, its account and keys, and Remove. Tab and Shift+Tab go
-between the tabs, and a tab that needs an update or a fix is marked •. A
-change saves at once.
+between the tabs, and a tab that needs an update or a fix is marked •, as are
+that source's button in the panel's header and the gear (their tooltips say
+why: a Soloist build getting old, say). A change saves at once.
 
 - **Settings** are kept in `~/.config/omarock/settings.json`, which you can also
   edit by hand; omarock follows it as it changes:
@@ -489,8 +492,8 @@ change saves at once.
 - **Accounts and keys** (the SiriusXM login, Spotify's Client ID and Soloist
   key, the bridge's token from pairing) each keep their own file in `~/.config/omarock`,
   readable only by you. (Soloist, Spotify's player, takes its key only on its
-  command line, so while it runs another user on this machine could see it with
-  `ps`.) The settings screen never shows a password or key: one
+  command line, where `ps` shows it to every account here: omarock hands it the
+  key from its file instead, so `ps` shows a stand-in.) The settings screen never shows a password or key: one
   that's set shows as dots, and a new one replaces it. `tools/omarock-account`
   does the same from a terminal.
 - **The music folder** is mpd's `music_directory`. Changing it asks first, then
@@ -548,6 +551,9 @@ A few are in the file only, for when you know you need them:
   on the Mac, or omarock-spotify. It looks again every 3 seconds and carries on
   once it answers. Spotify stays the source meanwhile: Spotify's player plays
   on without it.
+- **Spotify doesn't start after a new Soloist:** omarock starts only a Soloist
+  it has checked. **Update…** on the Spotify tab installs the newest one in your
+  Downloads folder, or checks the one there ([spotify/README.md](spotify/README.md)).
 - **A change didn't show up after updating:** `omarchy restart shell`.
 - **Anything else:** `journalctl --user -b | grep omarock`. The panel logs its
   version when it loads, and any mpd command or service request that was slow.

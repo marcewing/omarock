@@ -1,31 +1,284 @@
 #!/bin/bash
-# update-soloist: fetch Spotify's latest Soloist build for x86_64 and install
-# it into ~/.local/lib/omarock-soloist, restarting omarock-soloist if it
-# changed. Builds expire 90 days after their build date (an expired one exits
-# with 10), so run this at least every couple of months. Spotify's terms: the
-# archive and binary aren't redistributed; this fetches it from Spotify.
+# update-soloist: install the Soloist you downloaded from Spotify, and check it
+# works with omarock before omarock-soloist will start it.
+#
+# omarock doesn't download Soloist itself. Spotify offers one unversioned
+# "latest" archive per platform, with no checksums or signatures, rebuilt most
+# days, and its terms don't allow passing it on: so you download it, from
+# Spotify's page (developer.spotify.com/documentation/soloist, Reference,
+# Downloads and updates), and this finds it in your Downloads folder.
+#
+#   tools/update-soloist status [--installed]  JSON: the build installed, and
+#                                    the newest download; neither is run
+#   tools/update-soloist install [ARCHIVE]    install the newest download (or
+#                                    ARCHIVE), then check it
+#   tools/update-soloist check       check the build installed (one you put
+#                                    there yourself, say)
+#
+# Reading a download, without running it: an x86-64 Linux program that starts
+# through glibc and takes connections through glibc's accept() or accept4(),
+# which omarock's shim needs (spotify/omarock-soloist-shim.c), and not expired
+# (a build stops working 90 days after it's built: its build number is the
+# time it was built).
+#
+# Checking it: omarock-soloist starts it with the shim, and within 30 s its log
+# has to say that the shim handed Soloist its key and guards its control port
+# (this connects to the port once, to see). Then its hash goes into
+# soloist.sha256 (omarock-soloist starts that build and no other) and a copy is
+# kept as soloist.last-good. If it doesn't pass, the last good build goes back.
 set -euo pipefail
 # What it writes is yours alone: folders 700, files 600.
 umask 077
+page=https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates
 dest=$HOME/.local/lib/omarock-soloist
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
-curl --fail --location -sS -o "$work/soloist.tar.gz" https://soloist-builds.spotifycdn.com/soloist_release_x86_64.tar.gz
-mkdir "$work/x"
-tar -xzf "$work/soloist.tar.gz" -C "$work/x"
-test -x "$work/x/soloist"
-new=$("$work/x/soloist" --version)
-old=$([[ -x $dest/soloist ]] && "$dest/soloist" --version || echo none)
-echo "installed: $old"
-echo "latest:    $new"
-if [[ $new == "$old" ]]; then
-  echo "up to date"
-  exit 0
-fi
-install -d -m 700 "$dest"
-install -m 700 "$work/x/soloist" "$dest/soloist.new" && mv "$dest/soloist.new" "$dest/soloist"
-cp "$work/x/CHANGELOG.md" "$work/x/THIRD_PARTY_LICENSES.txt" "$dest/"
-if systemctl --user is-active --quiet omarock-soloist; then
+shim=$HOME/.local/share/omarock/spotify/omarock-soloist-shim.so
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/omarock
+ws=8731
+work=""
+trap '[[ -z $work ]] || rm -rf -- "$work"' EXIT
+
+say() { printf '  %s\n' "$*"; }
+good() { printf '  ✓ %s\n' "$*"; }
+wrong() { printf '  ✗ %s\n' "$*"; }
+day() { date -d "@$1" +%Y-%m-%d; }
+built_on() { local b; b=$(built_of "$1"); ((b > 0)) && printf ' (built %s)' "$(day "$b")"; return 0; }
+
+downloads_dirs() {
+  local d
+  d=$(xdg-user-dir DOWNLOAD 2>/dev/null || true)
+  [[ -n $d && $d != "$HOME" && -d $d ]] && echo "$d"
+  [[ -d $HOME/Downloads && $d != "$HOME/Downloads" ]] && echo "$HOME/Downloads"
+  return 0
+}
+
+# The newest Soloist download (browsers number a second one: "… (1).tar.gz").
+newest_download() {
+  local d
+  while IFS= read -r d; do
+    find "$d" -maxdepth 1 -type f -name 'soloist_release_x86_64*.tar.gz' -printf '%T@ %p\n'
+  done < <(downloads_dirs) | sort -rn | awk 'NR == 1 {sub(/^[^ ]* /, ""); print}'
+}
+
+# inspect FILE: is FILE (a program) one omarock can use? Prints why not.
+usable() {
+  local f=$1 syms
+  command -v readelf >/dev/null || { echo "reading Soloist needs readelf (binutils: sudo pacman -S --needed base-devel)"; return 1; }
+  readelf -h "$f" 2>/dev/null | grep -q 'Class:.*ELF64' && readelf -h "$f" | grep -q 'Machine:.*X86-64' \
+    || { echo "it isn't a Linux x86-64 program"; return 1; }
+  readelf -l "$f" 2>/dev/null | grep -q 'program interpreter' \
+    || { echo "it isn't built to start through the system's C library (glibc), which omarock's shim needs"; return 1; }
+  syms=$(readelf --dyn-syms -W "$f" 2>/dev/null | awk '$7 == "UND" {sub(/@.*/, "", $8); print $8}')
+  grep -qx '__libc_start_main' <<<"$syms" \
+    || { echo "it doesn't start through glibc's __libc_start_main, so omarock's shim can't give it its key"; return 1; }
+  grep -qx -e 'accept' -e 'accept4' <<<"$syms" \
+    || { echo "it doesn't take connections through glibc's accept, so omarock's shim can't guard its control port"; return 1; }
+  return 0
+}
+
+# unpack ARCHIVE DIR: the soloist program (and its notes) into DIR.
+unpack() {
+  local archive=$1 into=$2 list member
+  list=$(tar -tzf "$archive" 2>/dev/null) || { echo "it isn't an archive tar can read"; return 1; }
+  member=$(grep -m1 -xE '(\./)?soloist' <<<"$list") || { echo "there's no soloist program in it"; return 1; }
+  tar -xzf "$archive" -C "$into" --no-same-owner --no-same-permissions "$member" 2>/dev/null || { echo "it didn't unpack"; return 1; }
+  tar -xzf "$archive" -C "$into" --no-same-owner --no-same-permissions --wildcards '*CHANGELOG.md' '*THIRD_PARTY_LICENSES.txt' 2>/dev/null || true
+  [[ -f $into/soloist ]] || mv "$into/$member" "$into/soloist"
+}
+
+hash_of() { sha256sum "$1" | cut -d' ' -f1; }
+
+# When FILE (a Soloist) was built, or 0 if that can't be read. Soloist's build
+# number is the time it was built ("soloist 1.3.10.6 build 1792627290
+# (20261022)"), kept in it as text; the archive's own dates are all 2000-01-01.
+built_of() {
+  local found
+  found=$(strings -n 10 "$1" 2>/dev/null | grep -xE '1[0-9]{9}' \
+    | awk -v lo=1767225600 -v hi=$(($(date +%s) + 86400)) '$1 >= lo && $1 <= hi' | sort -u)
+  [[ -n $found && $(wc -l <<<"$found") -eq 1 ]] && echo "$found" || echo 0
+}
+
+# The installed build's hash, worked out once.
+installed_hash=""
+installed_hash() {
+  [[ -n $installed_hash || ! -f $dest/soloist ]] || installed_hash=$(hash_of "$dest/soloist")
+  printf '%s' "$installed_hash"
+}
+
+# The installed build: {built, days, version, checked, why}, or null.
+installed_json() {
+  local built version="" why=""
+  [[ -f $dest/soloist ]] || { echo null; return; }
+  if [[ -f $dest/soloist.sha256 ]]; then
+    [[ $(cut -d' ' -f1 "$dest/soloist.sha256") == "$(installed_hash)" ]] || why=replaced
+  else
+    why=unchecked
+  fi
+  if [[ -z $why && -f $dest/soloist.json ]]; then
+    built=$(jq -r '.built // empty' "$dest/soloist.json" 2>/dev/null)
+    version=$(jq -r '.version // empty' "$dest/soloist.json" 2>/dev/null)
+  fi
+  built=${built:-$(built_of "$dest/soloist")}
+  jq -n --argjson built "$built" --argjson days $((($(date +%s) - built) / 86400)) --arg version "$version" \
+    --arg why "$why" '{built: $built, days: $days, version: (if $version == "" then null else $version end), checked: ($why == ""), why: $why}'
+}
+
+# A download, read without running it: {path, built, days, ok, why, same,
+# newer}. Kept by its name, size and date, as the setup window asks often.
+# INSTALLED: installed_json's.
+download_json() {
+  local archive=$1 installed=$2 key out built why="" h
+  key="$archive $(stat -c '%s %Y' "$archive")"
+  if [[ -f $cache/soloist-download.json ]] && jq -e --arg k "$key" '.key == $k' "$cache/soloist-download.json" >/dev/null 2>&1; then
+    out=$(jq -c '.download' "$cache/soloist-download.json")
+  else
+    local x
+    x=$(mktemp -d)
+    if why=$(unpack "$archive" "$x") && why=$(usable "$x/soloist"); then why=""; fi
+    built=$( [[ -f $x/soloist ]] && built_of "$x/soloist" || echo 0)
+    h=$( [[ -f $x/soloist ]] && hash_of "$x/soloist" || true)
+    rm -rf -- "$x"
+    if [[ -z $why ]] && ((built > 0 && $(date +%s) - built >= 90 * 86400)); then why="it was built on $(day "$built") and has expired (builds last 90 days)"; fi
+    out=$(jq -nc --arg path "$archive" --argjson built "$built" --arg why "$why" --arg hash "$h" \
+      '{path: $path, built: $built, ok: ($why == ""), why: $why, hash: $hash}')
+    mkdir -p "$cache"
+    # The JSON on stdin, never on a command line (as everything omarock passes).
+    { jq -R . <<<"$key"; printf '%s\n' "$out"; } \
+      | jq -n 'input as $k | input as $d | {key: $k, download: $d}' >"$cache/soloist-download.json.new" \
+      && mv "$cache/soloist-download.json.new" "$cache/soloist-download.json"
+  fi
+  jq -c --arg ih "$(installed_hash)" --argjson ib "$(jq -r '.built // 0' <<<"$installed")" --argjson now "$(date +%s)" \
+    '. + {days: ((($now - .built) / 86400) | floor), same: (.hash != "" and .hash == $ih), newer: (.hash != "" and .hash != $ih and .built > $ib)} | del(.hash)' <<<"$out"
+}
+
+status() {
+  local d="" archive installed
+  installed=$(installed_json)
+  if [[ ${1:-} != --installed ]] && archive=$(newest_download) && [[ -n $archive ]]; then d=$(download_json "$archive" "$installed"); fi
+  printf '%s\n%s\n' "$installed" "${d:-null}" \
+    | jq -n --arg page "$page" 'input as $installed | input as $download | {page: $page, installed: $installed, download: $download}'
+}
+
+# ---- checking a build with omarock's shim ----
+
+network() { getent hosts apresolve.spotify.com >/dev/null; }
+
+# Its log since it started (invocation ID), never its command line.
+log_of() { journalctl --user --no-pager -q -o cat "_SYSTEMD_INVOCATION_ID=$1" 2>/dev/null; }
+
+record() {  # VERSION: soloist.json and soloist.last-good, for the build that passed
+  local h built
+  h=$(hash_of "$dest/soloist")
+  built=$(built_of "$dest/soloist")
+  jq -n --arg version "$1" --argjson built "$built" --arg hash "$h" --argjson checked "$(date +%s)" \
+    '{version: (if $version == "" then null else $version end), built: $built, sha256: $hash, checked: $checked}' >"$dest/soloist.json.new"
+  mv "$dest/soloist.json.new" "$dest/soloist.json"
+  if [[ ! -f $dest/soloist.last-good ]] || [[ $(hash_of "$dest/soloist.last-good") != "$h" ]]; then
+    cp -p "$dest/soloist" "$dest/soloist.last-good.new" && mv "$dest/soloist.last-good.new" "$dest/soloist.last-good"
+    cp "$dest/soloist.json" "$dest/last-good.json"
+  fi
+}
+
+# Start the build installed under the shim and watch its log: 0 when it
+# passed (version, signed set), 1 when it didn't (why set).
+try_it() {
+  local id lines="" state code i
+  printf '%s  soloist\n' "$(hash_of "$dest/soloist")" >"$dest/soloist.sha256"
+  systemctl --user reset-failed omarock-soloist 2>/dev/null || true
   systemctl --user restart omarock-soloist
-  echo "omarock-soloist restarted"
-fi
+  id=$(systemctl --user show -p InvocationID --value omarock-soloist)
+  for ((i = 0; i < 60; i++)); do
+    sleep 0.5
+    lines=$(log_of "$id")
+    if grep -q '^omarock-soloist: handed Soloist its key' <<<"$lines"; then
+      # Its control port: a connection of ours, so the shim has one to guard.
+      if grep -q '^omarock-soloist: guards 127\.0\.0\.1:'"$ws"':' <<<"$lines"; then
+        version=$(grep -m1 -oE 'soloist [0-9]+(\.[0-9]+)+ build' <<<"$lines" | cut -d' ' -f2 || true)
+        grep -q 'logged in as' <<<"$lines" && signed=yes
+        grep -q 'login failed' <<<"$lines" && signed=no
+        return 0
+      fi
+      (exec 3<>"/dev/tcp/127.0.0.1/$ws") 2>/dev/null || true
+    fi
+    state=$(systemctl --user show -p ActiveState --value omarock-soloist)
+    if [[ $state == failed || $state == inactive ]]; then
+      code=$(systemctl --user show -p ExecMainStatus --value omarock-soloist)
+      case $code in
+        10) why="it says it has expired" ;;
+        78) why="it couldn't read the Soloist key, or omarock's shim isn't installed (tools/install-spotify)" ;;
+        *) why="it stopped (exit $code): journalctl --user -u omarock-soloist" ;;
+      esac
+      return 1
+    fi
+  done
+  if grep -q '^omarock-soloist: handed Soloist its key' <<<"$lines"; then
+    why="omarock's shim didn't see it take a connection on its control port, so it can't guard it"
+  else
+    why="omarock's shim didn't load into it, so it can't give it its key"
+  fi
+  return 1
+}
+
+# check: the build installed, with the shim. Restores the last good one when
+# it fails. Leaves Soloist running if Spotify is switched on in omarock.
+check() {
+  local why="" version="" signed="" on=true
+  [[ -f $dest/soloist ]] || { wrong "there's no Soloist installed: download it from $page"; return 1; }
+  [[ -f $shim ]] || { wrong "omarock's shim isn't installed: run tools/install-spotify first"; return 1; }
+  network || { wrong "no network: Soloist starts only with one, so it can't be checked now; try again when you're online"; return 1; }
+  systemctl --user is-enabled --quiet omarock-soloist 2>/dev/null || on=false
+  say "Checking Soloist with omarock's shim (up to 30 s)…"
+  if try_it; then
+    record "$version"
+    good "Soloist${version:+ $version}$(built_on "$dest/soloist") works with omarock: it got its key off its command line, and only your account reaches its control port"
+    [[ $signed == yes ]] && good "it signed in to your Spotify account"
+    [[ $signed == no ]] && wrong "it couldn't sign in: check the Soloist key (omarock's settings, Spotify)"
+    $on || systemctl --user stop omarock-soloist
+    return 0
+  fi
+  wrong "This Soloist doesn't work with omarock: $why"
+  if [[ -f $dest/soloist.last-good ]] && [[ $(hash_of "$dest/soloist.last-good") != $(hash_of "$dest/soloist") ]]; then
+    cp -p "$dest/soloist.last-good" "$dest/soloist.new" && mv "$dest/soloist.new" "$dest/soloist"
+    printf '%s  soloist\n' "$(hash_of "$dest/soloist")" >"$dest/soloist.sha256"
+    cp "$dest/last-good.json" "$dest/soloist.json" 2>/dev/null || true
+    if $on; then systemctl --user reset-failed omarock-soloist 2>/dev/null || true; systemctl --user restart omarock-soloist; fi
+    say "Put back the Soloist that worked$(built_on "$dest/soloist"): Spotify carries on with it until it expires."
+  else
+    rm -f "$dest/soloist.sha256"
+    systemctl --user stop omarock-soloist 2>/dev/null || true
+    say "Spotify stays off until a Soloist build works with omarock."
+  fi
+  return 1
+}
+
+# install [ARCHIVE]: the newest download, unless given one.
+install_build() {
+  local archive=${1:-} why built
+  [[ -n $archive ]] || archive=$(newest_download)
+  [[ -n $archive && -f $archive ]] || { wrong "no Soloist download in your Downloads folder: download it from $page"; return 1; }
+  network || { wrong "no network: Soloist starts only with one, so a new build can't be checked now; try again when you're online"; return 1; }
+  install -d -m 700 "$dest"
+  work=$(mktemp -d "$dest/.new.XXXXXX")
+  why=$(unpack "$archive" "$work") && why=$(usable "$work/soloist") || { wrong "$(basename "$archive") isn't a Soloist omarock can use: $why"; return 1; }
+  built=$(built_of "$work/soloist")
+  ((built == 0 || $(date +%s) - built < 90 * 86400)) || { wrong "$(basename "$archive") was built on $(day "$built") and has expired: download a new one from $page"; return 1; }
+  if [[ -f $dest/soloist && -f $dest/soloist.sha256 ]] && [[ $(hash_of "$work/soloist") == $(hash_of "$dest/soloist") ]] \
+    && (cd "$dest" && sha256sum --check --status soloist.sha256 2>/dev/null); then
+    good "That's the Soloist installed already$(built_on "$dest/soloist")"
+    return 0
+  fi
+  chmod 700 "$work/soloist"
+  mv "$work/soloist" "$dest/soloist"
+  local f
+  for f in CHANGELOG.md THIRD_PARTY_LICENSES.txt; do
+    [[ -f $work/$f ]] && mv "$work/$f" "$dest/$f"
+  done
+  good "Installed Soloist from $(basename "$archive")$(built_on "$dest/soloist")"
+  check
+}
+
+case ${1:-} in
+  status) shift; status "$@" ;;
+  install) shift; install_build "$@" ;;
+  check) check ;;
+  *) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+esac

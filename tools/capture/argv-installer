@@ -10,7 +10,7 @@
 # point at this machine (/etc/hosts, with sudo; taken out at the end), the
 # Apple Music bridge is tools/capture/fake_bridge.py on 127.0.0.1, mpd is on
 # its socket only, and Soloist is a stand-in (the real one announces itself
-# on the network). Logs are in WORK-DIR (default a new ~/omarock-argv.XXXXXX).
+# on the network), downloaded into ~/Downloads as Soloist would be. Logs are in WORK-DIR (default a new ~/omarock-argv.XXXXXX).
 set -uo pipefail
 if [[ ${OMAROCK_THROWAWAY:-} != yes ]]; then
   echo "argv-installer: only on a throwaway machine (it installs and removes everything, and edits /etc/hosts)." >&2
@@ -40,13 +40,14 @@ sleep 2
 for h in api.edge-gateway.siriusxm.com apresolve.spotify.com; do
   getent ahosts "$h" | awk '{print $1}' | sort -u | grep -qvE '^(127\.0\.0\.1|::1)$' && { echo "argv-installer: $h still resolves elsewhere" >&2; exit 1; }
 done
-# A stand-in Soloist: it dates itself as Soloist does, and waits, keeping its
-# command line (what the doctor reads).
-mkdir -p ~/.local/lib/omarock-soloist
-printf '%s\n' '#!/bin/bash' \
-  'case $1 in --version|-V) echo "soloist 1.3.10.6 build 1792627290 (20261022) (standin) (linux/x86_64)"; exit 0;; esac' \
-  'while :; do sleep 3600; done' >~/.local/lib/omarock-soloist/soloist
-chmod 755 ~/.local/lib/omarock-soloist/soloist
+# A stand-in Soloist (soloist-standin.c), downloaded as you would download
+# Soloist: built as Soloist is, so ./install installs it from ~/Downloads
+# and checks it with omarock's shim as it would Soloist.
+standin=$(mktemp -d)
+cc -O2 -DBUILD="\"$(date +%s)\"" -o "$standin/soloist" "$repo/tools/capture/soloist-standin.c" || exit 1
+mkdir -p ~/Downloads
+tar -czf ~/Downloads/soloist_release_x86_64.tar.gz -C "$standin" soloist
+rm -rf -- "$standin"
 # Services started from here on are logged too.
 systemctl --user set-environment LD_PRELOAD="$so" OMAROCK_EXECLOG="$log"
 
@@ -91,7 +92,7 @@ printf '%s\n' "Set it up anyway?=y" "Enter the SiriusXM login again?=n" >"$work/
 limit=180 run_y sxm siriusxm --yes terms; said sxm
 
 echo "== Spotify (cut off at the pairing)"
-printf '%s\n' "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" "Fetch the latest from Spotify?=n" >"$work/answers-spotify"
+printf '%s\n' "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" >"$work/answers-spotify"
 limit=150 run_y spotify spotify; said spotify
 logged "$repo/tools/omarock-sp" status >/dev/null 2>&1
 
@@ -106,6 +107,10 @@ acct bridge-check http://127.0.0.1:8710
 printf 'http://127.0.0.1:8710\n' | acct apple-bridge; printf 'fake-bridge-token\n' | acct bridge-token
 fake pair '{"code":"654321"}'; printf '654321\n' | acct bridge-pair http://127.0.0.1:8710 2>/dev/null
 for a in status "search zen arcade" "raw GET /v1/health"; do logged "$repo/tools/omarock-am" $a >/dev/null 2>&1; done
+
+echo "== Soloist: checked again, as after one is put in by hand"
+logged "$repo/tools/update-soloist" check >"$work/logs/soloist-check.log" 2>&1
+logged "$repo/tools/update-soloist" status >/dev/null 2>&1
 
 echo "== the doctor, the sources, History"
 logged "$repo/tools/omarock-doctor" >"$work/logs/doctor.log" 2>&1

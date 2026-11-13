@@ -95,6 +95,7 @@ def main():
     sign_out()
     queue_jump()
     web_pages()
+    other_accounts()
     dropped()
     limited()
     paced()
@@ -379,6 +380,63 @@ def web_pages():
         check("the sign-in page shows an error as text, not as HTML",
               code == 400 and "<script>" not in page and "&lt;script&gt;" in page, page)
     finally:
+        server.shutdown()
+        server.server_close()
+
+
+def other_accounts():
+    """Another account's programs are refused, by who owns the connection's far
+    end in the kernel's socket table. Here every connection is this account's,
+    so "another account" is this one with the service told it runs as another."""
+    import http.client
+    import socket
+    check("an address as /proc/net/tcp shows it",
+          service.proc_address("127.0.0.1", 8730) == ("0100007F:221A" if sys.byteorder == "little" else "7F000001:221A"),
+          service.proc_address("127.0.0.1", 8730))
+    check("and as tcp6 shows an IPv6 socket connected to 127.0.0.1",
+          service.proc_address("::ffff:127.0.0.1", 8730) == ("0000000000000000FFFF00000100007F:221A"
+                                                             if sys.byteorder == "little" else
+                                                             "00000000000000000000FFFF7F000001:221A"),
+          service.proc_address("::ffff:127.0.0.1", 8730))
+    listener = socket.create_server(("127.0.0.1", 0))
+    client = socket.create_connection(listener.getsockname())
+    accepted, _ = listener.accept()
+    check("a connection of this account's: its far end is ours",
+          service.socket_owners(accepted.getpeername(), accepted.getsockname()) == [service.ME]
+          and service.from_another_account(accepted) is None,
+          service.socket_owners(accepted.getpeername(), accepted.getsockname()))
+    v6 = socket.socket(socket.AF_INET6)
+    v6.connect(("::ffff:127.0.0.1", listener.getsockname()[1]))
+    accepted6, _ = listener.accept()
+    check("an IPv6 socket's connection to 127.0.0.1 is found too",
+          service.socket_owners(accepted6.getpeername(), accepted6.getsockname()) == [service.ME])
+    client.close()
+    time.sleep(0.1)
+    check("a connection whose far end has closed is refused (no owner left to check)",
+          service.from_another_account(accepted) is not None,
+          service.socket_owners(accepted.getpeername(), accepted.getsockname()))
+    for s in (accepted, accepted6, v6, listener):
+        s.close()
+
+    server = service.ThreadingHTTPServer(("127.0.0.1", 0), service.Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def ask():
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/v1/nosuch", headers={"X-Omarock": "1"})
+        reply = conn.getresponse()
+        return reply.status, reply.read().decode()
+
+    me = service.ME
+    try:
+        check("this account's request gets past the check", ask()[0] == 404)
+        service.ME = me + 4242
+        code, text = ask()
+        check("another account's is refused, before its request is read",
+              code == 403 and "Only the account running omarock-spotify" in text, f"{code} {text}")
+    finally:
+        service.ME = me
         server.shutdown()
         server.server_close()
 

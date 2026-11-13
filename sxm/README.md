@@ -3,8 +3,11 @@
 omarock-sxm is a small service on your machine. It signs in to your SiriusXM
 account and serves each **live channel** as one continuous stream, which mpd
 plays like an internet radio station. It plays nothing itself, so the sound
-goes wherever mpd's goes. It listens on 127.0.0.1:8720 only. On-demand shows
-and Xtra channels aren't included.
+goes wherever mpd's goes. It listens on 127.0.0.1:8720 only, and answers only
+your account's programs (another account on the machine is refused: the
+kernel's socket table says who's at the other end of each connection), and of
+those only omarock's own requests, never a web page's. On-demand shows and Xtra
+channels aren't included.
 
 ## Read this first: it's unofficial
 
@@ -100,7 +103,7 @@ last asked.
 ## Testing
 
 `sxm/test_relay.py` checks the relay's listeners, and that only omarock's own
-requests are answered. Run it with the venv's Python:
+requests, from your account, are answered. Run it with the venv's Python:
 `~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py`.
 
 Don't test with `ffplay` or `mpv`: they play to your default output, not through

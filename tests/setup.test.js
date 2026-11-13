@@ -20,20 +20,23 @@ test("every account a window saves is one omarock-account takes", () => {
     for (const f of Setup.fields(piece)) if (f.account) assert.ok(verbs.includes(f.account), f.account)
 })
 
-test("Spotify: Start setup waits for a Client ID that looks like one, and the Soloist key", () => {
+test("Spotify: Start setup waits for a Client ID that looks like one, the Soloist key, and Soloist", () => {
   const id = "0123456789abcdef0123456789ABCDEF"
+  const found = { soloistDownload: { kind: "ok", text: "Found it" } }
   assert.equal(Setup.blocker("spotify", Setup.initial("spotify", {}), {}), "Needs the app's Client ID")
-  assert.equal(Setup.blocker("spotify", { spotifyClient: "abc", soloistKey: "k" }, {}), "A Client ID is 32 letters and digits")
-  assert.equal(Setup.blocker("spotify", { spotifyClient: id, soloistKey: "" }, {}), "Needs the Soloist key")
-  assert.equal(Setup.blocker("spotify", { spotifyClient: " " + id + " ", soloistKey: "k" }, {}), "")
+  assert.equal(Setup.blocker("spotify", { spotifyClient: "abc", soloistKey: "k" }, {}, found), "A Client ID is 32 letters and digits")
+  assert.equal(Setup.blocker("spotify", { spotifyClient: id, soloistKey: "" }, {}, found), "Needs the Soloist key")
+  assert.equal(Setup.blocker("spotify", { spotifyClient: " " + id + " ", soloistKey: "k" }, {}, found), "")
   // A key that's set already: empty keeps it.
-  assert.equal(Setup.blocker("spotify", { spotifyClient: id, soloistKey: "" }, { soloistKey: true }), "")
+  assert.equal(Setup.blocker("spotify", { spotifyClient: id, soloistKey: "" }, { soloistKey: true }, found), "")
+  // Soloist not found yet in the Downloads folder.
+  assert.equal(Setup.blocker("spotify", { spotifyClient: id, soloistKey: "k" }, {}), "Needs Soloist, downloaded from Spotify")
 })
 
 test("what's set already fills a line in; a secret starts empty", () => {
   const known = { spotifyClient: "0123456789abcdef0123456789abcdef", soloistKey: true, sxmUser: "me@example.com",
     sxmPassword: true, appleBridge: "http://100.64.0.10:8710" }
-  assert.deepEqual(Setup.initial("spotify", known), { spotifyClient: known.spotifyClient, soloistKey: "" })
+  assert.deepEqual(Setup.initial("spotify", known), { spotifyClient: known.spotifyClient, soloistKey: "", soloistDownload: "" })
   assert.deepEqual(Setup.initial("siriusxm", known), { sxmTerms: false, sxmUser: "me@example.com", sxmPassword: "" })
   assert.equal(Setup.initial("apple-music", known).appleMac, "http://100.64.0.10:8710")
   assert.equal(Setup.initial("sound", {}, "alsa_output.speakers").output, "alsa_output.speakers")
@@ -180,11 +183,44 @@ test("the windows as Marc laid them out: no Tailscale link, no list of what the 
   assert.ok(!apple.steps.some(s => (s.copies || []).length))
   assert.deepEqual(apple.steps[1].commands, ["git clone https://github.com/marcewing/omarock", "cd omarock && ./install"])
   assert.deepEqual(apple.steps.flatMap(s => (s.links || []).map(l => l.label)), ["The bridge's guide"])
-  // Spotify: where the Client ID comes from, Soloist's own page, and what Start setup does next, as step 3.
+  // Spotify: where the Client ID comes from, Soloist's own page, Soloist downloaded by you (step 3), and
+  // what Start setup does next, as step 4.
   const spotify = Setup.pages.spotify
   assert.match(spotify.steps[0].fields[0].lead, /copy the app's Client ID and paste it here/)
   assert.equal(spotify.steps[1].links[0].url, "https://developer.spotify.com/dashboard/soloist")
-  assert.equal(spotify.steps[2].title, 'After pressing "Start setup"')
-  assert.equal(spotify.steps[2].bullets.length, 4)
-  assert.ok(spotify.steps[2].bullets[1].includes("{host}"))
+  assert.equal(spotify.steps[2].links[0].url, Setup.SOLOIST_PAGE)
+  assert.deepEqual(spotify.steps[2].fields.map(f => f.type), ["soloist"])
+  assert.equal(spotify.steps[3].title, 'After pressing "Start setup"')
+  assert.equal(spotify.steps[3].bullets.length, 4)
+  assert.match(spotify.steps[3].bullets[0], /installed from your Downloads folder, checked with omarock/)
+  assert.ok(spotify.steps[3].bullets[1].includes("{host}"))
+})
+
+test("Soloist's step: found in the Downloads folder (read, never run), or waited for", () => {
+  const field = Setup.fields("spotify").find(f => f.type === "soloist")
+  const now = Math.floor(Date.now() / 1000)
+  const state = (installed, download) => Setup.soloistState(JSON.stringify({ installed, download }))
+  const fresh = { path: "/home/me/Downloads/soloist_release_x86_64.tar.gz", built: now - 3600, ok: true, why: "", days: 0, same: false, newer: true }
+  // Nothing installed: waiting, then found.
+  assert.deepEqual(state(null, null), { kind: "waiting", text: "Waiting for it in your Downloads folder…" })
+  assert.equal(Setup.problem(field, "", {}, state(null, null)), "Needs Soloist, downloaded from Spotify")
+  assert.equal(state(null, fresh).kind, "ok")
+  assert.match(state(null, fresh).text, /^Found it in your Downloads folder, built \d{4}-\d\d-\d\d\. Start setup installs it\.$/)
+  assert.equal(Setup.problem(field, "", {}, state(null, fresh)), "")
+  // A download that can't be used says why, by its name.
+  const broken = Object.assign({}, fresh, { ok: false, why: "it isn't a Linux x86-64 program" })
+  assert.deepEqual(state(null, broken), { kind: "bad",
+    text: "soloist_release_x86_64.tar.gz in your Downloads folder can't be used: it isn't a Linux x86-64 program" })
+  assert.equal(Setup.problem(field, "", {}, state(null, broken)), state(null, broken).text)
+  // Installed and checked: no download needed; one getting old wants a new one.
+  const checked = { built: now - 20 * 86400, days: 20, version: "1.3.10.6", checked: true, why: "" }
+  assert.match(state(checked, null).text, /^Soloist is installed already, built .*: no download needed$/)
+  assert.equal(state(Object.assign({}, checked, { days: 85 }), null).kind, "waiting")
+  assert.match(state(Object.assign({}, checked, { days: 85 }), null).text, /85 days old: download a new one/)
+  // Installed but not checked yet (from before, or replaced by hand): Start setup checks it.
+  assert.match(state(Object.assign({}, checked, { checked: false, why: "unchecked" }), null).text, /Start setup checks it with omarock/)
+  // The same build as the one installed isn't "found": it's the one there.
+  assert.equal(state(checked, Object.assign({}, fresh, { same: true, newer: false })).text, state(checked, null).text)
+  // tools/update-soloist didn't answer.
+  assert.equal(Setup.soloistState("").kind, "bad")
 })

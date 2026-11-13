@@ -165,7 +165,23 @@ fi
 
 if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/omarock-spotify.service ]]; then
   head2 "Spotify"
-  [[ -x $HOME/.local/lib/omarock-soloist/soloist ]] && ok "Soloist: $("$HOME/.local/lib/omarock-soloist/soloist" --version 2>/dev/null | head -1)" || bad "Soloist isn't installed: tools/update-soloist"
+  # Soloist itself, read without running it: the build you downloaded, and
+  # whether it was checked with omarock's shim (its unit starts no other).
+  so=$("$(dirname "$0")/update-soloist" status --installed 2>/dev/null | jq -c '.installed // empty')
+  if [[ -z $so ]]; then
+    bad "Soloist isn't installed: download it from Spotify, then ./install spotify (spotify/README.md, step 4)"
+  else
+    days=$(jq -r .days <<<"$so")
+    if [[ $(jq -r .checked <<<"$so") != true ]]; then
+      bad "this Soloist hasn't been checked with omarock (it's new, or was replaced by hand), so its unit won't start it again: ./install spotify, or Update… in omarock's settings (Spotify)"
+    elif ((days >= 90)); then
+      bad "Soloist's build is $days days old and has stopped working: download a new one from Spotify, then ./install spotify"
+    elif ((days >= 80)); then
+      note "Soloist's build is $days days old, and stops working at 90: download a new one from Spotify, then ./install spotify"
+    else
+      ok "Soloist$(jq -r '.version // empty | " " + .' <<<"$so"), built $days days ago, checked with omarock"
+    fi
+  fi
   [[ -f $HOME/.config/omarock/spotify.json ]] && ok "the developer app: ~/.config/omarock/spotify.json" || bad "no ~/.config/omarock/spotify.json: spotify/README.md, step 2"
   private_file "$HOME/.config/omarock/soloist-key" "the Soloist key" "spotify/README.md, step 3"
   if [[ $(setting spotify false) != true ]]; then
@@ -174,11 +190,18 @@ if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/om
     for u in omarock-soloist omarock-spotify; do active $u && ok "$u is running" || bad "$u isn't running: journalctl --user -u $u"; done
   fi
   # Soloist's command line, which every account here can read, should hold
-  # "@key" in place of its key (omarock-soloist-key.so). Read, never shown.
+  # "@key" in place of its key, and its control port should be guarded:
+  # both by omarock-soloist-shim.so, which says so in its log. Read, never shown.
   if active omarock-soloist; then
     pid=$(systemctl --user show -p MainPID --value omarock-soloist)
     if tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null | grep -qx -- '@key'; then ok "Soloist's key isn't on its command line"
     else bad "Soloist's key is on its command line, where every account here can read it: Update… in omarock's settings (Spotify), or tools/install-spotify --start"; fi
+    run=$(systemctl --user show -p InvocationID --value omarock-soloist)
+    if journalctl --user --no-pager -q -o cat "_SYSTEMD_INVOCATION_ID=$run" 2>/dev/null | grep -q '^omarock-soloist: guards 127\.0\.0\.1:'; then
+      ok "only your account reaches Soloist's control port"
+    else
+      bad "Soloist's control port isn't guarded (no word from omarock's shim): Update… in omarock's settings (Spotify), or tools/install-spotify --start"
+    fi
   fi
   h=$(health "$(setting spotifyService http://127.0.0.1:8730)")
   if [[ -n $h ]]; then

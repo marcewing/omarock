@@ -4,18 +4,22 @@
 # omarock's one volume. Without it, it plays into the default output, and its
 # own volume is the volume. It picks as it starts: ./install sound and
 # ./install --remove sound restart it.
-# Its WebSocket API (no authentication) listens on this machine only.
-# Installed by tools/install-spotify from a commit; the binary by
-# tools/update-soloist (Spotify's builds expire after 90 days: an expired one
-# exits with 10, which isn't restarted). Without its key it says so and stops
-# (78), rather than printing its usage every 5 s.
+# Its WebSocket API (no authentication of its own) listens on this machine only,
+# and the shim (below) lets only your account's connections reach it.
+# Installed by tools/install-spotify from a commit. Soloist itself is the build
+# you downloaded from Spotify, which tools/update-soloist installed and checked
+# with the shim: this starts only that build (its hash, in soloist.sha256), and
+# anything else (none yet, or one replaced by hand) stops with 79 until
+# update-soloist checks it. Spotify's builds expire after 90 days: an expired
+# one exits with 10. Without its key it says so and stops (78), rather than
+# printing its usage every 5 s. None of the three is restarted.
 # It waits for the network first: Soloist tries to log in once, at start, and a
 # session started before the network (a boot) stayed logged out. A user unit
 # can't wait for network-online.target, which is the system's.
 # Its folders hold its Spotify sign-in, so what it writes is yours alone
 # (UMask); tools/install-spotify makes what's already there the same.
 # Soloist takes its key only as an argument, which every account here can read
-# (ps): so it's given "@key", and omarock-soloist-key.so (loaded into Soloist
+# (ps): so it's given "@key", and omarock-soloist-shim.so (loaded into Soloist
 # alone, built by tools/install-spotify) hands Soloist the key from its file.
 [Unit]
 Description=Spotify's Soloist for omarock (a Spotify Connect speaker)
@@ -23,10 +27,10 @@ After=pipewire.service omarock-bus.service
 Wants=omarock-bus.service
 
 [Service]
-ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; shim=%h/.local/share/omarock/spotify/omarock-soloist-key.so; [ -r "$$shim" ] || { echo "omarock-soloist: no $$shim: run tools/install-spotify again" >&2; exit 78; }; until getent hosts apresolve.spotify.com >/dev/null; do [ -n "$$waiting" ] || echo "omarock-soloist: waiting for the network" >&2; waiting=1; sleep 2; done; if [ -e %h/.local/share/omarock/audio/omarock-bus.conf ]; then set -- --pipewire-device omarock --initial-volume 100; else set -- --initial-volume 40; fi; export LD_PRELOAD="$$shim" OMAROCK_SOLOIST_KEY="$$key"; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key @key --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 "$$@" --ws 127.0.0.1:8731'
+ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; shim=%h/.local/share/omarock/spotify/omarock-soloist-shim.so; [ -r "$$shim" ] || { echo "omarock-soloist: no $$shim: run tools/install-spotify again" >&2; exit 78; }; (cd %h/.local/lib/omarock-soloist 2>/dev/null && sha256sum --check --status soloist.sha256 2>/dev/null) || { echo "omarock-soloist: this Soloist is not the build omarock checked (none yet, or replaced by hand): Update... in the settings of omarock, Spotify, checks it" >&2; exit 79; }; until getent hosts apresolve.spotify.com >/dev/null; do [ -n "$$waiting" ] || echo "omarock-soloist: waiting for the network" >&2; waiting=1; sleep 2; done; if [ -e %h/.local/share/omarock/audio/omarock-bus.conf ]; then set -- --pipewire-device omarock --initial-volume 100; else set -- --initial-volume 40; fi; export LD_PRELOAD="$$shim" OMAROCK_SOLOIST_KEY="$$key"; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key @key --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 "$$@" --ws 127.0.0.1:8731'
 Restart=on-failure
 RestartSec=5
-RestartPreventExitStatus=10 78
+RestartPreventExitStatus=10 78 79
 UMask=0077
 
 [Install]

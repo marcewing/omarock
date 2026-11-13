@@ -25,7 +25,10 @@
 //   "pair": the pairing code the Mac's bridge shows. The window trades it
 //     for the bridge's token as soon as it's typed (tools/omarock-account
 //     bridge-pair), so the token goes straight into its file; a token that
-//     the bridge takes already needs no code.
+//     the bridge takes already needs no code;
+//   "soloist": Soloist, downloaded from Spotify into the Downloads folder:
+//     nothing to type, the window looks for it (tools/update-soloist status,
+//     which reads it without running it) until it's there.
 // `pattern` and `wrong`: what a text has to look like, and what's said when
 // it doesn't. `checked` (a secret): the window checks it live, against the
 // bridge.
@@ -33,6 +36,7 @@
 var GUIDES = "https://github.com/marcewing/omarock/blob/main/"
 var REDIRECT = "http://127.0.0.1:8730/callback"
 var BRIDGE_PORT = 8710
+var SOLOIST_PAGE = "https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates"
 
 var pages = {
   spotify: {
@@ -54,9 +58,14 @@ var pages = {
         links: [{ label: "Soloist's API key, in the dashboard", url: "https://developer.spotify.com/dashboard/soloist" }],
         fields: [{ key: "soloistKey", type: "secret", label: "The Soloist key", required: true, needs: "the Soloist key",
           account: "soloist-key" }] },
+      { title: "Soloist, Spotify's player",
+        text: ["Soloist comes from Spotify, and you download it yourself. On Spotify's Soloist page, pick Linux x86_64 (the soloist_release_x86_64.tar.gz file) and save it in your Downloads folder. omarock installs it from there, and checks that it works with omarock before it runs.",
+          "Spotify's builds stop working after 90 days: a dot on Spotify in omarock's header says when to download a new one."],
+        links: [{ label: "Soloist's downloads, on Spotify's site", url: SOLOIST_PAGE }],
+        fields: [{ key: "soloistDownload", type: "soloist", required: true, needs: "Soloist, downloaded from Spotify" }] },
       { title: "After pressing \"Start setup\"",
         bullets: [
-          "Soloist will be downloaded from Spotify and started by omarock-spotify.",
+          "Soloist will be installed from your Downloads folder, checked with omarock, and started.",
           "Soloist must be paired with your Spotify account. Open Spotify on your phone or computer (on this network), play something and choose {host} under Connect. This only needs to be done once.",
           "If your firewall is on, you'll be asked to confirm opening Soloist's port while you pair. The port will be closed again after pairing.",
           "Spotify will be opened in your browser to confirm access."
@@ -174,7 +183,7 @@ function initial(piece, known, defaultOutput) {
     else if (f.type === "check") out[f.key] = f.defaultValue === true
     else if (f.type === "mac") out[f.key] = typeof known.appleBridge === "string" ? known.appleBridge : ""
     else if (f.type === "output") out[f.key] = defaultOutput && defaultOutput !== "omarock" ? defaultOutput : ""
-    else if (f.type === "pair") out[f.key] = ""
+    else if (f.type === "pair" || f.type === "soloist") out[f.key] = ""
   })
   return out
 }
@@ -191,6 +200,7 @@ function problem(field, value, known, live) {
   known = known || {}
   var set = known[field.key] === true || (typeof known[field.key] === "string" && known[field.key] !== "")
   if (field.type === "check") return field.required && value !== true ? "Needs " + field.needs : ""
+  if (field.type === "soloist") return live && live.kind === "ok" ? "" : live && live.kind === "bad" ? live.text : "Needs " + field.needs
   if (field.type === "mac" || field.type === "output") {
     if (String(value || "").trim() === "") return field.required ? "Needs " + field.needs : ""
     if (field.type === "output") return ""
@@ -274,6 +284,25 @@ function pairState(code, stderr) {
     5: "The bridge on the Mac is older than 0.10.0, and can't pair: update it there (git pull, then ./install)",
     6: "The bridge didn't answer", 7: "Couldn't save the bridge's token" }
   return { kind: "bad", text: said || fallback[code] || "Pairing didn't work (" + code + ")" }
+}
+
+// Soloist, as `tools/update-soloist status` reads it (JSON: installed,
+// download), for its step: { kind: "ok"|"bad"|"waiting", text }.
+function soloistState(text) {
+  var st
+  try { st = JSON.parse(text) } catch (e) { return { kind: "bad", text: "Couldn't look for Soloist (tools/update-soloist status)" } }
+  var day = function(t) { return t > 0 ? new Date(t * 1000).toISOString().slice(0, 10) : "" }
+  var built = function(t) { return t > 0 ? ", built " + day(t) : "" }
+  var inst = st && st.installed, dl = st && st.download
+  if (dl && dl.ok && (dl.newer || !inst))
+    return { kind: "ok", text: "Found it in your Downloads folder" + built(dl.built) + ". Start setup installs it." }
+  if (inst && inst.checked && inst.days < 80)
+    return { kind: "ok", text: "Soloist is installed already" + built(inst.built) + ": no download needed" }
+  if (inst && !inst.checked && inst.days < 80 && (!dl || dl.same))
+    return { kind: "ok", text: "Soloist is installed" + built(inst.built) + ". Start setup checks it with omarock." }
+  if (dl && !dl.ok) return { kind: "bad", text: dl.path.replace(/^.*\//, "") + " in your Downloads folder can't be used: " + dl.why }
+  if (inst) return { kind: "waiting", text: "The Soloist installed is " + inst.days + " days old: download a new one. Waiting for it in your Downloads folder…" }
+  return { kind: "waiting", text: "Waiting for it in your Downloads folder…" }
 }
 
 // The Macs on a tailnet, from `tailscale status --json`:
@@ -364,6 +393,7 @@ function outputList(text) {
 if (typeof module !== "undefined") {
   module.exports = { pages: pages, REDIRECT: REDIRECT, title: title, fields: fields, bridgeUrl: bridgeUrl, initial: initial,
     problem: problem, blocker: blocker, writes: writes, args: args, pairDigits: pairDigits, pairState: pairState,
+    soloistState: soloistState, SOLOIST_PAGE: SOLOIST_PAGE,
     tailnetMacs: tailnetMacs, bonjourMacs: bonjourMacs, unescapeAvahi: unescapeAvahi, macList: macList, macLabel: macLabel,
     outputList: outputList }
 }

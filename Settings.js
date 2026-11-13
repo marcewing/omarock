@@ -212,7 +212,8 @@ function shown(states) {
       out.push(st.attention
         ? copy(field, { label: "Set " + field.name + " up again", button: "Fix…", detail: field.name + ": " + st.attention,
           description: "Runs its setup again, in a terminal: it carries on with whatever's missing." })
-        : copy(field, { label: "Update " + field.name, button: "Update…", detail: field.name + ": an update is waiting",
+        : copy(field, { label: "Update " + field.name, button: "Update…",
+          detail: field.name + ": " + (typeof st.update === "string" ? st.update : "an update is waiting"),
           description: st.update === true ? field.updateDescription : st.update }))
     } else if (!field.source || st.setUp) {
       out.push(field.signedIn && st.signedIn ? copy(field, field.signedIn) : field)
