@@ -30,9 +30,9 @@ final class Pairing {
     }
 
     /// /v1/pair/ROUTE: POST /pair from anywhere, without the token; opening, reading and
-    /// closing a code from this Mac only (by the connection's address), with it. nil: not
-    /// a pairing endpoint.
-    func respond(to request: HTTPRequest, route: [String], authorized: Bool, client: String?) -> HTTPResponse? {
+    /// closing a code only over the control socket (from 0.14.0; before, from loopback with
+    /// the token, which went to whatever held the port). nil: not a pairing endpoint.
+    func respond(to request: HTTPRequest, route: [String], client: String?) -> HTTPResponse? {
         switch (request.method, route) {
         case ("POST", []):
             let body = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any]
@@ -50,8 +50,7 @@ final class Pairing {
                 return .error(409, "No pairing code is open on the Mac: run ./install pair there.")
             }
         case ("GET", []), ("POST", ["open"]), ("POST", ["close"]):
-            guard request.fromLoopback else { return .error(403, "Pairing codes are opened on the Mac: run ./install pair there.") }
-            guard authorized else { return .error(401, "Missing or wrong bearer token.") }
+            guard request.fromOwner else { return .error(403, "Pairing codes are opened on the Mac: run ./install pair there.") }
             switch route {
             case ["open"]: return .json(200, open())
             case ["close"]: cancel()

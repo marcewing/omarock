@@ -23,6 +23,19 @@ enum Paths {
     static let adminPassword = support.appendingPathComponent("admin.password")
     static let relayPassword = support.appendingPathComponent("relay.password")
     static let logs = support.appendingPathComponent("log")
+    /// The control socket: the API for this Mac account's processes, without the token
+    /// (apple-bridge/API.md, Transport).
+    static let controlSocket = support.appendingPathComponent("api.sock")
+
+    /// Makes the support folder, or makes it private (700) if it's there: it holds the
+    /// secrets and the control socket.
+    static func makeSupportPrivate() throws {
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        guard chmod(support.path, 0o700) == 0 else {
+            throw BridgeError("cannot make \(support.path) private: \(String(cString: strerror(errno)))")
+        }
+    }
 }
 
 /// config.json. Every field is optional.

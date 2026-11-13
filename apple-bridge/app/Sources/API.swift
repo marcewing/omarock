@@ -92,7 +92,7 @@ final class API {
                                                     query: request.query, library: library))
         }
         if route.first == "pair", let response = pairing.respond(to: request, route: Array(route.dropFirst()),
-                                                                 authorized: authorized(request), client: Self.client(request)) {
+                                                                 client: Self.client(request)) {
             return respond(response)
         }
         guard authorized(request) else { throw APIError(status: 401, message: "Missing or wrong bearer token.") }
@@ -270,6 +270,8 @@ final class API {
             "streamDelay": (stream.delay * 1000).rounded() / 1000,
             // Pairing codes (POST /pair) from 0.10.0.
             "pairing": true,
+            // From 0.14.0, the control socket (Paths.controlSocket), where ./install pairs.
+            "controlSocket": true,
         ]
         if let storefront = music.storefront { health["storefront"] = storefront }
         if authorized(request) { health["stream"] = config.streamURL ?? "http://\(request.host):\(Icecast.port)\(mount)" }
@@ -296,8 +298,10 @@ final class API {
         return name
     }
 
-    /// Constant-time comparison of the bearer token.
+    /// Constant-time comparison of the bearer token. The control socket needs none: only
+    /// this Mac account reaches it, and that account can read the token anyway.
     private func authorized(_ request: HTTPRequest) -> Bool {
+        if request.fromOwner { return true }
         guard let header = request.headers["authorization"], header.hasPrefix("Bearer ") else { return false }
         let given = Data(header.dropFirst("Bearer ".count).utf8)
         guard given.count == token.count else { return false }
@@ -345,6 +349,7 @@ final class Bridge {
 
     /// Serves on every address, or on config's listenHost and loopback.
     init(config: Config) throws {
+        try Paths.makeSupportPrivate()
         try FileManager.default.createDirectory(at: Paths.logs, withIntermediateDirectories: true)
         self.config = config
         let token = try Secrets.token()
@@ -359,7 +364,7 @@ final class Bridge {
         let api = API(token: token, config: config, mount: try Secrets.streamMount(), bonjour: bonjour, music: music,
                       library: library, stream: stream, player: player, artwork: artwork)
         let hosts = config.listenHost.map { $0 == "127.0.0.1" ? [$0] : [$0, "127.0.0.1"] } ?? []
-        server = HTTPServer(hosts: hosts, port: config.port) { request, respond in
+        server = HTTPServer(hosts: hosts, port: config.port, socketPath: Paths.controlSocket.path) { request, respond in
             api.handle(request, respond: respond)
         }
     }

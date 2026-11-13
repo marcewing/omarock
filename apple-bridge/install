@@ -26,6 +26,9 @@ repo=${0:A:h:h}
 here=$repo/apple-bridge/app
 support=${OMAROCK_BRIDGE_SUPPORT:-$HOME/Library/Application Support/omarock-bridge}
 app=${OMAROCK_BRIDGE_APP:-$HOME/Applications/OmarockBridge.app}
+# The bridge's control socket (from 0.14.0): only this Mac account can use it, so
+# what goes through it needs no token.
+sock=$support/api.sock
 answers=${OMAROCK_INSTALL_ANSWERS:-}
 autoload -Uz is-at-least
 changed=false   # this run installed or changed something
@@ -176,20 +179,26 @@ tailnet_name() {
 }
 # The bridge by loopback, where it always listens (with a listenHost too).
 bridge_url() { print -r -- "http://127.0.0.1:${$(config_value port):-8710}"; }
-health() { curl -s -m 5 "$(bridge_url)/v1/health" 2>/dev/null; }
+# Whether the control socket is there, and ours.
+control_ok() { [[ -S $sock && -O $sock ]]; }
+# The bridge's API over its control socket: METHOD PATH [TIMEOUT]. Never the token,
+# and never by TCP: whatever held the port would get what it was sent.
+control() { control_ok && curl -s -m ${3:-5} -X $1 --unix-socket "$sock" "http://localhost/v1$2" 2>/dev/null; }
+# Health by the control socket, or by TCP from a bridge before 0.14.0 (it asks
+# nothing secret, so the worst a stranger on the port could do is lie).
+health() { control GET /health || curl -s -m 5 "$(bridge_url)/v1/health" 2>/dev/null; }
 health_ok() { [[ -n $(health) ]]; }
 health_value() { plutil -extract "$1" raw -o - - <<<"$(health)" 2>/dev/null; }
 health_true() { [[ $(health_value "$1") == true ]]; }
 health_is() { [[ $(health_value "$1") == "$2" ]]; }
 private_ok() { [[ -s $1 && $(stat -f %Lp "$1") == 600 ]]; }
+# The support folder holds the secrets and the control socket: only you may open it.
+support_private() { [[ -d $support && -O $support ]] && chmod go= "$support"; }
 
 # Asks the bridge for Apple Music access again (a dialog on the Mac, if it hasn't
-# been answered), which also re-reads the subscription. The token goes to curl
-# on stdin, not on its command line.
-reauthorize() {
-  print -r -- "header = \"Authorization: Bearer $(<"$support/token")\"" \
-    | curl -s -m ${1:-5} -o /dev/null -X POST -K - "$(bridge_url)/v1/authorize"
-}
+# been answered), which also re-reads the subscription. By the control socket only:
+# a bridge before 0.14.0 isn't asked.
+reauthorize() { control POST /authorize ${1:-5} >/dev/null; }
 catalog_now() { reauthorize; health_true canPlayCatalog; }
 
 # The Apple Development certificate with this SHA-1 hash, as PEM.
@@ -465,6 +474,7 @@ step_build() {
 
 step_health() {
   step "The bridge's permissions"
+  support_private
   local url label
   url=$(bridge_url)
   label=$(installed_id)
@@ -509,6 +519,7 @@ step_health() {
   if ! health_true authorized; then
     if [[ $(health_value musicAuthorization) == notDetermined ]]; then
       explain "The bridge asks for Apple Music access in a dialog on this Mac: click Allow."
+      control_ok || note "this bridge is older than 0.14.0, so the installer can't ask it again: if no dialog shows, run ./install again"
       reauthorize 600 &!
     else
       explain "The bridge isn't allowed to use Apple Music: switch OmarockBridge on in System Settings, Privacy & Security, Media & Apple Music."
@@ -622,12 +633,9 @@ step_handoff() {
 
 # ---- 7. Pairing ----
 
-# The bridge's pairing endpoint, /v1/pair/PATH, from loopback (it only opens codes
-# there). The token goes to curl on stdin, not on its command line.
-pair_api() {  # METHOD [PATH]
-  print -r -- "header = \"Authorization: Bearer $(<"$support/token")\"" \
-    | curl -s -m 5 -X $1 -K - "$(bridge_url)/v1/pair${2:-}" 2>/dev/null
-}
+# The bridge's pairing endpoint, /v1/pair/PATH, by the control socket (it only
+# opens codes there, from 0.14.0).
+pair_api() { control $1 /pair${2:-}; }  # METHOD [PATH]
 pair_state="" pair_left="" pair_tries=5
 pair_value() { plutil -extract "$1" raw -o - - <<<"$pair_state" 2>/dev/null; }
 # While waiting: the code's state, and a note when a wrong code was tried (on fd 3,
@@ -684,7 +692,7 @@ step_pair() {
 
 # At the end of a run: a code for the Omarchy machine, if the bridge can pair.
 offer_pair() {
-  health_true pairing || return 0
+  control_ok && health_true controlSocket || return 0
   echo
   confirm "Show a pairing code for your Omarchy machine?" "$($changed && print yes || print no)" || return 0
   step_pair || true
@@ -702,10 +710,11 @@ pair_only() {
     explain "Its log says why: $support/log/bridge.log"
     exit 1
   fi
-  if ! health_true pairing; then
+  if ! health_true controlSocket || ! control_ok; then
     bad "the bridge here ($(health_value version)) is too old to pair: run ./install to update the bridge first"
     exit 1
   fi
+  support_private
   private_ok "$support/token" || { bad "the token isn't there, or others can read it: ${support/#$HOME/~}/token"; exit 1; }
   step_pair || exit 1
   echo

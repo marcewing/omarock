@@ -48,8 +48,13 @@ timed() {
 # Listeners on the stream, as the running bridge counts them (its /v1/health, from 0.13.0,
 # which tells this Mac). Nothing if it can't tell: no bridge, an older one, or its Icecast
 # isn't up. Never Icecast's admin password: whatever holds 127.0.0.1:8000 would get it.
+# Health by the bridge's control socket (0.14.0), which only this account can answer on,
+# or else by TCP, which asks nothing secret.
 bridge_health() {
-  curl -s -m 5 "http://127.0.0.1:${$(plutil -extract port raw -o - "$support/config.json" 2>/dev/null || true):-8710}/v1/health" 2>/dev/null || true
+  local sock=$support/api.sock
+  [[ -S $sock && -O $sock ]] && curl -s -m 5 --unix-socket "$sock" http://localhost/v1/health 2>/dev/null ||
+    curl -s -m 5 "http://127.0.0.1:${$(plutil -extract port raw -o - "$support/config.json" 2>/dev/null || true):-8710}/v1/health" 2>/dev/null ||
+    true
 }
 listeners() { bridge_health | plutil -extract listeners raw -o - - 2>/dev/null || true; }
 

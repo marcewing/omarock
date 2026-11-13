@@ -29,6 +29,7 @@ if CommandLine.arguments.dropFirst().first == "--encode" {
 // runs it). The stream's address isn't there: /v1/health gives it to token holders.
 if CommandLine.arguments.dropFirst().first == "--setup" {
     do {
+        try Paths.makeSupportPrivate()
         let config = try Config.load()
         _ = try Secrets.token()
         try IcecastConfig.prepare(listenHost: config.listenHost, icecast: config.icecast)

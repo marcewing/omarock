@@ -38,6 +38,15 @@ name, works the same.
   for (see **One machine at a time**). Letters, digits, `-`, `.` and `_`, at most 64;
   anything else counts as no header.
 - Errors: a non-2xx status and `{"error": "what went wrong, in a sentence"}`.
+- **The control socket (0.14.0):** the bridge also serves this API on a unix socket,
+  `~/Library/Application Support/omarock-bridge/api.sock` (mode 600, in that folder,
+  which the bridge and the installer keep at 700). It serves only processes of the Mac
+  account the bridge runs as, by the connection's peer credentials (`getpeereid`), and
+  closes anything else. Requests there need no token: that account can read the token
+  anyway. `apple-bridge/install` uses it to pair and to ask for Apple Music access, so it
+  never sends the token to whatever answers on a TCP port. At start the bridge replaces
+  a socket of its own account at that path, and leaves anything else there alone (and
+  logs it): it never follows a link. `curl --unix-socket … http://localhost/v1/health`.
   Use 400 for bad input, 404 for an unknown id, 409 if MusicKit isn't
   authorized or there's no subscription, and 502 if Apple's API failed.
 - The stream is separate: Icecast on the Mac, port 8000, on every address as the
@@ -125,8 +134,8 @@ All paths start with `/v1`.
 
 | Method and path | What it does |
 | --- | --- |
-| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`), `"minBitrate": true` from 0.7.0, and from 0.8.0 `"streamDelay"`: seconds from a status's `position` to that audio reaching Icecast. In 0.8.0 it's the encoder's hold alone (0.041); from 0.8.1 it also takes off the Mac's output latency, since MusicKit's position is what the output device plays and the tap gets the audio before it, so it's near 0 and can be slightly negative (-0.006 on the built-in speakers; see the stream, above). No auth needed, and without the token it reveals nothing private: from 0.9.0 `stream` is there only when the request carries the right token (built from the request's `Host`, see Transport; config.json's `streamURL` replaces it, for token holders too). Also from 0.9.0, the diagnostic `"bonjour"`: `advertised`, `waiting` (no answer from mDNSResponder yet), `denied` (macOS's Local Network privacy: System Settings → Privacy & Security → Local Network), `failed` (retrying) or `off` (a `listenHost`). From 0.10.0, `"pairing": true` (see **Pairing**). From 0.12.0, the diagnostic `"icecast"`: `running` (an Icecast of the Mac account the bridge runs as took the bridge's last connection to port 8000), `starting`, `taken` (something else answers on 127.0.0.1:8000: another account's server, say, or a leftover; the bridge sends it nothing, doesn't start a second Icecast beside it, and checks again every 5 s) or `failed` (Icecast can't be started: config.json's `icecast`). From 0.13.0, `"listeners"`: how many are listening to the stream now, for a request from the Mac itself or with the token, and only while the bridge knows (its Icecast is `running` and answered); the install scripts read it instead of asking Icecast. |
-| `POST /authorize` | Asks for MusicKit access (`MusicAuthorization.request()`), which puts a dialog on the Mac's screen; returns health. For someone at the Mac (the bridge also asks at its first launch). |
+| `GET /health` | `{ "ok": true, "version": "0.3.0", "authorized": true, "canPlayCatalog": true, "stream": "http://…/omarock.ogg", "storefront": "us" }`, plus diagnostics (`musicAuthorization`, `capturing`, `encoding`), `"minBitrate": true` from 0.7.0, and from 0.8.0 `"streamDelay"`: seconds from a status's `position` to that audio reaching Icecast. In 0.8.0 it's the encoder's hold alone (0.041); from 0.8.1 it also takes off the Mac's output latency, since MusicKit's position is what the output device plays and the tap gets the audio before it, so it's near 0 and can be slightly negative (-0.006 on the built-in speakers; see the stream, above). No auth needed, and without the token it reveals nothing private: from 0.9.0 `stream` is there only when the request carries the right token (built from the request's `Host`, see Transport; config.json's `streamURL` replaces it, for token holders too). Also from 0.9.0, the diagnostic `"bonjour"`: `advertised`, `waiting` (no answer from mDNSResponder yet), `denied` (macOS's Local Network privacy: System Settings → Privacy & Security → Local Network), `failed` (retrying) or `off` (a `listenHost`). From 0.10.0, `"pairing": true` (see **Pairing**). From 0.12.0, the diagnostic `"icecast"`: `running` (an Icecast of the Mac account the bridge runs as took the bridge's last connection to port 8000), `starting`, `taken` (something else answers on 127.0.0.1:8000: another account's server, say, or a leftover; the bridge sends it nothing, doesn't start a second Icecast beside it, and checks again every 5 s) or `failed` (Icecast can't be started: config.json's `icecast`). From 0.13.0, `"listeners"`: how many are listening to the stream now, for a request from the Mac itself or with the token, and only while the bridge knows (its Icecast is `running` and answered); the install scripts read it instead of asking Icecast. From 0.14.0, `"controlSocket": true` (Transport). |
+| `POST /authorize` | Asks for MusicKit access (`MusicAuthorization.request()`), which puts a dialog on the Mac's screen; returns health. For someone at the Mac (the bridge also asks at its first launch). With the token, or over the control socket, where `apple-bridge/install` asks it. |
 | `GET /status?since=SEQ` | Now playing. Returns at once if the state's `seq` differs from `SEQ` (or there is no `since`); otherwise waits up to 25 s for a change, then returns the same state (long poll). |
 | `POST /play` | `{ "items": [ {kind, id, source}, … ], "start": 0, "mode": "play" }`. `mode` is `play` (replace the queue and start at song `start`), `next` (insert after the current song) or `add` (append). Items are expanded to songs, in order (see **Items** below). `start` is the index into the tracks as the detail route lists them (`/albums|/playlists/{source}/{id}`), counted before unplayable songs are skipped; if that song is unplayable, play starts at the next playable one. A single song that can't be played answers 409 with the reason. Returns the new status. |
 | `POST /pause`, `/resume`, `/toggle`, `/next`, `/previous` | Transport; each returns the new status. With nothing loaded, `resume` and `toggle` do nothing and still return 200. |
@@ -150,7 +159,7 @@ All paths start with `/v1`.
 | `POST /library/playlists/{id}/tracks` | `{ "items": [ … ] }`: append, the items expanded to songs. Returns the Playlist. Apple's API can't remove tracks or delete playlists; those come later through AppleScript on the Mac. |
 | `POST /library/add` | `{ "items": [ {kind, id, source} ] }`: adds catalog songs, albums and playlists to the library. Returns `{ "ok": true, "added": 2 }` (the catalog items sent to Apple). See **Adding to the library** below. |
 | `GET /info/{source}/{kind}/{id}` | Everything known about one song or album (`kind` is `song` or `album`), for omarock's info card (`i`). See **Info** below. |
-| `POST /pair/open`, `GET /pair`, `POST /pair/close` | From the Mac itself only: open a pairing code, see how it went, close it. See **Pairing** below. |
+| `POST /pair/open`, `GET /pair`, `POST /pair/close` | Over the control socket only (0.14.0): open a pairing code, see how it went, close it. See **Pairing** below. |
 | `POST /pair` | `{ "code": "048213" }`, no token: trades an open pairing code for the token. See **Pairing** below. |
 
 ### Info
@@ -346,11 +355,11 @@ offers a code at its end, and `./install pair` there opens a new one any time.
 - **A code** is 6 digits, from a cryptographic random source, leading zeros kept
   (`048213`). It works once, for 10 minutes, and for 5 wrong tries. Opening a new
   one replaces any code still open. Codes are compared in constant time.
-- `POST /v1/pair/open`, `GET /v1/pair` and `POST /v1/pair/close` need the token
-  **and** a request from the Mac itself (127.0.0.1 or ::1, by the connection's peer
-  address, never the `Host` header). Where it comes from is checked first: from
-  anywhere else, 403 `{"error": "Pairing codes are opened on the Mac: run ./install
-  pair there."}`, token or not; from the Mac without the right token, 401.
+- `POST /v1/pair/open`, `GET /v1/pair` and `POST /v1/pair/close` work only over
+  the control socket (Transport), from 0.14.0. Anywhere else, loopback TCP included,
+  they're 403 `{"error": "Pairing codes are opened on the Mac: run ./install pair
+  there."}`, token or not. (0.10.0 to 0.13.0 took them from 127.0.0.1 or ::1 with the
+  token, which went to whatever held the port.)
   - `POST /v1/pair/open` → `{ "code": "048213", "expiresIn": 600, "tries": 5 }`.
   - `GET /v1/pair` → while a code is open, `{ "open": true, "expiresIn": 431,
     "triesLeft": 4 }`; once it's closed, `{ "open": false, "closed": "paired",

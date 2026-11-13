@@ -270,7 +270,8 @@ curl http://my-mac.local:8710/v1/health   # your Mac's name, or its Tailscale ad
 
 ### What it keeps where
 
-Everything lives in `~/Library/Application Support/omarock-bridge`, not in the repo:
+Everything lives in `~/Library/Application Support/omarock-bridge`, not in the repo. Only
+you can open the folder (700): the bridge and the installer keep it that way.
 
 | File | What it is |
 | --- | --- |
@@ -279,6 +280,7 @@ Everything lives in `~/Library/Application Support/omarock-bridge`, not in the r
 | `icecast.xml` | Icecast's config, rewritten at each launch. Delete its first comment line to keep your own edits. |
 | `config.json` | Optional settings (below). |
 | `INSTALLED` | The commit the installed app was built from. |
+| `api.sock` | The bridge's control socket (from 0.14.0): the installer pairs and asks for Apple Music access through it, without the token. Only your account can use it. |
 | `log/` | `bridge.log`, `encoder.log` (the stream's encoder), and Icecast's `error.log` and `access.log`. |
 
 `config.json`, every field optional:

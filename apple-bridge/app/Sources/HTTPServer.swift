@@ -11,8 +11,12 @@ struct HTTPRequest {
     /// How the client reached the bridge, "host:port": its Host header, or else the address
     /// it connected to. URLs the bridge hands out are built from it (apple-bridge/API.md).
     let authority: String
-    /// Whether the connection comes from this Mac's loopback (by its address, not by Host).
+    /// Whether the connection comes from this Mac's loopback (by its address, not by Host),
+    /// or over the control socket.
     let fromLoopback: Bool
+    /// Whether it came over the control socket, from a process of the Mac account the
+    /// bridge runs as (by the socket's peer credentials).
+    let fromOwner: Bool
 
     /// The authority's host, with an IPv6 address's brackets.
     var host: String {
@@ -39,7 +43,8 @@ struct HTTPResponse {
 
 /// A minimal HTTP/1.1 server: one request per connection (Connection: close), bodies by
 /// Content-Length only. Enough for omarock and curl. It listens on every address, IPv4 and
-/// IPv6, through one dual-stack socket, or on just the addresses it's given.
+/// IPv6, through one dual-stack socket, or on just the addresses it's given, and on a unix
+/// socket (the control socket) that only this Mac account's processes may use.
 ///
 /// Plain BSD sockets and GCD rather than NWListener: on macOS 27 an NWListener with a
 /// required local endpoint on the Tailscale interface accepts each flow and then fails
@@ -50,14 +55,17 @@ final class HTTPServer {
     /// Empty: every address.
     private let hosts: [String]
     private let port: UInt16
+    private let socketPath: String?
     private let queue: DispatchQueue
     private let handler: Handler
     private var acceptSources: [DispatchSourceRead] = []
+    private var socketSource: DispatchSourceRead?
     private var stopped = false
 
-    init(hosts: [String], port: UInt16, queue: DispatchQueue = .main, handler: @escaping Handler) {
+    init(hosts: [String], port: UInt16, socketPath: String? = nil, queue: DispatchQueue = .main, handler: @escaping Handler) {
         self.hosts = hosts
         self.port = port
+        self.socketPath = socketPath
         self.queue = queue
         self.handler = handler
     }
@@ -68,6 +76,7 @@ final class HTTPServer {
 
     func start() {
         stopped = false
+        startSocket()
         var fds: [Int32] = []
         do {
             for host in hosts.isEmpty ? [nil] : hosts.map(Optional.some) { fds.append(try bindAndListen(host)) }
@@ -83,7 +92,7 @@ final class HTTPServer {
         }
         for fd in fds {
             let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
-            source.setEventHandler { [weak self] in self?.acceptPending(fd) }
+            source.setEventHandler { [weak self] in self?.acceptPending(fd, owner: false) }
             source.setCancelHandler { close(fd) }
             source.resume()
             acceptSources.append(source)
@@ -95,6 +104,65 @@ final class HTTPServer {
         stopped = true
         acceptSources.forEach { $0.cancel() }
         acceptSources = []
+        socketSource?.cancel()
+        socketSource = nil
+    }
+
+    /// The control socket, once. Not retried: what stops it (a path too long, something
+    /// else at the path) doesn't go away by itself.
+    private func startSocket() {
+        guard let socketPath, socketSource == nil else { return }
+        do {
+            let fd = try Self.bindSocket(socketPath)
+            let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+            source.setEventHandler { [weak self] in self?.acceptPending(fd, owner: true) }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            socketSource = source
+            Log.info("API listening on \(socketPath) for this account")
+        } catch {
+            Log.error("cannot listen on \(socketPath): \(error)")
+        }
+    }
+
+    /// A unix socket at `path`, mode 600, in the support folder (700). A socket of this
+    /// account's already there (a bridge that stopped) is replaced; anything else is left
+    /// alone. lstat: a link there isn't followed.
+    private static func bindSocket(_ path: String) throws -> Int32 {
+        var address = sockaddr_un()
+        let bytes = Array(path.utf8)
+        let room = MemoryLayout.size(ofValue: address.sun_path)
+        guard bytes.count < room else {
+            throw BridgeError("the path is \(bytes.count) bytes, and a socket's can be \(room - 1) at most")
+        }
+        var info = stat()
+        if lstat(path, &info) == 0 {
+            guard info.st_mode & S_IFMT == S_IFSOCK, info.st_uid == getuid() else {
+                throw BridgeError("something that isn't this account's socket is there; leaving it alone")
+            }
+            guard unlink(path) == 0 else { throw BridgeError("cannot remove the old socket: \(String(cString: strerror(errno)))") }
+        } else if errno != ENOENT {
+            throw BridgeError(String(cString: strerror(errno)))
+        }
+        address.sun_family = sa_family_t(AF_UNIX)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        withUnsafeMutableBytes(of: &address.sun_path) { raw in
+            raw.copyBytes(from: bytes)
+            raw[bytes.count] = 0
+        }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw BridgeError("socket: \(String(cString: strerror(errno)))") }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0, chmod(path, 0o600) == 0, listen(fd, 16) == 0 else {
+            let message = String(cString: strerror(errno))
+            close(fd)
+            throw BridgeError(message)
+        }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
+        return fd
     }
 
     /// `host` nil: IPv6's any address, with IPV6_V6ONLY off, so IPv4 too.
@@ -129,16 +197,25 @@ final class HTTPServer {
         return fd
     }
 
-    private func acceptPending(_ listenFD: Int32) {
+    /// `owner`: the control socket, where only this account's processes are served.
+    private func acceptPending(_ listenFD: Int32, owner: Bool) {
         while true {
             let fd = accept(listenFD, nil, nil)
             guard fd >= 0 else { return }  // EAGAIN: nothing more to accept
+            if owner {
+                var uid = uid_t.max, gid = gid_t.max
+                guard getpeereid(fd, &uid, &gid) == 0, uid == getuid() else {
+                    Log.error("control socket: refused a connection from uid \(uid == uid_t.max ? "?" : String(uid))")
+                    close(fd)
+                    continue
+                }
+            }
             var on: Int32 = 1
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
             _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-            HTTPConnection(fd: fd, local: Self.localAuthority(fd), fromLoopback: Self.peerIsLoopback(fd), queue: queue,
-                           handler: handler).start()
+            HTTPConnection(fd: fd, local: owner ? "localhost" : Self.localAuthority(fd),
+                           fromLoopback: owner || Self.peerIsLoopback(fd), fromOwner: owner, queue: queue, handler: handler).start()
         }
     }
 
@@ -193,6 +270,7 @@ private final class HTTPConnection {
     private let fd: Int32
     private let local: String
     private let fromLoopback: Bool
+    private let fromOwner: Bool
     private let queue: DispatchQueue
     private let handler: HTTPServer.Handler
     private var readSource: DispatchSourceRead?
@@ -201,10 +279,11 @@ private final class HTTPConnection {
     private var answered = false
     private var closed = false
 
-    init(fd: Int32, local: String, fromLoopback: Bool, queue: DispatchQueue, handler: @escaping HTTPServer.Handler) {
+    init(fd: Int32, local: String, fromLoopback: Bool, fromOwner: Bool, queue: DispatchQueue, handler: @escaping HTTPServer.Handler) {
         self.fd = fd
         self.local = local
         self.fromLoopback = fromLoopback
+        self.fromOwner = fromOwner
         self.queue = queue
         self.handler = handler
     }
@@ -280,7 +359,8 @@ private final class HTTPConnection {
         return .request(HTTPRequest(method: String(parts[0]), path: components?.percentEncodedPath ?? target,
                                     query: query, headers: headers,
                                     body: buffer.subdata(in: bodyStart..<bodyStart + length),
-                                    authority: Self.authority(headers["host"], local: local), fromLoopback: fromLoopback))
+                                    authority: Self.authority(headers["host"], local: local), fromLoopback: fromLoopback,
+                                    fromOwner: fromOwner))
     }
 
     /// The Host header if it's a plain name or address (it ends up in JSON and URLs), else `local`.
