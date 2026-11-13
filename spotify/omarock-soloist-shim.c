@@ -124,7 +124,9 @@ static void proc_form(const address *a, int v6, char *out, size_t size) {
 }
 
 // The owners of a connection's far end (peer, seen from ours), from the
-// socket table: 1 when there's one and it's this account, else 0.
+// socket table: 1 when it's this account's, 0 when it's another account's,
+// -1 when it has closed (no owner left to check: the table lists a closed
+// socket with no inode, and a TIME_WAIT one as uid 0).
 static int ours_alone(const address *peer, const address *ours) {
   static const char *tables[] = {"/proc/net/tcp", "/proc/net/tcp6"};
   int found = 0, others = 0;
@@ -141,14 +143,15 @@ static int ours_alone(const address *peer, const address *ours) {
     while (fgets(line, sizeof line, f)) {
       char local[64], remote[64];
       unsigned uid;
-      if (sscanf(line, " %*[^:]: %63s %63s %*s %*s %*s %*s %u", local, remote, &uid) != 3) continue;
-      if (strcmp(local, want_local) || strcmp(remote, want_remote)) continue;
+      unsigned long inode;
+      if (sscanf(line, " %*[^:]: %63s %63s %*s %*s %*s %*s %u %*s %lu", local, remote, &uid, &inode) != 4) continue;
+      if (strcmp(local, want_local) || strcmp(remote, want_remote) || inode == 0) continue;
       found++;
       if (uid != geteuid()) others++;
     }
     fclose(f);
   }
-  return found > 0 && others == 0;
+  return found == 0 ? -1 : others == 0;
 }
 
 static pthread_mutex_t noted = PTHREAD_MUTEX_INITIALIZER;
@@ -172,7 +175,8 @@ static void say_guarded(const address *listening) {
   }
 }
 
-static void say_refused(int listener) {
+// why: 0 another account's, -1 its far end had gone before it could be checked.
+static void say_refused(int listener, int why) {
   address listening;
   socklen_t len = sizeof listening;
   unsigned short port = getsockname(listener, &listening.sa, &len) == 0 ? port_of(&listening) : 0;
@@ -181,19 +185,22 @@ static void say_refused(int listener) {
   int say = now - refused_said >= 60;
   if (say) refused_said = now;
   pthread_mutex_unlock(&noted);
-  if (say) fprintf(stderr, "omarock-soloist: refused a connection to port %u from another account\n", port);
+  if (!say) return;
+  if (why == 0) fprintf(stderr, "omarock-soloist: refused a connection to port %u from another account\n", port);
+  else fprintf(stderr, "omarock-soloist: refused a connection to port %u that closed before its owner could be checked\n", port);
 }
 
 // A connection Soloist may have: on a loopback listener, only this account's.
+// 1 when it may, else why not (as ours_alone).
 static int allowed(int listener, int conn) {
   address listening, peer, ours;
   socklen_t len = sizeof listening;
   if (getsockname(listener, &listening.sa, &len) != 0 || !loopback(&listening)) return 1;
   say_guarded(&listening);
   len = sizeof peer;
-  if (getpeername(conn, &peer.sa, &len) != 0) return 0;
+  if (getpeername(conn, &peer.sa, &len) != 0) return -1;
   len = sizeof ours;
-  if (getsockname(conn, &ours.sa, &len) != 0) return 0;
+  if (getsockname(conn, &ours.sa, &len) != 0) return -1;
   if (peer.sa.sa_family != ours.sa.sa_family || (peer.sa.sa_family != AF_INET && peer.sa.sa_family != AF_INET6))
     return 0;
   return ours_alone(&peer, &ours);
@@ -205,11 +212,11 @@ static int (*real_accept4)(int, struct sockaddr *, socklen_t *, int);
 int accept(int fd, struct sockaddr *addr, socklen_t *len) {
   if (!real_accept) real_accept = dlsym(RTLD_NEXT, "accept");
   for (;;) {
-    int conn = real_accept(fd, addr, len);
-    if (conn < 0 || allowed(fd, conn)) return conn;
+    int conn = real_accept(fd, addr, len), ok;
+    if (conn < 0 || (ok = allowed(fd, conn)) == 1) return conn;
     int saved = errno;
     close(conn);
-    say_refused(fd);
+    say_refused(fd, ok);
     errno = saved;
   }
 }
@@ -217,11 +224,11 @@ int accept(int fd, struct sockaddr *addr, socklen_t *len) {
 int accept4(int fd, struct sockaddr *addr, socklen_t *len, int flags) {
   if (!real_accept4) real_accept4 = dlsym(RTLD_NEXT, "accept4");
   for (;;) {
-    int conn = real_accept4(fd, addr, len, flags);
-    if (conn < 0 || allowed(fd, conn)) return conn;
+    int conn = real_accept4(fd, addr, len, flags), ok;
+    if (conn < 0 || (ok = allowed(fd, conn)) == 1) return conn;
     int saved = errno;
     close(conn);
-    say_refused(fd);
+    say_refused(fd, ok);
     errno = saved;
   }
 }

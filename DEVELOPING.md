@@ -92,7 +92,8 @@
   end of each connection in the kernel's socket table (`/proc/net/tcp`, `tcp6`:
   the far end's line, local and remote addresses swapped, and its uid) and
   refuse any account but their own, before reading the request; a far end
-  that's gone (listed as no one's) is refused too. The `X-Omarock: 1` header
+  that has already closed (listed with no inode, or as uid 0 in TIME_WAIT: no
+  owner left to check) is refused too, and logged as such. The `X-Omarock: 1` header
   and the Host check are for web pages, which run as you. Soloist's control
   port (8731) has no sign-in, so the shim does the same in Soloist's `accept`:
   on a listener bound to a loopback address it closes another account's

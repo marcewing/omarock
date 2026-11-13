@@ -197,7 +197,9 @@ try_it() {
         grep -q 'login failed' <<<"$lines" && signed=no
         return 0
       fi
-      (exec 3<>"/dev/tcp/127.0.0.1/$ws") 2>/dev/null || true
+      # Held open a moment, so the shim finds who it's from (one closed at
+      # once has no owner left to check, and is refused as such).
+      (exec 3<>"/dev/tcp/127.0.0.1/$ws" && sleep 0.5) 2>/dev/null || true
     fi
     state=$(systemctl --user show -p ActiveState --value omarock-soloist)
     if [[ $state == failed || $state == inactive ]]; then

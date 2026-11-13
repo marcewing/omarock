@@ -198,9 +198,10 @@ def control_port(standin, env, how):
         v6.close()
     finally:
         log = soloist.stop()
-    check(f"{how}: its log says once that the port is guarded, and that it refused one",
+    check(f"{how}: its log says once that the port is guarded, and why it refused one (not another account's)",
           log.count(f"omarock-soloist: guards 127.0.0.1:{soloist.port}:") == 1
-          and f"refused a connection to port {soloist.port} from another account" in log, log)
+          and f"refused a connection to port {soloist.port} that closed before its owner could be checked" in log
+          and "from another account" not in log, log)
 
 
 def other_listeners(standin, env, tmp):

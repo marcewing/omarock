@@ -764,8 +764,9 @@ def proc_address(ip, port):
 
 def socket_owners(peer, ours):
     """The accounts owning the far end of a loopback connection (peer, ours:
-    (address, port) as seen here), from /proc/net/tcp and tcp6: [] when it's
-    gone (closed already: then it's listed, if at all, as no one's)."""
+    (address, port) as seen here), from /proc/net/tcp and tcp6: [] when it has
+    closed (the table lists a closed socket with no inode, and a TIME_WAIT one
+    as uid 0: no owner left to check)."""
     pairs = [(peer[0], ours[0])]
     if ":" not in peer[0]:  # an IPv6 socket connected to 127.0.0.1
         pairs.append(("::ffff:" + peer[0], "::ffff:" + ours[0]))
@@ -778,7 +779,7 @@ def socket_owners(peer, ours):
             continue
         for line in lines:
             f = line.split()
-            if len(f) > 7 and (f[1], f[2]) in wanted:
+            if len(f) > 9 and (f[1], f[2]) in wanted and f[9] != "0":
                 owners.append(int(f[7]))
     return owners
 
@@ -794,7 +795,8 @@ def from_another_account(sock):
         return None
     if time.monotonic() - _refused_logged > 60:
         _refused_logged = time.monotonic()
-        log(f"refused a connection from another account ({owners or 'gone'})")
+        log("refused a connection " + (f"from another account (uid {owners[0]})" if owners
+                                       else "that closed before its owner could be checked"))
     return "Only the account running omarock-spotify can use it."
 
 

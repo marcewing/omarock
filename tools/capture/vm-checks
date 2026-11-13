@@ -95,6 +95,8 @@ check "./install spotify installed the downloaded Soloist, checked with omarock"
   [ "$(installed checked)" = true -a "$(installed built)" = $((now - 7200)) ]
 guarded=$(since_start | grep -c '^omarock-soloist: guards 127\.0\.0\.1:8731:')
 check "Soloist runs under the shim, which guards its control port" [ "$(soloist_state)" = "active 0" -a "$guarded" = 1 ]
+refused=$(since_start | grep -c 'omarock-soloist: refused')
+check "and refused none of this account's connections, the install's own check included ($refused)" [ "$refused" = 0 ]
 
 echo "== another account"
 sudo useradd -m "$other" 2>/dev/null || true
