@@ -367,9 +367,10 @@ For what `./install` says while it sets the bridge up, see
   certificate worked before: check it in Xcode → Settings → Accounts → Manage
   Certificates (they expire after a year).
 - **`authorized: false`:** allow the bridge in System Settings → Privacy & Security →
-  Media & Apple Music, or ask again with
-  `curl -X POST -H "Authorization: Bearer $(cat ~/.config/omarock/bridge-token)" http://…:8710/v1/authorize`
-  (the dialog shows on the Mac).
+  Media & Apple Music, or ask again from Linux with `tools/omarock-am authorize` in
+  your omarock clone (the dialog shows on the Mac). It gives curl the token on stdin:
+  on a command line (`curl -H "Authorization: Bearer …"`), any account on the machine
+  could read it while curl runs.
 - **`canPlayCatalog: false`, or catalog searches fail:** check the Apple Music
   subscription, that MusicKit is checked for the bundle ID in `Local.xcconfig`
   (Identifiers, on developer.apple.com), and give a new bundle ID a few minutes.
@@ -392,9 +393,10 @@ For what `./install` says while it sets the bridge up, see
   Pair again: `./install pair` on the Mac, then its code in **Pair with the bridge** on
   omarock's Apple Music tab.
 - **On Linux,** run `tools/omarock-doctor`.
-- **Another Icecast on port 8000:** the bridge uses whatever answers on 127.0.0.1:8000,
-  so stop the other one, or move it. The bridge's own Icecast serves only the stream:
-  its status pages answer 404.
+- **Another Icecast on port 8000** (`"icecast": "taken"` in the bridge's health, and a
+  Fix in omarock's settings): the bridge talks only to its own Icecast, so it sends the
+  other one nothing and waits for the port. Stop the other server, or move it. The
+  bridge's own Icecast serves only the stream: its status pages answer 404.
 - **Logs:** `~/Library/Application Support/omarock-bridge/log/`.
 
 ## Uninstalling
