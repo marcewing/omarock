@@ -5,6 +5,10 @@
 #
 #   tools/omarock-doctor
 set -uo pipefail
+# matches ARGS…: grep ARGS >/dev/null, for "… | matches PATTERN". It reads to the end:
+# grep -q stops at the first match, and the command writing into it, cut off, then
+# fails the whole pipe (pipefail).
+matches() { grep "$@" >/dev/null; }
 ok() { printf '  \e[32m✓\e[0m %s\n' "$*"; }
 bad() { printf '  \e[31m✗\e[0m %s\n' "$*"; }
 note() { printf '  \e[33m–\e[0m %s\n' "$*"; }
@@ -94,9 +98,9 @@ elif [[ -n $tcp ]]; then
   note "mpd also listens on TCP ($tcp), where every account here can read its queue (with Apple Music, the stream's private address): $fix"
 else
   ok "mpd listens on its socket only"
-  if systemctl --user show-environment 2>/dev/null | grep -q '^MPD_HOST='; then ok "MPD_HOST points mpd clients at it"
+  if systemctl --user show-environment 2>/dev/null | matches '^MPD_HOST='; then ok "MPD_HOST points mpd clients at it"
   else note "mpc and other mpd clients need MPD_HOST=$sock to find mpd (./install offers it)"; fi
-  if ! systemctl --user show mpd-mpris -p ExecStart --value 2>/dev/null | grep -q -- '-network unix'; then
+  if ! systemctl --user show mpd-mpris -p ExecStart --value 2>/dev/null | matches -- '-network unix'; then
     bad "mpd-mpris looks for mpd on TCP, so the media keys don't reach it: ./install gives it the socket"
   fi
 fi
@@ -154,10 +158,10 @@ head2 "omarock's sound output (the audio bus; optional)"
 if [[ -f $HOME/.local/share/omarock/audio/omarock-bus.conf ]]; then
   pin=$(grep -o 'target.object = "[^"]*"' "$HOME/.local/share/omarock/audio/omarock-bus.conf" | cut -d'"' -f2)
   ok "installed, pinned to $pin"
-  if pactl list sinks short 2>/dev/null | awk '{print $2}' | grep -qx -- "$pin"; then ok "that output is connected"; else note "that output isn't connected now: the bus waits, silent"; fi
+  if pactl list sinks short 2>/dev/null | awk '{print $2}' | matches -x -- "$pin"; then ok "that output is connected"; else note "that output isn't connected now: the bus waits, silent"; fi
   if active omarock-bus; then ok "omarock-bus is running"; else bad "omarock-bus isn't running: systemctl --user start omarock-bus"; fi
   if active omarock-guard; then ok "omarock-guard is running"; else note "omarock-guard isn't running: systemctl --user start omarock-guard"; fi
-  if command -v mpc >/dev/null && MPD_HOST=$sock mpc outputs 2>/dev/null | grep -q "(omarock)"; then ok "mpd plays into the bus"
+  if command -v mpc >/dev/null && MPD_HOST=$sock mpc outputs 2>/dev/null | matches "(omarock)"; then ok "mpd plays into the bus"
   else note "mpd's output isn't the bus: audio/README.md, step 3"; fi
 else
   note "not set up (./install sound, or Set up… in omarock's settings): audio/README.md"
@@ -194,10 +198,10 @@ if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/om
   # both by omarock-soloist-shim.so, which says so in its log. Read, never shown.
   if active omarock-soloist; then
     pid=$(systemctl --user show -p MainPID --value omarock-soloist)
-    if tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null | grep -qx -- '@key'; then ok "Soloist's key isn't on its command line"
+    if tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null | matches -x -- '@key'; then ok "Soloist's key isn't on its command line"
     else bad "Soloist's key is on its command line, where every account here can read it: Update… in omarock's settings (Spotify), or tools/install-spotify --start"; fi
     run=$(systemctl --user show -p InvocationID --value omarock-soloist)
-    said() { journalctl --user --no-pager -q -o cat "_SYSTEMD_INVOCATION_ID=$run" 2>/dev/null | grep -q "$1"; }
+    said() { journalctl --user --no-pager -q -o cat "_SYSTEMD_INVOCATION_ID=$run" 2>/dev/null | matches "$1"; }
     if said '^omarock-soloist: guards 127\.0\.0\.1:'; then
       ok "only your account reaches Soloist's control port"
     else

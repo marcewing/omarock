@@ -15,6 +15,10 @@
 # INSTALLED (the commit). ~/.config/pipewire/client.conf.d/50-omarock-players.conf
 # and the two units in ~/.config/systemd/user/.
 set -euo pipefail
+# matches ARGS…: grep ARGS >/dev/null, for "… | matches PATTERN". It reads to the end:
+# grep -q stops at the first match, and the command writing into it, cut off, then
+# fails the whole pipe (pipefail).
+matches() { grep "$@" >/dev/null; }
 # What it writes is yours alone: folders 700, files 600.
 umask 077
 start=false
@@ -37,7 +41,7 @@ if [[ ! $output =~ ^[A-Za-z0-9._:-]+$ ]]; then
   echo "install-audio: \"$output\" doesn't look like a sink's node name" >&2
   exit 2
 fi
-if ! pactl list sinks short 2>/dev/null | awk '{print $2}' | grep -qx -- "$output"; then
+if ! pactl list sinks short 2>/dev/null | awk '{print $2}' | matches -x -- "$output"; then
   echo "note: $output isn't connected now; the bus will wait for it, silent" >&2
 fi
 install -d -m 700 "$(dirname "$saved")"

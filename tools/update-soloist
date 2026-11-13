@@ -28,6 +28,10 @@
 # soloist.sha256 (omarock-soloist starts that build and no other) and a copy is
 # kept as soloist.last-good. If it doesn't pass, the last good build goes back.
 set -euo pipefail
+# matches ARGS…: grep ARGS >/dev/null, for "… | matches PATTERN". It reads to the end:
+# grep -q stops at the first match, and the command writing into it, cut off, then
+# fails the whole pipe (pipefail).
+matches() { grep "$@" >/dev/null; }
 # What it writes is yours alone: folders 700, files 600.
 umask 077
 page=https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates
@@ -64,9 +68,9 @@ newest_download() {
 usable() {
   local f=$1 syms
   command -v readelf >/dev/null || { echo "reading Soloist needs readelf (binutils: sudo pacman -S --needed base-devel)"; return 1; }
-  readelf -h "$f" 2>/dev/null | grep -q 'Class:.*ELF64' && readelf -h "$f" | grep -q 'Machine:.*X86-64' \
+  readelf -h "$f" 2>/dev/null | matches 'Class:.*ELF64' && readelf -h "$f" | matches 'Machine:.*X86-64' \
     || { echo "it isn't a Linux x86-64 program"; return 1; }
-  readelf -l "$f" 2>/dev/null | grep -q 'program interpreter' \
+  readelf -l "$f" 2>/dev/null | matches 'program interpreter' \
     || { echo "it isn't built to start through the system's C library (glibc), which omarock's shim needs"; return 1; }
   syms=$(readelf --dyn-syms -W "$f" 2>/dev/null | awk '$7 == "UND" {sub(/@.*/, "", $8); print $8}')
   grep -qx '__libc_start_main' <<<"$syms" \

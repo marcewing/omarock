@@ -20,6 +20,10 @@
 # Soloist is a stand-in (soloist-standin.c: the real one announces itself on
 # the network), downloaded into ~/Downloads as Soloist would be.
 set -uo pipefail
+# matches ARGS…: grep ARGS >/dev/null, for "… | matches PATTERN". It reads to the end:
+# grep -q stops at the first match, and the command writing into it, cut off, then
+# fails the whole pipe (pipefail).
+matches() { grep "$@" >/dev/null; }
 if [[ ${OMAROCK_THROWAWAY:-} != yes ]]; then
   echo "vm-checks: only on a throwaway machine (it installs and removes everything, adds an account, and edits /etc/hosts)." >&2
   echo "  OMAROCK_THROWAWAY=yes $0 [WORK-DIR]" >&2
@@ -45,7 +49,7 @@ hosts="apresolve.spotify.com accounts.spotify.com api.spotify.com login5.spotify
 trap 'sudo sed -i "/# omarock-vm-checks\$/d" /etc/hosts; sudo userdel -r "$other" 2>/dev/null; sudo ip netns del omarock-other-machine 2>/dev/null; sudo ip link del omv0 2>/dev/null' EXIT
 sleep 2
 for h in api.edge-gateway.siriusxm.com apresolve.spotify.com; do
-  getent ahosts "$h" | awk '{print $1}' | sort -u | grep -qvE '^(127\.0\.0\.1|::1)$' && { echo "vm-checks: $h still resolves elsewhere" >&2; exit 1; }
+  getent ahosts "$h" | awk '{print $1}' | sort -u | matches -vE '^(127\.0\.0\.1|::1)$' && { echo "vm-checks: $h still resolves elsewhere" >&2; exit 1; }
 done
 
 now=$(date +%s)

@@ -50,6 +50,10 @@
 # cut to 20 s, and a prompt asked 5 times (a retry its answer can't end) stops
 # the run.
 set -uo pipefail
+# matches ARGS…: grep ARGS >/dev/null, for "… | matches PATTERN". It reads to the end:
+# grep -q stops at the first match, and the command writing into it, cut off, then
+# fails the whole pipe (pipefail).
+matches() { grep "$@" >/dev/null; }
 
 # Before anything bash 4: a Mac's own bash is 3.2.
 [[ $(uname) == Darwin ]] && exec "$(dirname "$0")/apple-bridge/install" ${1+"$@"}
@@ -656,7 +660,7 @@ step_mpd() {
   fi
   # mpd.conf without TCP, and mpd still on it from before (a run that
   # stopped short of the restart): the restart below ends that.
-  if ! $changed && active mpd && ! mpd_on_tcp "$conf" && ss -ltnpH 2>/dev/null | grep -q '"mpd"'; then
+  if ! $changed && active mpd && ! mpd_on_tcp "$conf" && ss -ltnpH 2>/dev/null | matches '"mpd"'; then
     note "mpd still listens on TCP, from its config before: a restart ends that"
     changed=true
   fi
@@ -721,7 +725,7 @@ step_mpd() {
   local songs
   $new_music && run mpc --quiet update
   songs=$(mpc stats 2>/dev/null | awk '/^Songs:/ {print $2}')
-  if mpc status 2>/dev/null | grep -q '^Updating DB'; then
+  if mpc status 2>/dev/null | matches '^Updating DB'; then
     ok "mpd is reading your music now ($songs songs so far); it carries on in the background"
   elif [[ ${songs:-0} == 0 ]]; then
     note "mpd's library is empty."
@@ -732,7 +736,7 @@ step_mpd() {
 
   # Other clients look for mpd on TCP unless MPD_HOST says where it is.
   local envd=${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/omarock-mpd.conf
-  if ! mpd_on_tcp "$conf" && [[ ! -f $envd ]] && ! systemctl --user show-environment 2>/dev/null | grep -q '^MPD_HOST='; then
+  if ! mpd_on_tcp "$conf" && [[ ! -f $envd ]] && ! systemctl --user show-environment 2>/dev/null | matches '^MPD_HOST='; then
     explain "Other mpd clients (mpc, ncmpcpp, rmpc and the like) look for mpd on TCP unless MPD_HOST says where it is. A line in $envd sets it for everything you start (and Hyprland gets it now, for what it starts until you next log in)."
     if confirm "Point mpd clients at the socket?"; then
       install -d "$(dirname "$envd")"
@@ -986,7 +990,7 @@ step_bus() {
     if ((${#args[@]} == 0)); then bad "PipeWire lists no outputs."; return 1; fi
     # Picked in the setup window, where Start setup was the go-ahead.
     out=${preset[output]:-}
-    if [[ -n $out ]] && ! printf '%s\n' "${names[@]}" | grep -qxF -- "$out"; then
+    if [[ -n $out ]] && ! printf '%s\n' "${names[@]}" | matches -xF -- "$out"; then
       bad "The output picked in the setup window isn't there now: $out"
       out=""
     fi
@@ -1038,7 +1042,7 @@ PY
     run systemctl --user restart mpd
     local i
     for ((i = 0; i < 40; i++)); do mpd_answers && break; sleep 0.5; done
-    if mpc outputs 2>/dev/null | grep -q "(omarock)"; then ok "mpd plays into it"; else bad "mpd's output isn't omarock's: journalctl --user -u mpd"; return 1; fi
+    if mpc outputs 2>/dev/null | matches "(omarock)"; then ok "mpd plays into it"; else bad "mpd's output isn't omarock's: journalctl --user -u mpd"; return 1; fi
   fi
   ok "omarock's volume knob sets its volume now (mpc volume no longer applies: tools/omarock-volume)"
   soloist_follow_bus
@@ -1211,7 +1215,7 @@ step_spotify() {
           for spec in "$port tcp" "5353 udp"; do
             rule="from $net to any port ${spec% *} proto ${spec#* }"
             # One that was there already stays, and isn't taken out after.
-            sudo ufw show added 2>/dev/null | grep -qxF "ufw allow $rule" && continue
+            sudo ufw show added 2>/dev/null | matches -xF "ufw allow $rule" && continue
             run sudo ufw allow $rule >/dev/null && added_rules+=("$rule") && script+="ufw delete allow $rule >/dev/null; "
           done
         done
@@ -1708,7 +1712,7 @@ soloist_follow_bus() {
   local pid on=false want=false
   pid=$(systemctl --user show -p MainPID --value omarock-soloist)
   # Its command line holds the Soloist key: read, never shown.
-  tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q -- '--pipewire-device omarock' && on=true
+  tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | matches -- '--pipewire-device omarock' && on=true
   [[ -f $share/audio/omarock-bus.conf ]] && want=true
   [[ $on == "$want" ]] && return 0
   explain "Spotify's player restarts, to play $($want && echo "through omarock's sound output" || echo "into your default output")."
@@ -1879,7 +1883,7 @@ un_mpd() {
   gone=$([[ -f $conf ]] && mpd_socket_undo "$conf" show)
   for f in "$units/mpd.service.d/runtime-dir.conf" "$units/mpd.service.d/restart.conf" "$units/mpd.service.d/private.conf" \
            "$units/mpd-mpris.service.d/follow-mpd.conf" "$units/mpd-mpris.service.d/mpd-socket.conf" "$envd"; do
-    head -1 "$f" 2>/dev/null | grep -q '^# omarock:' && dropins+=("$f")
+    head -1 "$f" 2>/dev/null | matches '^# omarock:' && dropins+=("$f")
   done
   [[ -n $gone ]] || ((${#dropins[@]})) || return 0
   step "omarock's changes to mpd"
