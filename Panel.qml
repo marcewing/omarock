@@ -311,7 +311,7 @@ Panel {
         setUp: sp ? sp.setUp : root.spotifyEnabled,
         update: !sp || !sp.setUp ? false
           : solo.why === "replaced" ? "Soloist, Spotify's player, was replaced outside omarock, so it doesn't start: Update… checks it with omarock"
-          : solo.download === true ? "A newer Soloist is in your Downloads folder: Update… installs it, and checks it with omarock"
+          : solo.download === true ? "A newer Soloist is in your Downloads folder: Update… shows it, asks, then installs it and checks it with omarock"
           : days >= 80 ? "Soloist, Spotify's player, " + (days >= 90 ? "has stopped working: its build is " + days + " days old" : "stops working in " + (90 - days) + " days")
             + ". Download a new one from Spotify into your Downloads folder, then Update… installs it"
           : !sp.upToDate ? true

@@ -5779,8 +5779,18 @@ def setup_scenario(host, output, failures):
     fake_soloist_download(downloads / "soloist_release_x86_64 (1).tar.gz")
     wait_for(lambda: window()["canStart"], "Start setup, ready")
     check(window()["notes"]["soloistDownload"].startswith("Found it in your Downloads folder, built ")
+          and "didn't record where it came from" in window()["notes"]["soloistDownload"]
           and window()["footer"] == "Ready",
           "the newest download, read without running it: found; with all three, Start setup is ready: "
+          + window()["notes"]["soloistDownload"], failures)
+    newest = downloads / "soloist_release_x86_64 (1).tar.gz"
+    os.setxattr(newest, "user.xdg.origin.url", b"https://downloads.example.net/soloist_release_x86_64.tar.gz")
+    wait_for(lambda: "not Spotify" in window()["notes"].get("soloistDownload", ""), "a download from elsewhere")
+    check(not window()["canStart"] and "came from downloads.example.net" in window()["notes"]["soloistDownload"],
+          "a download the browser says came from elsewhere can't be used: " + window()["notes"]["soloistDownload"], failures)
+    os.setxattr(newest, "user.xdg.origin.url", b"https://soloist-builds.spotifycdn.com/soloist_release_x86_64.tar.gz")
+    wait_for(lambda: ", from Spotify." in window()["notes"].get("soloistDownload", "") and window()["canStart"], "Spotify's download")
+    check(window()["footer"] == "Ready", "one from Spotify's soloist-builds.spotifycdn.com is said to be: "
           + window()["notes"]["soloistDownload"], failures)
     host.call("setupFocus", "soloistKey")
     lines = logged_argv(home, lambda: (

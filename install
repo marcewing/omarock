@@ -1056,6 +1056,22 @@ soloist_status() { "$repo/tools/update-soloist" status; }
 # A Soloist download that omarock can use, newer than the one installed.
 soloist_downloaded() { soloist_status | jq -e '.download.ok and .download.newer' >/dev/null; }
 soloist_page=https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates
+# A Soloist found in Downloads, shown as you'd want to see it before it's
+# installed: its name, size, when it was saved, and where your browser says it
+# came from. Nothing that turns up there is installed without a yes (a web page
+# can start a download too). STATUS: soloist_status's JSON.
+soloist_offer() {
+  local d from=no saved
+  d=$(jq -c .download <<<"$1")
+  saved=$(date -d "@$(jq -r '.saved // 0' <<<"$d")" '+%b %-d at %H:%M')
+  if [[ $(jq -r '.origin // ""' <<<"$d") == https://soloist-builds.spotifycdn.com/* ]]; then
+    from=yes
+    explain "It's $(basename "$(jq -r .path <<<"$d")") ($(numfmt --to=iec --suffix=B "$(jq -r '.size // 0' <<<"$d")"), saved $saved), from Spotify's soloist-builds.spotifycdn.com."
+  else
+    explain "It's $(basename "$(jq -r .path <<<"$d")") ($(numfmt --to=iec --suffix=B "$(jq -r '.size // 0' <<<"$d")"), saved $saved). Your browser didn't record where it came from: install it only if you downloaded it from Spotify's page yourself."
+  fi
+  confirm "Install this Soloist?" $from
+}
 # Soloist itself: the build you download from Spotify, installed and checked
 # with omarock's shim by tools/update-soloist. A newer download is installed;
 # a build that's getting old asks for a new download, and one never checked
@@ -1068,12 +1084,20 @@ step_soloist() {
   checked=$(jq -r '.installed.checked // false' <<<"$st")
   if jq -e '.download.ok and .download.newer' <<<"$st" >/dev/null; then
     if [[ $installed == true ]]; then
-      explain "There's a Soloist in your Downloads folder newer than the one here: it's installed now, and checked with omarock."
+      explain "There's a Soloist in your Downloads folder newer than the one here."
     else
-      explain "Found Soloist in your Downloads folder: it's installed now, and checked with omarock."
+      explain "Found Soloist in your Downloads folder."
     fi
-    run "$repo/tools/update-soloist" install "$(jq -r .download.path <<<"$st")" || return 1
-    return 0
+    if soloist_offer "$st"; then
+      run "$repo/tools/update-soloist" install "$(jq -r .download.path <<<"$st")" || return 1
+      return 0
+    fi
+    if [[ $installed != true ]]; then
+      bad "No Soloist to use yet: download it from Spotify's page, then run $again spotify again"
+      block "$soloist_page"
+      return 1
+    fi
+    note "Left in your Downloads folder; carrying on with the Soloist here"
   fi
   if [[ $installed == true ]] && ((days < 80)); then
     if [[ $checked == true ]]; then
@@ -1093,8 +1117,9 @@ step_soloist() {
   fi
   block "$soloist_page"
   if [[ -z $answers ]] && confirm "Open that page in your browser?"; then xdg-open "$soloist_page" >/dev/null 2>&1 & fi
-  if wait_until "Waiting for Soloist in your Downloads folder (Ctrl-C stops waiting)…" 900 soloist_downloaded; then
-    run "$repo/tools/update-soloist" install || return 1
+  if wait_until "Waiting for Soloist in your Downloads folder (Ctrl-C stops waiting)…" 900 soloist_downloaded \
+    && st=$(soloist_status) && soloist_offer "$st"; then
+    run "$repo/tools/update-soloist" install "$(jq -r .download.path <<<"$st")" || return 1
   elif [[ $installed == true ]] && ((days < 90)); then
     note "Carrying on with the Soloist you have; it stops working in $((90 - days)) days"
   else

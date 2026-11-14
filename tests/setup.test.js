@@ -205,7 +205,12 @@ test("Soloist's step: found in the Downloads folder (read, never run), or waited
   assert.deepEqual(state(null, null), { kind: "waiting", text: "Waiting for it in your Downloads folder…" })
   assert.equal(Setup.problem(field, "", {}, state(null, null)), "Needs Soloist, downloaded from Spotify")
   assert.equal(state(null, fresh).kind, "ok")
-  assert.match(state(null, fresh).text, /^Found it in your Downloads folder, built \d{4}-\d\d-\d\d\. Start setup installs it\.$/)
+  assert.match(state(null, fresh).text, /^Found it in your Downloads folder, built \d{4}-\d\d-\d\d, though your browser didn't record where it came from\. Start setup shows it and asks before installing it\.$/)
+  // Where the browser says it came from: Spotify's builds host, or elsewhere (refused by update-soloist).
+  const spotify = Object.assign({}, fresh, { origin: "https://soloist-builds.spotifycdn.com/soloist_release_x86_64.tar.gz" })
+  assert.match(state(null, spotify).text, /, from Spotify\. Start setup shows it and asks before installing it\.$/)
+  const lookalike = Object.assign({}, fresh, { origin: "https://soloist-builds.spotifycdn.com.example.net/soloist_release_x86_64.tar.gz" })
+  assert.match(state(null, lookalike).text, /didn't record where it came from/)
   assert.equal(Setup.problem(field, "", {}, state(null, fresh)), "")
   // A download that can't be used says why, by its name.
   const broken = Object.assign({}, fresh, { ok: false, why: "it isn't a Linux x86-64 program" })

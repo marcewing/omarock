@@ -96,7 +96,7 @@ printf '%s\n' "Set it up anyway?=y" "Enter the SiriusXM login again?=n" >"$work/
 limit=180 run_y sxm siriusxm --yes terms; said sxm
 
 echo "== Spotify (cut off at the pairing)"
-printf '%s\n' "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" >"$work/answers-spotify"
+printf '%s\n' "Install this Soloist?=y" "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" >"$work/answers-spotify"
 limit=150 run_y spotify spotify; said spotify
 logged "$repo/tools/omarock-sp" status >/dev/null 2>&1
 

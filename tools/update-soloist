@@ -15,6 +15,11 @@
 #   tools/update-soloist check       check the build installed (one you put
 #                                    there yourself, say)
 #
+# Where a download came from: browsers record it (Chromium and Firefox write the
+# user.xdg.origin.url attribute), and one that says anywhere but Spotify's
+# soloist-builds.spotifycdn.com is refused. ./install shows the download and asks
+# before installing it: one that turned up in Downloads isn't taken on its own.
+#
 # Reading a download, without running it: an x86-64 Linux program that starts
 # through glibc and takes connections through glibc's accept() or accept4(),
 # which omarock's shim needs (spotify/omarock-soloist-shim.c), and not expired
@@ -92,6 +97,17 @@ unpack() {
 
 hash_of() { sha256sum "$1" | cut -d' ' -f1; }
 
+# Where the browser says FILE came from, or nothing (not every browser says).
+origin_of() { getfattr --only-values -n user.xdg.origin.url -- "$1" 2>/dev/null || true; }
+# Why FILE can't be Spotify's, by where it came from, or nothing.
+not_spotify() {
+  local o
+  o=$(origin_of "$1")
+  [[ -z $o || $o == https://soloist-builds.spotifycdn.com/* ]] && return 0
+  o=${o#*://}
+  echo "your browser says it came from ${o%%/*}, not Spotify (soloist-builds.spotifycdn.com)"
+}
+
 # When FILE (a Soloist) was built, or 0 if that can't be read. Soloist's build
 # number is the time it was built ("soloist 1.3.10.6 build 1792627290
 # (20261022)"), kept in it as text; the archive's own dates are all 2000-01-01.
@@ -127,24 +143,29 @@ installed_json() {
     --arg why "$why" '{built: $built, days: $days, version: (if $version == "" then null else $version end), checked: ($why == ""), why: $why}'
 }
 
-# A download, read without running it: {path, built, days, ok, why, same,
-# newer}. Kept by its name, size and date, as the setup window asks often.
+# A download, read without running it: {path, size, saved, origin, built,
+# days, ok, why, same, newer}. Kept by its name, size, date and origin, as the
+# setup window asks often.
 # INSTALLED: installed_json's.
 download_json() {
-  local archive=$1 installed=$2 key out built why="" h
-  key="$archive $(stat -c '%s %Y' "$archive")"
+  local archive=$1 installed=$2 key out built why="" h origin
+  origin=$(origin_of "$archive")
+  key="$archive $(stat -c '%s %Y' "$archive") $origin"
   if [[ -f $cache/soloist-download.json ]] && jq -e --arg k "$key" '.key == $k' "$cache/soloist-download.json" >/dev/null 2>&1; then
     out=$(jq -c '.download' "$cache/soloist-download.json")
   else
     local x
     x=$(mktemp -d)
-    if why=$(unpack "$archive" "$x") && why=$(usable "$x/soloist"); then why=""; fi
+    why=$(not_spotify "$archive")
+    if [[ -z $why ]] && why=$(unpack "$archive" "$x") && why=$(usable "$x/soloist"); then why=""; fi
     built=$( [[ -f $x/soloist ]] && built_of "$x/soloist" || echo 0)
     h=$( [[ -f $x/soloist ]] && hash_of "$x/soloist" || true)
     rm -rf -- "$x"
     if [[ -z $why ]] && ((built > 0 && $(date +%s) - built >= 90 * 86400)); then why="it was built on $(day "$built") and has expired (builds last 90 days)"; fi
-    out=$(jq -nc --arg path "$archive" --argjson built "$built" --arg why "$why" --arg hash "$h" \
-      '{path: $path, built: $built, ok: ($why == ""), why: $why, hash: $hash}')
+    out=$({ printf '%s\n' "$archive" "$origin"; } | jq -nRc --argjson built "$built" --arg why "$why" --arg hash "$h" \
+      --argjson size "$(stat -c %s "$archive")" --argjson saved "$(stat -c %Y "$archive")" \
+      'input as $path | input as $origin | {path: $path, size: $size, saved: $saved, origin: (if $origin == "" then null else $origin end),
+        built: $built, ok: ($why == ""), why: $why, hash: $hash}')
     mkdir -p "$cache"
     # The JSON on stdin, never on a command line (as everything omarock passes).
     { jq -R . <<<"$key"; printf '%s\n' "$out"; } \
@@ -284,6 +305,8 @@ install_build() {
   local archive=${1:-} why built
   [[ -n $archive ]] || archive=$(newest_download)
   [[ -n $archive && -f $archive ]] || { wrong "no Soloist download in your Downloads folder: download it from $page"; return 1; }
+  why=$(not_spotify "$archive")
+  [[ -z $why ]] || { wrong "$(basename "$archive") isn't installed: $why"; return 1; }
   network || { wrong "no network: Soloist starts only with one, so a new build can't be checked now; try again when you're online"; return 1; }
   install -d -m 700 "$dest"
   work=$(mktemp -d "$dest/.new.XXXXXX")

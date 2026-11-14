@@ -295,7 +295,9 @@ function soloistState(text) {
   var built = function(t) { return t > 0 ? ", built " + day(t) : "" }
   var inst = st && st.installed, dl = st && st.download
   if (dl && dl.ok && (dl.newer || !inst))
-    return { kind: "ok", text: "Found it in your Downloads folder" + built(dl.built) + ". Start setup installs it." }
+    return { kind: "ok", text: "Found it in your Downloads folder" + built(dl.built)
+      + (/^https:\/\/soloist-builds\.spotifycdn\.com\//.test(dl.origin || "") ? ", from Spotify" : ", though your browser didn't record where it came from")
+      + ". Start setup shows it and asks before installing it." }
   if (inst && inst.checked && inst.days < 80)
     return { kind: "ok", text: "Soloist is installed already" + built(inst.built) + ": no download needed" }
   if (inst && !inst.checked && inst.days < 80 && (!dl || dl.same))

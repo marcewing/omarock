@@ -94,7 +94,7 @@ printf 'me@example.com\n' | acct sxm-user; printf 'hunter 2\n' | acct sxm-passwo
 printf '0123456789abcdef0123456789abcdef\n' | acct spotify-client; printf 'soloist-test-key\n' | acct soloist-key
 printf '%s\n' "Set it up anyway?=y" "Enter the SiriusXM login again?=n" >"$work/answers-sxm"
 limit=180 run_y sxm siriusxm --yes terms
-printf '%s\n' "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" >"$work/answers-spotify"
+printf '%s\n' "Install this Soloist?=y" "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" >"$work/answers-spotify"
 limit=120 run_y spotify spotify
 check "./install spotify installed the downloaded Soloist, checked with omarock" \
   [ "$(installed checked)" = true -a "$(installed built)" = $((now - 7200)) ]
@@ -163,6 +163,21 @@ check "one whose control port the shim never sees: turned down by running it, th
   bash -c "grep -q \"didn't see it take a connection\" '$work/logs/deaf.log' && grep -q 'Put back the Soloist that worked' '$work/logs/deaf.log' \
     && [[ \$(sha256sum '$lib/soloist' | cut -d' ' -f1) == $good ]] && [[ \$(systemctl --user is-active omarock-soloist) == active ]]"
 check "and it still passes as checked" [ "$(installed checked)" = true ]
+
+echo "== downloads omarock doesn't take on its own"
+standin ~/Downloads/soloist_release_x86_64.tar.gz $((now - 120))
+setfattr -n user.xdg.origin.url -v https://downloads.example.net/soloist_release_x86_64.tar.gz ~/Downloads/soloist_release_x86_64.tar.gz
+check "one your browser says came from elsewhere: not offered to the settings" \
+  [ "$("$repo/tools/omarock-sources" state | jq -r .spotify.soloist.download)" != true ]
+limit=120 run_y foreign spotify
+"$repo/tools/update-soloist" install ~/Downloads/soloist_release_x86_64.tar.gz >"$work/logs/foreign.log" 2>&1
+check "nor installed, by ./install spotify or by name" \
+  bash -c "[[ \$(sha256sum '$lib/soloist' | cut -d' ' -f1) == $good ]] && grep -q 'not Spotify' '$work/logs/foreign.log'"
+setfattr -x user.xdg.origin.url ~/Downloads/soloist_release_x86_64.tar.gz
+printf '%s\n' "Install this Soloist?=n" "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" >"$work/answers-unsure"
+limit=120 run unsure spotify
+check "one with no recorded origin is shown and asked about: no, so it stays in Downloads" \
+  bash -c "grep -q 'Install this Soloist?' '$work/logs/unsure.log' && [[ \$(sha256sum '$lib/soloist' | cut -d' ' -f1) == $good ]]"
 
 echo "== a newer download, by ./install spotify (the settings' Update…)"
 standin ~/Downloads/soloist_release_x86_64.tar.gz $((now - 60))
