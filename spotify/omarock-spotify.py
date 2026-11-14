@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.3.6"
+VERSION = "0.3.7"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 # omarock's sound output (audio/, ./install sound): Soloist plays into it
@@ -220,7 +220,7 @@ class Soloist:
     def run(self):
         while True:
             try:
-                ws = soloist_ws.WebSocket(port=SOLOIST_PORT)
+                ws = soloist_ws.WebSocket(port=SOLOIST_PORT, check=soloist_not_ours)
             except (OSError, soloist_ws.Closed):
                 time.sleep(3)
                 continue
@@ -762,11 +762,13 @@ def proc_address(ip, port):
     return "".join("%08X" % w for w in struct.unpack("=%dI" % (len(raw) // 4), raw)) + ":%04X" % port
 
 
-def socket_owners(peer, ours):
+def socket_owners(peer, ours, queued=False):
     """The accounts owning the far end of a loopback connection (peer, ours:
     (address, port) as seen here), from /proc/net/tcp and tcp6: [] when it has
     closed (the table lists a closed socket with no inode, and a TIME_WAIT one
-    as uid 0: no owner left to check)."""
+    as uid 0: no owner left to check). queued: a connection we made, whose far
+    end may still wait in the listener's queue, with no inode yet but the
+    listener's account: an established row counts then."""
     pairs = [(peer[0], ours[0])]
     if ":" not in peer[0]:  # an IPv6 socket connected to 127.0.0.1
         pairs.append(("::ffff:" + peer[0], "::ffff:" + ours[0]))
@@ -779,9 +781,31 @@ def socket_owners(peer, ours):
             continue
         for line in lines:
             f = line.split()
-            if len(f) > 9 and (f[1], f[2]) in wanted and f[9] != "0":
+            if len(f) > 9 and (f[1], f[2]) in wanted and (f[9] != "0" or (queued and f[3] == "01")):
                 owners.append(int(f[7]))
     return owners
+
+
+def soloist_not_ours(sock):
+    """Why omarock-spotify won't talk to what answered on Soloist's control
+    port, or None: another account can bind 127.0.0.1:8731 while Soloist is
+    down, and would get its commands and choose its answers. The far end of
+    this very connection, before anything is sent."""
+    global _soloist_refused_logged
+    try:
+        owners = socket_owners(sock.getpeername()[:2], sock.getsockname()[:2], queued=True)
+    except OSError:
+        owners = []
+    if owners and all(uid == ME for uid in owners):
+        return None
+    if time.monotonic() - _soloist_refused_logged > 60:
+        _soloist_refused_logged = time.monotonic()
+        log("didn't use Soloist's control port: " + (f"another account (uid {owners[0]}) holds it" if owners
+                                                    else "its owner couldn't be found"))
+    return "Soloist's control port is held by another account"
+
+
+_soloist_refused_logged = 0.0
 
 
 def from_another_account(sock):

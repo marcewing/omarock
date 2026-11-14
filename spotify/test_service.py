@@ -418,6 +418,42 @@ def other_accounts():
     for s in (accepted, accepted6, v6, listener):
         s.close()
 
+    # The other way: what omarock-spotify connects to (Soloist's control
+    # port), checked before anything is sent, while the connection may still
+    # wait in the listener's queue (not accepted yet).
+    import soloist_ws
+    listener = socket.create_server(("127.0.0.1", 0))
+    sent = []
+    try:
+        soloist_ws.WebSocket(port=listener.getsockname()[1], timeout=2, check=lambda sock: sent.append(
+            service.socket_owners(sock.getpeername()[:2], sock.getsockname()[:2], queued=True)) or None)
+    except (OSError, soloist_ws.Closed):
+        pass  # nothing answers the handshake: only the check matters here
+    check("Soloist's port held by this account: its far end, still in the queue, is ours",
+          sent == [[service.ME]], sent)
+    listener.close()
+    listener = socket.create_server(("127.0.0.1", 0))
+    real_me = service.ME
+    service.ME = real_me + 1  # as if another account held the port
+    try:
+        try:
+            soloist_ws.WebSocket(port=listener.getsockname()[1], timeout=2, check=service.soloist_not_ours)
+            refused = None
+        except soloist_ws.Closed as e:
+            refused = str(e)
+        queued = listener.accept()[0]
+        queued.settimeout(1)
+        try:
+            got = queued.recv(100)
+        except OSError:
+            got = b"(nothing)"
+    finally:
+        service.ME = real_me
+    check("held by another account: omarock-spotify sends it nothing, and says why",
+          refused == "Soloist's control port is held by another account" and got in (b"", b"(nothing)"), (refused, got))
+    queued.close()
+    listener.close()
+
     server = service.ThreadingHTTPServer(("127.0.0.1", 0), service.Handler)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()

@@ -17,8 +17,14 @@ class Closed(Exception):
 
 
 class WebSocket:
-    def __init__(self, host="127.0.0.1", port=8731, timeout=10):
+    def __init__(self, host="127.0.0.1", port=8731, timeout=10, check=None):
         self.sock = socket.create_connection((host, port), timeout=timeout)
+        # Whatever holds the port gets what's sent: check, before anything is,
+        # who's at the far end (check(sock): why not, or None).
+        why = check(self.sock) if check else None
+        if why:
+            self.sock.close()
+            raise Closed(why)
         key = base64.b64encode(os.urandom(16)).decode()
         self.sock.sendall((f"GET / HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())

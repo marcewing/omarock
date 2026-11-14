@@ -113,6 +113,27 @@ mine=$(code http://127.0.0.1:8720/v1/health) theirs=$(as_other curl -s -o /dev/n
 check "omarock-sxm answers this account ($mine) and refuses another's ($theirs)" [ "$mine" != 403 -a "$mine" != 000 -a "$theirs" = 403 ]
 theirs=$(as_other curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1:8720/stream/x)
 check "and its streams too ($theirs)" [ "$theirs" = 403 ]
+
+echo "== another account holding the ports omarock connects to"
+squat() { as_other python3 -I -c 'import socket, sys, time; s = socket.create_server(("127.0.0.1", int(sys.argv[1]))); time.sleep(float(sys.argv[2]))' "$@"; }
+systemctl --user stop omarock-soloist
+since=$(date '+%Y-%m-%d %H:%M:%S')
+squat 8731 12 & held=$!
+sleep 9
+check "omarock-spotify sends nothing to Soloist's port held by another account, and says so" \
+  bash -c "journalctl --user -u omarock-spotify --since '$since' --no-pager -q -o cat | grep -q 'another account (uid'"
+wait "$held"
+systemctl --user start omarock-soloist
+systemctl --user stop omarock-spotify
+squat 8730 10 & held=$!
+sleep 1
+out=$("$repo/tools/omarock-sp" raw GET /v1/health 2>&1 || true)
+check "omarock-sp won't use omarock-spotify's port held by another account" grep -q 'another account (uid' <<<"$out"
+"$repo/tools/omarock-doctor" >"$work/logs/doctor-held.log" 2>&1 || true
+check "and the doctor says another account holds it" grep -q "holds omarock-spotify's port" "$work/logs/doctor-held.log"
+wait "$held"
+systemctl --user start omarock-spotify
+sleep 3
 greet='import socket, sys; s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5); s.settimeout(5); print(s.recv(16).decode().strip() or "closed")'
 mine=$(python3 -I -c "$greet" 127.0.0.1 8731 2>&1) theirs=$(as_other python3 -I -c "$greet" 127.0.0.1 8731 2>&1)
 check "Soloist's control port takes this account's connection ($mine) and closes another's ($theirs)" \

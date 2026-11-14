@@ -41,7 +41,22 @@ Item {
 
   signal tuneRequested(var channel)
 
+  // Only while this account holds omarock-sxm's port (ListenerCheck): another
+  // account binding it first would get the requests, and choose the channels,
+  // titles and art omarock shows.
+  readonly property int loopbackPort: {
+    var m = /^http:\/\/127\.0\.0\.1:(\d+)(\/|$)/.exec(root.baseUrl)
+    return m ? parseInt(m[1], 10) : 0
+  }
+  ListenerCheck { id: listener; port: root.loopbackPort }
+
   function request(method, path, body, callback, timeoutMs) {
+    if (root.loopbackPort > 0 && !listener.ours) {
+      if (callback) callback(null, listener.owner !== ""
+        ? "omarock-sxm's port (127.0.0.1:" + root.loopbackPort + ") is held by another account (uid " + listener.owner + "), so omarock doesn't use it"
+        : "SiriusXM isn't running (omarock-sxm)")
+      return
+    }
     var xhr = new XMLHttpRequest()
     xhr.onreadystatechange = function() {
       // A reply that arrives after a plugin reload destroyed this client
@@ -78,6 +93,10 @@ Item {
   // something's wrong only then.
   property bool healthKnown: false
   function checkHealth(callback) {
+    if (root.loopbackPort > 0) return listener.verify(function() { root.checkHealthNow(callback) })
+    root.checkHealthNow(callback)
+  }
+  function checkHealthNow(callback) {
     root.request("GET", "/v1/health", null, function(data, error) {
       root.healthKnown = true
       root.available = !!data && data.account === true

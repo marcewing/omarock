@@ -3309,11 +3309,13 @@ Panel {
       return
     }
     spotify.get("/v1/login", function(data, error) {
-      if (data && data.url) {
+      // Only Spotify's own sign-in page: whatever answered as omarock-spotify
+      // shouldn't choose what the browser (or any other handler) opens.
+      if (data && /^https:\/\/accounts\.spotify\.com\/authorize\?/.test(String(data.url || ""))) {
         Qt.openUrlExternally(data.url)
         root.say("Spotify's sign-in is open in your browser")
       } else {
-        root.say(error !== "" ? error : "omarock-spotify has no sign-in to offer")
+        root.say(error !== "" ? error : data && data.url ? "omarock-spotify's sign-in isn't Spotify's page, so it isn't opened" : "omarock-spotify has no sign-in to offer")
       }
     })
   }

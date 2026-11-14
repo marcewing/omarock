@@ -77,6 +77,14 @@ Item {
     var m = /^https?:\/\/([^\/:\[\]]+\.local)\.?(:\d+)?(\/|$)/i.exec(root.baseUrl)
     return m ? m[1].toLowerCase() : ""
   }
+  // A service on this machine's loopback (omarock-spotify): only while this
+  // account holds its port (ListenerCheck).
+  readonly property int loopbackPort: {
+    var m = /^http:\/\/127\.0\.0\.1:(\d+)(\/|$)/.exec(root.baseUrl)
+    return m ? parseInt(m[1], 10) : 0
+  }
+  readonly property string heldText: root.bridgeName + "'s port (127.0.0.1:" + root.loopbackPort + ") is held by another account" + (listener.owner !== "" ? " (uid " + listener.owner + ")" : "") + ", so omarock doesn't use it"
+  ListenerCheck { id: listener; port: root.loopbackPort }
   property string hostVerified: ""
   property bool pointsHere: false
   readonly property string pointsHereText: root.localHost + " points to this machine, not your Mac: something here is answering for its name, so omarock sends it nothing"
@@ -157,6 +165,10 @@ Item {
     }
     if (root.localHost !== "" && root.hostVerified !== root.localHost) {
       if (callback) callback(null, root.pointsHere ? root.pointsHereText : root.unreachableText)
+      return
+    }
+    if (root.loopbackPort > 0 && !listener.ours) {
+      if (callback) callback(null, listener.owner !== "" ? root.heldText : root.unreachableText)
       return
     }
     var xhr = new XMLHttpRequest()
@@ -286,6 +298,7 @@ Item {
     }
   }
   function checkHealth(callback) {
+    if (root.loopbackPort > 0) return listener.verify(function() { root.checkHealthNow(callback) })
     if (root.localHost === "") return root.checkHealthNow(callback)
     hostCheck.waiting = hostCheck.waiting.concat([callback || null])
     if (!hostCheck.running) hostCheck.running = true

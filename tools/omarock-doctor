@@ -29,7 +29,20 @@ conf_value() { grep -E "^[[:space:]]*$2[[:space:]]" "$1" 2>/dev/null | head -1 |
 # X-Omarock: omarock's own services answer only requests that carry it. A
 # reply goes to python3 on stdin, never on its command line (others on this
 # machine can read that): omarock-sxm's can name the account.
-health() { curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
+# held_by_other URL: for a service on 127.0.0.1:PORT, whether another account
+# holds that port (it could have bound it first, while the service was down)
+# and would get what's sent; it prints that account's uid. The listening
+# socket's owner, from /proc/net/tcp: 127.0.0.1's, else the wildcard's.
+held_by_other() {
+  local port uid
+  [[ $1 =~ ^http://127\.0\.0\.1:([0-9]+)(/|$) ]] || return 1
+  port=$(printf '%04X' "${BASH_REMATCH[1]}")
+  uid=$(awk -v p=":$port" '$4 == "0A" && $2 == "0100007F" p {print $8; exit}' /proc/net/tcp)
+  [[ -n $uid ]] || uid=$(awk -v p=":$port" '$4 == "0A" && $2 == "00000000" p {print $8; exit}' /proc/net/tcp)
+  [[ -n $uid && $uid != "$(id -u)" ]] || return 1
+  echo "$uid"
+}
+health() { held_by_other "$1" >/dev/null && return 0; curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
 
 id=marcewing.omarock
 plugin=$HOME/.config/omarchy/plugins/$id
@@ -221,6 +234,9 @@ if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/om
       fi
     fi
   fi
+  if uid=$(held_by_other "$(setting spotifyService http://127.0.0.1:8730)"); then
+    bad "another account (uid $uid) holds omarock-spotify's port, so omarock doesn't use it: it could have bound it while omarock-spotify was down"
+  fi
   h=$(health "$(setting spotifyService http://127.0.0.1:8730)")
   if [[ -n $h ]]; then
     python3 -I -c '
@@ -241,6 +257,9 @@ if [[ $(setting siriusXM false) == true ]] || [[ -e $HOME/.config/systemd/user/o
     note "switched off in omarock's settings: omarock-sxm is stopped"
   else
     active omarock-sxm && ok "omarock-sxm is running" || bad "omarock-sxm isn't running: journalctl --user -u omarock-sxm"
+  fi
+  if uid=$(held_by_other "$(setting sxmService http://127.0.0.1:8720)"); then
+    bad "another account (uid $uid) holds omarock-sxm's port, so omarock doesn't use it: it could have bound it while omarock-sxm was down"
   fi
   h=$(health "$(setting sxmService http://127.0.0.1:8720)")
   if [[ -n $h ]]; then
