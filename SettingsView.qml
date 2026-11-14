@@ -49,6 +49,8 @@ Rectangle {
   signal closeRequested()
   // An edit ended (saved or dropped): the keys go back to the panel.
   signal editFinished()
+  // A word for the panel to say (a paste a field turned down).
+  signal noticeRequested(string text)
 
   // Changes shown at once, before Omarchy's config hands them back.
   property var local: ({})
@@ -503,7 +505,7 @@ Rectangle {
               // A text or number setting, an account, a secret or the music
               // folder. It shows the value (a secret, dots if it's set), and
               // edits on Enter or a click; Enter saves, Esc drops the edit.
-              TextField {
+              GuardedField {
                 id: editor
                 visible: rowItem.row.type !== "boolean" && rowItem.row.type !== "enum" && rowItem.row.type !== "action"
                   && rowItem.row.type !== "info"
@@ -538,7 +540,8 @@ Rectangle {
                     if (password || rowItem.row.type === "pair") text = ""
                   }
                 }
-                Keys.onPressed: function(event) {
+                onRefusalChanged: if (editor.refusal !== "") root.noticeRequested(editor.refusal)
+                onKeyPressed: function(event) {
                   if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     root.finishEdit(rowItem.row.key, editor.text, true)
                     // A secret leaves nothing behind in the field; the music

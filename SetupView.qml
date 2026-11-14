@@ -44,6 +44,8 @@ Rectangle {
   property string defaultOutput: ""
   // The panel's word once Start setup is pressed: saving, or why it couldn't.
   property string notice: ""
+  // A paste a field turned down, for a few seconds (GuardedField.refusal).
+  property string fieldRefusal: ""
   property bool busy: false
   property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
@@ -98,6 +100,8 @@ Rectangle {
     root.touched = {}
     root.live = {}
     root.notice = ""
+    // The field that turned a paste down may be gone, its fields made anew.
+    root.fieldRefusal = ""
     root.busy = false
     root.otherMac = !root.macListed(root.values.appleMac || "") && (root.values.appleMac || "") !== "" || root.macs.length === 0
     flick.contentY = 0
@@ -736,7 +740,7 @@ Rectangle {
 
               // A line or a secret, or the Mac's address typed. A secret
               // set already shows as such, and empty keeps it.
-              TextField {
+              GuardedField {
                 id: editor
                 objectName: "setupField:" + field.f.key
                 visible: field.f.type === "text" || field.f.type === "secret" || field.f.type === "pair" || (field.f.type === "mac" && root.otherMac)
@@ -750,6 +754,7 @@ Rectangle {
                 text: field.value === undefined || field.value === null ? "" : String(field.value)
                 onTextEdited: root.setValue(field.f.key, text)
                 onAccepted: root.next(field.f.key)
+                onRefusalChanged: root.fieldRefusal = editor.refusal
                 Component.onCompleted: {
                   var inputs = Object.assign({}, root.inputs)
                   inputs[field.f.key] = editor
@@ -803,8 +808,9 @@ Rectangle {
       anchors.rightMargin: Style.space(12)
       anchors.verticalCenter: parent.verticalCenter
       textFormat: Text.PlainText
-      text: root.notice !== "" ? root.notice : root.blocker !== "" ? root.blocker : "Ready"
-      color: root.notice !== "" || root.blocker === "" ? root.foreground : root.dim
+      text: root.notice !== "" ? root.notice : root.fieldRefusal !== "" ? root.fieldRefusal
+        : root.blocker !== "" ? root.blocker : "Ready"
+      color: root.notice !== "" || root.fieldRefusal !== "" || root.blocker === "" ? root.foreground : root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap

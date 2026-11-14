@@ -195,8 +195,42 @@ ShellRoot {
   readonly property var keyNames: ({
     Return: Qt.Key_Return, Escape: Qt.Key_Escape, Backspace: Qt.Key_Backspace, Space: Qt.Key_Space,
     Up: Qt.Key_Up, Down: Qt.Key_Down, Left: Qt.Key_Left, Right: Qt.Key_Right, Tab: Qt.Key_Tab,
-    PageUp: Qt.Key_PageUp, PageDown: Qt.Key_PageDown
+    PageUp: Qt.Key_PageUp, PageDown: Qt.Key_PageDown, Home: Qt.Key_Home, End: Qt.Key_End,
+    Delete: Qt.Key_Delete, Insert: Qt.Key_Insert
   })
+  readonly property var modifierNames: ({
+    Shift: Qt.ShiftModifier, Ctrl: Qt.ControlModifier, Alt: Qt.AltModifier, Meta: Qt.MetaModifier
+  })
+
+  // Every text input under item, shown or not: Qt's TextInput and TextEdit,
+  // and the fields made from them, are the items with readOnly and
+  // cursorPosition. guarded: a GuardedField (it has keyPressed).
+  function textInputsIn(item, window, out) {
+    if (!item) return out
+    if (typeof item.readOnly === "boolean" && typeof item.cursorPosition === "number")
+      out.push({ window: window, name: item.objectName || String(item).replace(/\(.*$/, ""),
+        readOnly: item.readOnly, guarded: typeof item.keyPressed === "function", shown: item.visible === true })
+    var children = item.children || []
+    for (var i = 0; i < children.length; i++) host.textInputsIn(children[i], window, out)
+    return out
+  }
+
+  function rootOf(item) {
+    while (item && item.parent) item = item.parent
+    return item
+  }
+
+  // The text input with the keys, in whichever of the panel's windows has them.
+  function focusedField() {
+    var p = popup()
+    var windows = [p ? p.contentItem[0] : null, host.panel.setupWindow.contentItem, host.panel.keysWindow.contentItem]
+    for (var i = 0; i < windows.length; i++) {
+      if (!windows[i] || !windows[i].Window.window) continue
+      var item = windows[i].Window.window.activeFocusItem
+      if (item && typeof item.readOnly === "boolean" && typeof item.cursorPosition === "number") return item
+    }
+    return null
+  }
 
   component Api: PluginBarApi {
     pluginId: "marcewing.omarock"
@@ -299,15 +333,61 @@ ShellRoot {
     function back(): void { host.panel.stepBack() }
     // A click on the source switch.
     function setSource(name: string): void { host.panel.setSource(name) }
-    // press("Return"), press("Shift+Return"), or one character: press("a").
+    // press("Return"), press("Shift+Return"), press("Ctrl+Shift+V"), or one
+    // character: press("a"), press("+").
     function press(name: string): string {
-      var shift = name.indexOf("Shift+") === 0
-      var key = shift ? name.slice(6) : name
-      var done = host.keyNames[key] !== undefined
-        ? keyboard.keyClick(host.keyNames[key], shift ? Qt.ShiftModifier : Qt.NoModifier, -1)
-        : keyboard.keyClickChar(key, Qt.NoModifier, -1)
+      var parts = name.length > 1 ? name.split("+") : [name]
+      var key = parts.pop()
+      var modifiers = Qt.NoModifier
+      parts.forEach(function(m) { modifiers |= host.modifierNames[m] })
+      var done = host.keyNames[key] !== undefined ? keyboard.keyClick(host.keyNames[key], modifiers, -1)
+        // A letter with Ctrl: its key, as a keyboard sends it.
+        : modifiers !== Qt.NoModifier && /^[A-Za-z]$/.test(key) ? keyboard.keyClick(key.toUpperCase().charCodeAt(0), modifiers, -1)
+        : keyboard.keyClickChar(key, modifiers, -1)
       return done ? "ok" : "no window"
     }
+    // Every text input in the panel's windows (the popup, the keys window,
+    // the setup window) and the bar, shown or not: [{ window, name,
+    // readOnly, guarded, shown }].
+    function textInputs(): string {
+      var p = popup()
+      var out = []
+      if (p) host.textInputsIn(host.rootOf(p.contentItem[0]), "panel", out)
+      host.textInputsIn(host.panel.keysWindow.contentItem, "keys", out)
+      host.textInputsIn(host.panel.setupWindow.contentItem, "setup", out)
+      host.textInputsIn(strip, "bar", out)
+      return JSON.stringify(out)
+    }
+    // The text input with the keys: its text, cursor and selection, why its
+    // last paste was turned down, whether its cursor shows.
+    function field(): string {
+      var f = host.focusedField()
+      if (!f) return "{}"
+      var caret = (f.children || []).filter(function(c) { return c.objectName === "caret" })[0]
+      return JSON.stringify({ name: f.objectName || String(f).replace(/\(.*$/, ""), text: f.text, cursor: f.cursorPosition,
+        selectionStart: f.selectionStart, selectionEnd: f.selectionEnd, selected: f.selectedText, readOnly: f.readOnly,
+        refusal: f.refusal === undefined ? null : f.refusal, caret: caret ? caret.visible : null, deadKey: f.deadKey || 0 })
+    }
+    // A key that QtTest can't make (a dead key: it has no character), handed
+    // to the focused field's editing as the key event would be.
+    function fieldKey(key: int, text: string, modifiers: int): string {
+      var f = host.focusedField()
+      if (!f || typeof f.edit !== "function") return "no field"
+      var event = { key: key, text: text, modifiers: modifiers, accepted: false, matches: function() { return false } }
+      f.edit(event)
+      return event.accepted ? "accepted" : "passed on"
+    }
+    // A middle click on a text input, by objectName ("" for the search box),
+    // a third of the way in.
+    function middleClick(name: string): string {
+      var p = popup()
+      var f = name === "" ? host.panel.searchField
+        : host.findNamed(p.contentItem[0].parent.parent, name) || (host.setupView() ? host.findNamed(host.setupView(), name) : null)
+      if (!f) return "No field " + name
+      return keyboard.mouseClick(f, f.width / 3, f.height / 2, Qt.MiddleButton, Qt.NoModifier, -1) ? "ok" : "no window"
+    }
+    // What a copy put on the clipboard (Qt's own, offscreen: never the desktop's).
+    function clipboard(): string { return Quickshell.clipboardText }
     // Which window and item keys would reach, for diagnosing press().
     function focusInfo(): string {
       var popupWindow = popup()

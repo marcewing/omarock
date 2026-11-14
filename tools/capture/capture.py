@@ -46,6 +46,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
                 "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js", "StdinProcess.qml", "ListenerCheck.qml",
+                "GuardedField.qml", "Editing.js",
                 "tools/omarock-account", "tools/omarock-sources", "tools/update-soloist"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -98,8 +99,14 @@ def prepare(work):
     # The real sh and jq, which log their command lines while a scenario asks.
     (fakes / "sh").symlink_to(TOOLS / "argv-log")
     (fakes / "jq").symlink_to(TOOLS / "argv-log")
+    # Never the real clipboard: the fields' pastes read a file in the test HOME.
+    (fakes / "wl-paste").symlink_to(TOOLS / "fake-wl-paste")
+    # A display that isn't there (a real Wayland client started here finds
+    # nothing): the fake wl-paste checks the panel hands it on, as the real
+    # one needs it. Quickshell warns once that it's set while offscreen.
     env = dict(HOME=str(home), PATH=f"{fakes}:/usr/bin:/bin", LANG="C.UTF-8",
-               XDG_RUNTIME_DIR=str(runtime), OMARCHY_PATH="/usr/share/omarchy")
+               XDG_RUNTIME_DIR=str(runtime), OMARCHY_PATH="/usr/share/omarchy",
+               WAYLAND_DISPLAY="omarock-capture-no-display")
     subprocess.run(["omarchy-theme-set-templates"], env=env, check=True, stdout=subprocess.DEVNULL)
     shutil.copytree(theme, theme.with_name("theme"))
     fonts = home / ".config/fontconfig"
@@ -310,6 +317,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     apple_genres_scenario(host, output, socket_path, failures)
     apple_network_scenario(host, output, socket_path, failures)
     time_machine_scenario(host, output, socket_path, failures)
+    guarded_fields_scenario(host, output, failures)
 
     # mpd goes away: the panel says so instead of failing silently.
     host.call("close")
@@ -6337,6 +6345,309 @@ def logged_argv(home, steps):
         log.unlink(missing_ok=True)
 
 
+def guarded_fields_scenario(host, output, failures):
+    """The marketplace's review (Medium, on Qt 6.12): an editable text field
+    reads the whole clipboard each time any program sets it, and again on a
+    paste, with no limit on its size or on how long it takes, so a clipboard
+    offering a huge or endless text froze the shell. Every field is read-only
+    to Qt, always, shown or not (GuardedField does the editing), and a paste
+    reads the clipboard through wl-paste, at most 4 KB and 2 s (here the
+    harness's fake-wl-paste, which plays the clipboard from files)."""
+    home = Path(host.env["HOME"])
+    clipboard, primary, mode, pid_file = (home / name for name in
+                                          (".fake-clipboard", ".fake-primary", ".fake-clipboard-mode", ".fake-wl-paste.pid"))
+    big = "The clipboard holds more than 4 KB: not pasted"
+    slow = "The clipboard didn't answer: nothing pasted"
+
+    def inputs():
+        return json.loads(host.call("textInputs"))
+
+    def writable(found):
+        return [f["window"] + ":" + f["name"] for f in found if not f["readOnly"]]
+
+    def field():
+        return json.loads(host.call("field") or "{}")
+
+    def clip(text, how=""):
+        """The clipboard holds text; how it misbehaves (fake-wl-paste)."""
+        clipboard.write_text(text)
+        if how: mode.write_text(how)
+        else: mode.unlink(missing_ok=True)
+        pid_file.unlink(missing_ok=True)
+
+    def ended(pid):
+        """The process is gone (or a zombie, waiting to be reaped)."""
+        try: return Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1][0] in "ZX"
+        except (FileNotFoundError, IndexError): return True
+
+    def paste_started():
+        wait_for(lambda: pid_file.exists() and pid_file.read_text().strip() != "", "wl-paste started")
+        return int(pid_file.read_text())
+
+    def keys(*names):
+        for name in names: host.call("press", name)
+
+    def text_is(want, what):
+        wait_for(lambda: field().get("text") == want, what, timeout=6)
+
+    # ---- Every field, read-only to Qt, in every window, shown or not ----
+    host.call("close")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    found = inputs()
+    names = [f["name"] for f in found if f["guarded"]]
+    check(found and not writable(found) and "pickerField" in names and "yearField" in names
+          and any(f["guarded"] and f["shown"] for f in found),
+          "compact: every text field is read-only to Qt, the search box, picker, year box and settings among them ("
+          + str(len(found)) + "): " + repr(writable(found)), failures)
+    host.call("expand", "true")
+    host.settle(1)
+    found = inputs()
+    check(not writable(found) and any(f["guarded"] and f["shown"] for f in found),
+          "expanded: every text field is read-only (" + str(len(found)) + "): " + repr(writable(found)), failures)
+    host.call("expand", "false")
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"], "the settings open")
+    for tab in host.state()["settingsTabs"]:
+        found = inputs()
+        check(any(f["guarded"] for f in found) and not writable(found),
+              "settings, the " + tab + " tab: every field read-only: " + repr(writable(found)), failures)
+        host.call("press", "Tab")
+    host.call("close")
+    in_windows = []
+    for piece in ("spotify", "siriusxm", "apple-music", "sound"):
+        host.call("openSetup", piece)
+        wait_for(lambda: host.state()["setupWindow"]["open"] and host.state()["setupWindow"]["piece"] == piece,
+                 piece + "'s setup window")
+        found = [f for f in inputs() if f["window"] == "setup"]
+        in_windows += found
+        check(not writable(found), piece + "'s setup window: every field read-only ("
+              + ", ".join(f["name"] + ("" if f["guarded"] else " (no editing)") for f in found) + ")", failures)
+        host.call("close")
+    check(any(f["name"] == "setupField:spotifyClient" for f in in_windows), "the setup windows' fields were found", failures)
+    host.call("activatePopup")
+
+    # ---- Typing, deleting, selecting, cut, copy and undo, in the search box ----
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.call("press", "/")
+    wait_for(lambda: host.state()["searchFocused"], "the search box has the keys")
+    host.call("typeKeys", "abc def")
+    f = field()
+    check(f.get("text") == "abc def" and f["cursor"] == 7 and f["readOnly"] and f["caret"] is not None,
+          "typed into a read-only field, the cursor after it, and a cursor of its own drawn: " + repr(f), failures)
+    keys("Backspace")
+    check(field().get("text") == "abc de", "Backspace: " + field().get("text", ""), failures)
+    keys("Home", "Delete")
+    check(field().get("text") == "bc de" and field()["cursor"] == 0, "Home, Delete: " + repr(field()), failures)
+    keys("End", "Shift+Home")
+    check(field().get("selected") == "bc de", "Shift+Home selects (Qt's own): " + repr(field()), failures)
+    host.call("typeKeys", "xy foo bar")
+    check(field().get("text") == "xy foo bar", "typing replaces the selection: " + field().get("text", ""), failures)
+    keys("Ctrl+Backspace")
+    check(field().get("text") == "xy foo ", "Ctrl+Backspace, a word: " + field().get("text", ""), failures)
+    keys("Ctrl+Backspace")
+    check(field().get("text") == "xy ", "and the next: " + field().get("text", ""), failures)
+    keys("Ctrl+Z")
+    check(field().get("text") == "xy foo ", "Ctrl+Z undoes it: " + field().get("text", ""), failures)
+    keys("Ctrl+Z")
+    check(field().get("text") == "xy foo bar", "and the one before: " + field().get("text", ""), failures)
+    keys("Home", "Ctrl+Delete")
+    check(field().get("text") == "foo bar", "Ctrl+Delete, a word: " + field().get("text", ""), failures)
+    keys("Ctrl+A", "Delete")
+    check(field().get("text") == "", "Ctrl+A (Qt's own), then Delete: " + repr(field().get("text")), failures)
+    keys("Ctrl+Z")
+    check(field().get("text") == "foo bar", "Ctrl+Z brings it back: " + field().get("text", ""), failures)
+    keys("Ctrl+A", "Ctrl+X")
+    check(field().get("text") == "" and host.call("clipboard") == "foo bar",
+          "Ctrl+X cuts: the field empty, the text on the clipboard: " + repr(host.call("clipboard")), failures)
+    keys("Ctrl+Z", "Home", "Shift+Right", "Shift+Right", "Shift+Right", "Ctrl+Shift+C")
+    check(field().get("text") == "foo bar" and host.call("clipboard") == "foo",
+          "Ctrl+Shift+C copies (Omarchy's Super+C with a terminal behind): " + repr(host.call("clipboard")), failures)
+    keys("End", "Shift+Left", "Shift+Left", "Shift+Left", "Ctrl+C")
+    check(host.call("clipboard") == "bar", "Ctrl+C copies (Qt's own): " + repr(host.call("clipboard")), failures)
+    # A dead key's accent on the next letter (US International's ´, then e),
+    # through Shift for a capital. QtTest can't make a dead key's event, so
+    # it goes to the field's editing as one.
+    keys("End")
+    dead_acute, shift_key = 0x01001251, 0x01000020
+    check(host.call("fieldKey", dead_acute, "", 0) == "accepted" and field().get("deadKey") == dead_acute,
+          "a dead key waits for its letter", failures)
+    host.call("typeKeys", "e")
+    host.call("fieldKey", dead_acute, "", 0)
+    host.call("fieldKey", shift_key, "", 0x02000000)
+    host.call("typeKeys", "E")
+    host.call("fieldKey", dead_acute, "", 0)
+    host.call("typeKeys", " ")
+    check(field().get("text") == "foo baréÉ'",
+          "dead keys: ´e is é, ´ Shift E is É, ´ space is ': " + field().get("text", ""), failures)
+
+    # ---- Paste, through wl-paste: never Qt's own ----
+    keys("Ctrl+A", "Delete")
+    secret = "clip-" + hashlib.sha256(b"guarded-fields").hexdigest()[:16]
+    clip(secret + "\n")
+    lines = logged_argv(home, lambda: (keys("Ctrl+V"), text_is(secret, "Ctrl+V pasted")))
+    check(field().get("text") == secret and field()["cursor"] == len(secret) and secret not in lines and "wl-paste" in lines,
+          "Ctrl+V pastes at the cursor through wl-paste, its trailing newline dropped, and the clipboard's text on "
+          "no command line" + (" (it was on one)" if secret in lines else ""), failures)
+    clip("two")
+    keys("Home", "Ctrl+Shift+V")
+    text_is("two" + secret, "Ctrl+Shift+V pasted")
+    check(field()["cursor"] == 3, "Ctrl+Shift+V pastes too (Omarchy's Super+V with a terminal behind)", failures)
+    clip("THREE")
+    keys("Shift+End", "Shift+Insert")
+    text_is("twoTHREE", "Shift+Insert pasted")
+    check(True, "Shift+Insert pastes, in place of the selection", failures)
+    clip("a\r\nb\x00c\n")
+    keys("Ctrl+A", "Ctrl+V")
+    text_is("a bc", "a paste of lines")
+    check(True, "a paste's line breaks become a space, its NULs go", failures)
+    primary.write_text("mid")
+    pid_file.unlink(missing_ok=True)
+    host.call("middleClick", "")
+    wait_for(lambda: "mid" in field().get("text", ""), "a middle click's paste")
+    check(field()["text"] in ("mida bc", "amid bc", "a midbc", "a bmidc", "a bcmid"),
+          "a middle click pastes the selection (wl-paste --primary), where it clicks: " + field()["text"], failures)
+
+    # A huge or endless clipboard: not pasted, said so, and the shell answers.
+    keys("Ctrl+A", "Delete")
+    clip("1" * 4096)
+    keys("Ctrl+V")
+    text_is("1" * 4096, "4096 bytes pasted")
+    check(True, "4096 bytes are pasted", failures)
+    keys("Ctrl+A", "Delete")
+    clip("1" * 4097)
+    keys("Ctrl+V")
+    wait_for(lambda: host.state()["notice"] == big, "4097 bytes turned down")
+    check(field().get("text") == "", "4097 bytes aren't, and the panel says why", failures)
+    clip("", "endless")
+    host.call("say", "")
+    started = time.monotonic()
+    keys("Ctrl+V")
+    pid = paste_started()
+    wait_for(lambda: host.state()["notice"] == big, "the endless clipboard turned down")
+    took = time.monotonic() - started
+    started = time.monotonic()
+    host.call("typeKeys", "ok")
+    answered = time.monotonic() - started
+    wait_for(lambda: ended(pid), "the endless wl-paste ended", timeout=5)
+    check(field().get("text") == "ok" and took < 2 and answered < 2,
+          f"an endless clipboard: cut off at 4 KB, not pasted, said so in {took:.1f} s, and the shell typing on "
+          f"({answered:.1f} s)", failures)
+    host.call("say", "")
+    clip("", "slow")
+    started = time.monotonic()
+    keys("Ctrl+V")
+    pid = paste_started()
+    wait_for(lambda: host.state()["notice"] == slow, "the slow clipboard given up", timeout=8)
+    took = time.monotonic() - started
+    wait_for(lambda: ended(pid), "the slow wl-paste killed", timeout=3)
+    check(field().get("text") == "ok" and 1.5 < took < 4.5,
+          f"a clipboard that doesn't answer: given up after {took:.1f} s, its wl-paste killed, said so", failures)
+
+    # A paste that comes back too late: the field lost the keys, its text
+    # changed, or another paste started meanwhile. Dropped, and stopped.
+    host.call("say", "")
+    clip("late", "late")
+    keys("Ctrl+V")
+    pid = paste_started()
+    keys("Down")
+    wait_for(lambda: not host.state()["searchFocused"], "the search box left")
+    wait_for(lambda: ended(pid), "the paste stopped as the field lost the keys", timeout=2)
+    host.settle(1.5)
+    check(host.state()["query"] == "ok" and host.state()["notice"] == "",
+          "a paste the field lost the keys during: stopped, and nothing pasted: " + host.state()["query"], failures)
+    host.call("press", "/")
+    wait_for(lambda: host.state()["searchFocused"], "the search box again")
+    keys("End")
+    clip("late", "late")
+    keys("Ctrl+V")
+    paste_started()
+    host.call("typeKeys", "z")
+    host.settle(1.6)
+    check(field().get("text") == "okz", "a paste the text changed during: dropped: " + field().get("text", ""), failures)
+    clip("first", "late")
+    keys("Ctrl+V")
+    pid = paste_started()
+    clip("second")
+    keys("Ctrl+V")
+    text_is("okzsecond", "the second paste")
+    host.settle(1.6)
+    check(field().get("text") == "okzsecond" and ended(pid),
+          "a paste a newer one started during: stopped, and only the newer pasted: " + field().get("text", ""), failures)
+
+    # ---- A setting being typed: Shift+← selects (it doesn't seek), a paste turned down says why ----
+    host.call("close")
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    host.call("press", ",")
+    wait_for(lambda: host.state()["settingsOpen"], "the settings open")
+    settings_cursor_to(host, "radioArea")
+    was = host.state()["settingValues"].get("radioArea")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["settingsEditing"] == "radioArea", "editing radioArea")
+    host.call("typeKeys", "Portland")
+    keys("Shift+Left", "Shift+Left", "Shift+Left", "Shift+Left")
+    f = field()
+    check(f.get("text") == "Portland" and f.get("selected") == "land",
+          "in a setting being typed, Shift+← selects, as in any field, and doesn't seek: " + repr(f), failures)
+    host.call("say", "")
+    clip("", "endless")
+    keys("Ctrl+V")
+    wait_for(lambda: host.state()["notice"] == big, "the setting's paste turned down")
+    check(field().get("text") == "Portland", "a setting's paste over 4 KB: turned down, said at the settings' foot", failures)
+    keys("Escape")
+    wait_for(lambda: host.state()["settingsEditing"] == "", "the edit dropped")
+    check(host.state()["settingValues"].get("radioArea") == was, "Esc drops the edit, as before", failures)
+    host.call("close")
+
+    # ---- The playlist picker's box ----
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    keys("Down", "A")
+    wait_for(lambda: host.state()["pickerOpen"], "the picker")
+    host.call("typeKeys", "Ne")
+    keys("Backspace")
+    clip("w Mix")
+    keys("Ctrl+V")
+    wait_for(lambda: "new:Nw Mix" in host.state()["pickerChoices"], "the picker's paste")
+    clip("", "endless")
+    keys("Ctrl+V")
+    wait_for(lambda: field().get("refusal") == big, "the picker's paste turned down")
+    check(field().get("text") == "Nw Mix", "the picker's box: typing, Backspace, paste, and a paste turned down", failures)
+    keys("Escape")
+    host.call("close")
+
+    # ---- A setup window's field: what's typed and pasted reaches the window ----
+    host.call("openSetup", "spotify")
+    wait_for(lambda: host.state()["setupWindow"]["open"], "Spotify's setup window")
+    host.call("setupFocus", "spotifyClient")
+    host.call("typeKeys", "abc")
+    wait_for(lambda: host.state()["setupWindow"]["values"].get("spotifyClient") == "abc", "typed in the setup window")
+    client_id = "0123456789abcdef0123456789abcdef"
+    clip(client_id + "\n")
+    keys("Ctrl+A", "Ctrl+V")
+    wait_for(lambda: host.state()["setupWindow"]["values"].get("spotifyClient") == client_id, "pasted in the setup window")
+    wait_for(lambda: host.state()["setupWindow"]["notes"].get("spotifyClient") != "A Client ID is 32 letters and digits",
+             "the Client ID checked")
+    keys("Ctrl+Z")
+    wait_for(lambda: host.state()["setupWindow"]["values"].get("spotifyClient") == "abc", "undone in the setup window")
+    clip("", "endless")
+    keys("Ctrl+V")
+    wait_for(lambda: host.state()["setupWindow"]["footer"] == big, "the setup window's paste turned down")
+    check(True, "a setup window's field: typing, paste and undo reach the window, a paste turned down is said at its foot",
+          failures)
+    # Closed and opened again at once: its fields are new, and so is its foot.
+    host.call("close")
+    host.call("openSetup", "spotify")
+    wait_for(lambda: host.state()["setupWindow"]["open"], "Spotify's setup window again")
+    check(host.state()["setupWindow"]["footer"] != big,
+          "opened again, the setup window doesn't keep the paste's word: " + host.state()["setupWindow"]["footer"], failures)
+    host.call("close")
+    host.call("activatePopup")
+    for path in (clipboard, primary, mode, pid_file): path.unlink(missing_ok=True)
+
+
 def fresh_start_scenario(host, socket_path, failures):
     """Each time another plugin reloaded (the shell reloads them all), the bar
     showed only the music note until the panel was opened, while SiriusXM
@@ -6848,6 +7159,7 @@ def main():
                             elif name == "fresh-start": fresh_start_scenario(host, socket_path, failures)
                             elif name == "late-config": late_config_scenario(host, failures)
                             elif name == "private-files": private_files_scenario(host, failures)
+                            elif name == "guarded-fields": guarded_fields_scenario(host, output, failures)
                             elif name == "sources-switch": sources_switch_scenario(host, socket_path, failures)
                             elif name == "settings": settings_scenario(host, output, failures)
                             elif name == "setup": setup_scenario(host, output, failures)

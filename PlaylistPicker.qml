@@ -146,13 +146,14 @@ Item {
         }
       }
 
-      TextField {
+      GuardedField {
         id: field
+        objectName: "pickerField"
         width: parent.width
         placeholderText: root.playlists.length > 0 ? "Find a playlist, or name a new one" : "Name the new playlist"
         foreground: root.foreground
         font.family: root.fontFamily
-        Keys.onPressed: function(event) {
+        onKeyPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
             root.canceled()
           } else if (event.key === Qt.Key_Down) {
@@ -251,8 +252,8 @@ Item {
       Text {
         textFormat: Text.PlainText
         width: parent.width
-        text: "↑↓ choose · Enter add · Esc cancel"
-        color: root.dim
+        text: field.refusal !== "" ? field.refusal : "↑↓ choose · Enter add · Esc cancel"
+        color: field.refusal !== "" ? root.foreground : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }

@@ -119,14 +119,14 @@ Item {
         }
       }
 
-      TextField {
+      GuardedField {
         id: field
         objectName: "yearField"
         width: parent.width
         placeholderText: "A year from " + root.firstYear + " to " + root.lastYear
         foreground: root.foreground
         font.family: root.fontFamily
-        Keys.onPressed: function(event) {
+        onKeyPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
             root.canceled()
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -144,6 +144,18 @@ Item {
         width: parent.width
         text: root.warning
         color: Commons.Color.urgent
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      // A paste the field turned down.
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        visible: field.refusal !== ""
+        text: field.refusal
+        color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap

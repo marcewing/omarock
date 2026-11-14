@@ -48,6 +48,7 @@ mpd with mpd's `null` output, or a private PipeWire.
 | `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`, over the panel or in its own window), the info card (`i`), the playlist picker (`A`) |
 | `Hints.js` | Pure helpers: the hint line's keys, fitted to its fixed number of lines |
 | `Paging.js` | Pure helpers: where PgUp and PgDn take the cursor (the first or last row in full view, then a page on), for the panel's lists, the settings and the playlist picker |
+| `GuardedField.qml`, `Editing.js` | Every text field omarock has: Omarchy's, but read-only to Qt, always, so Qt never reads the clipboard into it; the field does its own typing, deleting, cut and undo (`Editing.js`, pure, tested), and a paste goes through `wl-paste`, at most 4 KB and 2 s. Its owner takes its keys through `keyPressed` (below, "The clipboard, read only on a paste") |
 | `Wave.js`, `WavyOutline.qml` | The search box's wavy outline while Time Machine keeps search to its year: the path (pure, tested), and the shape drawing it in the field's own colors |
 | `SettingsView.qml` | The settings (`,` or the gear): Settings.js as a form, each source with its service's state; settings go into settings.json, accounts, keys and the music folder through `tools/omarock-account` |
 | `Setup.js`, `SetupView.qml` | A piece's setup window (Set up…): how it works, what it needs, links, and its fields (checked live against the bridge for Apple Music); Start setup saves them through `tools/omarock-account`, then runs `./install PIECE` in a terminal with the window's choices (`--yes terms`, `--output NAME`) |
@@ -103,6 +104,36 @@ mpd with mpd's `null` output, or a private PipeWire.
   shown only while omarock-sxm answers, for the same reason. `--only outages`,
   with `fake_mpd`'s `fake_stream_starve` and `fake_down`, and `fake_sxm`'s
   `POST /v1/fake/offline`.
+- **The clipboard, read only on a paste.** On Qt 6.12 an editable text field
+  reads the whole clipboard each time any program sets it while the shell
+  has the keyboard (a panel open), shown or not, and a paste does the same,
+  with no limit on its size or on how long it takes (Qt's fix,
+  qtdeclarative bcbfae6761, isn't in Arch's Qt): a clipboard offering a huge
+  or endless text would freeze the shell, and the bar and every plugin with
+  it. So every field is a `GuardedField`, read-only to Qt, always, shown or
+  not, and edits itself. In the test VM, with gdb counting
+  `QQuickTextInput::q_canPasteChanged` and `QMimeData::text`, a clipboard
+  set with omarock's panel open was read 18 times on 1.0.6 and 3 times
+  with GuardedFields: the 3 are Omarchy's own fields, which read it with
+  omarock switched off too. Selecting, copying, Ctrl+A, the arrows, Home and End
+  stay Qt's. A paste (Ctrl+V, Ctrl+Shift+V, Shift+Insert, the Paste key; a
+  middle click for the selection) runs `wl-paste` under `timeout` (2 s, then
+  its process group is signaled, then killed) through `head -c 4097`: over
+  4096 bytes, or no answer, nothing is pasted and the field says why
+  (`refusal`). A paste whose field lost the keys, whose text changed, or
+  that a newer paste overtook is stopped and dropped. Omarchy's Super+C,
+  Super+V and Super+X send Ctrl+C, Ctrl+V and Ctrl+X to the panel
+  (Ctrl+Shift+C and Ctrl+Shift+V with a terminal behind it), so both forms
+  work: checked in the test VM's own shell, with fcitx5 running, with and
+  without a terminal behind the panel. A field's owner handles its keys in `onKeyPressed`, which runs before
+  the editing; `Keys.onPressed` on a GuardedField would run after it.
+  Compose-key sequences and input methods (fcitx5 typing Chinese, say) don't
+  reach a read-only field; dead keys do, and the field puts their accents on
+  (`Editing.compose`). `tests/fields.test.js` fails on any text field in the
+  QML that isn't `readOnly: true`; `--only guarded-fields` looks through the
+  live panel's and setup windows' items for any that isn't, and types,
+  deletes, undoes and pastes, with `fake-wl-paste` playing a normal, an
+  endless, a slow and a late clipboard.
 - **Opt-in sources.** A source's switch (`spotify`, `appleMusic`, `siriusXM`,
   `radio`) gives it a button and lets omarock talk to its service; switched off,
   omarock doesn't contact it.
@@ -191,6 +222,11 @@ everything else:
   /v1/fake/pair {code, tries, seconds}` opens a code, as the Mac's installer would.
   The test HOME starts with Spotify and SiriusXM "set up"; `--only setup` sets
   pieces up and removes them through the settings.
+- `fake-wl-paste` for the clipboard: it prints `$HOME/.fake-clipboard`
+  (`.fake-primary` for the selection), or, as `$HOME/.fake-clipboard-mode`
+  says, never ends ("endless"), doesn't answer ("slow") or answers a second
+  late ("late"). The harness's `WAYLAND_DISPLAY` names no display, and the
+  fake fails without one, as the real one does.
 
 The panel finds the fakes through settings that are in no settings screen,
 only in the file (Settings.js): `spotifyService`, `sxmService`, `radioBrowser`,
@@ -405,6 +441,15 @@ is installed by `./install spotify`. It ends with "0 failure(s)".
   jump.
 - A property whose name starts with `on` and a capital is taken for a signal
   handler's name, and silently never works.
+- **A read-only text field (Qt 6.12)** still selects, copies, moves its
+  cursor and says `accepted` on Enter, and its `insert()` and `remove()`
+  still work, keeping a binding on `text` and sending `textEdited`; its own
+  `undo()` doesn't. It draws no cursor, even with `cursorVisible` set, so
+  GuardedField has a cursor delegate. It turns down every ShortcutOverride
+  (a `Keys.onShortcutOverride` on it never hears one), so a `Shortcut` in
+  its window takes its keys: the panel's Shift+←→ seek is off while a field
+  has the keys. And a component's own `Keys.onPressed` runs before one set
+  where it's used.
 - Hyprland floats a Quickshell `FloatingWindow` whose minimum and maximum
   sizes are the same, and centers it. Without a fixed size it tiles. It decides
   as the window maps, so the keys window maps at a fixed size, then lets go of

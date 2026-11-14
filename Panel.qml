@@ -558,6 +558,8 @@ Panel {
   onColumnsChanged: root.schedulePreview()
   // Typing in the search box, where letters are text, not keys.
   readonly property bool typing: !!root.searchField && root.searchField.activeFocus
+  // A text field has the keys: the search box, or a setting being edited.
+  readonly property bool fieldHasKeys: root.typing || (root.settingsOpen && settingsView.editing !== "")
 
   // What Enter (→ out of the search box) does on a row of a kind, for the
   // hints; null where it does nothing.
@@ -4267,6 +4269,7 @@ Panel {
         onFolderRequested: function(path) { root.askMusicFolder(path) }
         onCloseRequested: root.closeSettings()
         onEditFinished: keyCatcher.forceActiveFocus()
+        onNoticeRequested: function(text) { root.say(text) }
       }
 
       PlaylistPicker {
@@ -4340,17 +4343,20 @@ Panel {
         }
       }
 
+      // Not while a text field has the keys, where Shift+←→ select: to Qt
+      // the fields are read-only (GuardedField), and Qt lets a Shortcut
+      // take any key from a read-only field.
       Shortcut {
         sequence: "Shift+Right"
         enabled: root.opened && !root.keysOpen && !root.pickerOpen && !root.confirmOpen && !root.infoOpen && !root.yearPickerOpen
-          && !(root.searchField && root.searchField.activeFocus)
+          && !root.fieldHasKeys
         onActivated: root.player.seekBy(10)
       }
 
       Shortcut {
         sequence: "Shift+Left"
         enabled: root.opened && !root.keysOpen && !root.pickerOpen && !root.confirmOpen && !root.infoOpen && !root.yearPickerOpen
-          && !(root.searchField && root.searchField.activeFocus)
+          && !root.fieldHasKeys
         onActivated: root.player.seekBy(-10)
       }
     }
@@ -4451,7 +4457,7 @@ Panel {
     onClicked: root.openYearPicker()
   }
 
-  component SearchBox: TextField {
+  component SearchBox: GuardedField {
     id: field
     placeholderText: root.radioMode ? "Stations: name, call sign, frequency or genre  ( / )"
       : root.sxmMode ? "SiriusXM channels: name, number, genre or artist  ( / )"
@@ -4487,7 +4493,8 @@ Panel {
     // At teardown the panel may already be gone.
     Component.onDestruction: if (root && root.searchField === field) root.searchField = null
     onTextChanged: root.setQuery(field.text)
-    Keys.onPressed: function(event) {
+    onRefusalChanged: if (field.refusal !== "") root.say(field.refusal)
+    onKeyPressed: function(event) {
       if (event.key === Qt.Key_Escape) {
         if (root.browsing) root.goBack()
         else if (field.text !== "") root.clearSearch()

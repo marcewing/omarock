@@ -1,0 +1,19 @@
+#!/bin/bash
+# The harness's wl-paste: never the real clipboard. It prints
+# $HOME/.fake-clipboard ($HOME/.fake-primary with --primary), as
+# `wl-paste --no-newline --type text` would, or acts out a clipboard that
+# misbehaves, as $HOME/.fake-clipboard-mode says: "endless" (text without
+# end), "slow" (no answer for 30 s), "late" (the text, a second late). It
+# writes its pid to $HOME/.fake-wl-paste.pid, so a scenario can see it end,
+# and fails as the real one does without WAYLAND_DISPLAY.
+[[ -n $WAYLAND_DISPLAY ]] || { echo "Failed to connect to a Wayland server" >&2; exit 1; }
+echo $$ >"$HOME/.fake-wl-paste.pid"
+file=$HOME/.fake-clipboard
+[[ " $* " == *" --primary "* ]] && file=$HOME/.fake-primary
+case $(cat "$HOME/.fake-clipboard-mode" 2>/dev/null) in
+  endless) exec yes "an endless clipboard" ;;
+  slow) exec sleep 30 ;;
+  late) sleep 1 ;;
+esac
+[[ -f $file ]] || { echo "Nothing is copied" >&2; exit 1; }
+exec cat "$file"
