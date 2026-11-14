@@ -4,7 +4,9 @@ Top 100 away from the real one: Billboard's year-end chart for 1985 as a
 page of wikitext, in the shapes Wikipedia's pages use (a rowspan, a row
 header, a sort value, a reference, a double A-side), with songs the fake
 bridge's catalog has (one only as a later version: 1989's), and some it
-doesn't. Every other year's page is missing. Every request is logged (path, query and Api-User-Agent).
+doesn't. 1984's is the same; 1982's is that chart in a page made to slow a
+parser down, and 1983's is too big to read (2 MiB). Every other year's page
+is missing. Every request is logged (path, query and Api-User-Agent).
 
     fake_charts.py <port-file> <request-log>
 """
@@ -40,9 +42,22 @@ CHART_1985 = """Some words about the year.
 {{reflist}}
 """
 
+# 1982's is 1985's table in a page made to slow a parser down: "{|" with no
+# table, then heading cells of comments never closed, "[[" never closed, a
+# long attribute, "<" with one ">" far on, web links never closed.
+HOSTILE_HEADING = ("|-\n! " + "<!--" * 40000 + " !! " + "[[" * 40000 + " !! " + "a=" * 40000 + "[[x|y]] | x\n"
+                   + "|-\n! " + "<" * 80000 + "> !! " + "[http://" * 10000 + " x !! " + "<ref" * 20000 + ">\n")
+CHART_1982 = ("{|" * 60000 + "\n" + "{|\n" * 30000
+              + CHART_1985.replace('|-\n! scope="col"', HOSTILE_HEADING + '|-\n! scope="col"', 1))
+
+# 1983's is too big to be a chart's page: 2 MiB, where the panel reads 1.
+CHART_1983 = CHART_1985 + "x" * (2 * 1024 * 1024)
+
 # 1984's is 1985's songs again: a chart no service has looked up yet.
 PAGES = {"Billboard Year-End Hot 100 singles of 1985": CHART_1985,
-         "Billboard Year-End Hot 100 singles of 1984": CHART_1985}
+         "Billboard Year-End Hot 100 singles of 1984": CHART_1985,
+         "Billboard Year-End Hot 100 singles of 1983": CHART_1983,
+         "Billboard Year-End Hot 100 singles of 1982": CHART_1982}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -54,7 +69,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # 1983's: the panel hangs up once it sees the length
 
     def do_GET(self):
         url = urlparse(self.path)

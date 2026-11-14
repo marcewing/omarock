@@ -74,6 +74,105 @@ test("wikitext as plain text", () => {
   assert.equal(TimeMachine.plainText("A<br />B &amp; C"), "A / B & C")
 })
 
+// The patterns plainText and splitCell used before, which can take minutes
+// on a hostile page: the new code must give what they gave, on text short
+// enough for them.
+function patternText(text) {
+  let s = String(text || "")
+  s = s.replace(/<!--[\s\S]*?-->/g, "")
+  s = s.replace(/<ref[^>]*\/>/gi, "").replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, "")
+  s = s.replace(/<br\s*\/?>/gi, " / ").replace(/<[^>]+>/g, "")
+  for (let guard = 0; guard < 10 && /\{\{[^{}]*\}\}/.test(s); guard++)
+    s = s.replace(/\{\{([^{}]*)\}\}/g, (all, body) => TimeMachine.plainText("{{" + body + "}}"))
+  s = s.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, "$1")
+  s = s.replace(/\[https?:\/\/[^\s\]]+\s([^\]]*)\]/g, "$1")
+  s = s.replace(/'{2,}/g, "")
+  s = s.replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&#0?39;/g, "'")
+    .replace(/&ndash;/g, "–").replace(/&mdash;/g, "—")
+  return s.replace(/\s+/g, " ").trim()
+}
+const patternAttributes = (s) => /^\s*([a-z-]+\s*=\s*("[^"]*"|'[^']*'|[^\s|]+)\s*)+$/i.test(s)
+
+test("plain text and attributes as the old patterns had them", () => {
+  let seed = 12345
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const text = (tokens, n) => Array.from({ length: Math.floor(random() * n) }, () => tokens[Math.floor(random() * tokens.length)]).join("")
+  const wiki = ["<!--", "-->", "--", "<!-->", "<ref", "<REF", "<Ref name=a", "/>", ">", "</ref>", "</REF>", "<", "[[", "]]", "]",
+    "[", "|", "[http://", "[https://", "[htt", " ", "\t", "\n", " ", "a", "B", "1", "'", "''", "<br>", "<BR />", "<br/",
+    "<br  >", "<br", '"', "=", "&amp;", "&#39;", "-", "<b>", "<>"]
+  const attrs = ["a", "Z", "-", "=", '"', "'", "|", " ", "\t", "x1", "[[", "]]", "!", " ", '="']
+  for (let i = 0; i < 20000; i++) {
+    const s = text(wiki, 14)
+    assert.equal(TimeMachine.plainText(s), patternText(s), JSON.stringify(s))
+    const a = text(attrs, 10)
+    assert.equal(TimeMachine.isAttributes(a), patternAttributes(a), JSON.stringify(a))
+  }
+})
+
+// Wikipedia's page comes over the network: one made to slow the parser
+// down reads as fast as any page its size, and the chart stops at its size.
+test("a hostile page reads in a moment, and gives no more than the chart's rows", () => {
+  const MiB = 1024 * 1024
+  const table = (rows) => '{| class="wikitable"\n|-\n' + rows + "\n|}"
+  const rows = (n, row) => Array.from({ length: n }, (_, i) => row(i)).join("\n|-\n")
+  const pages = {
+    "a comment never closed": table('|1 || "' + "<!--".repeat(MiB / 2) + '" || x'),
+    "{| on every line, no wikitable": "{|\n".repeat(MiB / 3) + table('|1 || "A" || B'),
+    "{| all along one line": "{|".repeat(MiB) + "\n" + table('|1 || "A" || B'),
+    "a long attribute": table("|1 || " + "a=".repeat(MiB) + 'b | "A" || B'),
+    "a long attribute, then a link": table("|1 || " + "a=".repeat(MiB) + '[[x|y]] | "A" || B'),
+    "attributes, then not": table("|1 || " + "a=b ".repeat(MiB / 2) + '! | "A" || B'),
+    "[[ never closed": table('|1 || "' + "[[".repeat(MiB) + '" || x'),
+    "[[ closed once, far on": table('|1 || "' + "[[a".repeat(MiB / 2) + ']x" || x'),
+    "<ref and one > at the end": table('|1 || "' + "<ref".repeat(MiB / 2) + '>" || x'),
+    "< and one > at the end": table('|1 || "' + "<".repeat(MiB * 2) + '>" || x'),
+    "<br and spaces": table('|1 || "' + "<br".repeat(MiB / 4) + " ".repeat(MiB) + '" || x'),
+    "web links never closed": table('|1 || "' + "[http://".repeat(MiB / 4) + ' x" || x'),
+    "{{ never closed": table('|1 || "' + "{{".repeat(MiB) + '" || x'),
+    "a cell spanning every row": table('|1 || "A" || rowspan="999999" | ' + "<!--".repeat(MiB / 2) + "\n|-\n"
+      + rows(200000, () => "|2")),
+    "200,000 rows": table(rows(200000, (i) => '|' + (i + 1) + '||"a"||b')),
+    "200,000 rows at one place": table(rows(200000, () => '|1||"a"||b')),
+    "a row of 500,000 cells": table("|1" + "||".repeat(500000))
+  }
+  for (const [name, page] of Object.entries(pages)) {
+    const started = Date.now()
+    const chart = TimeMachine.parseChart(page, TimeMachine.chartSize(1996))
+    const took = Date.now() - started
+    assert.ok(took < 200, name + ": " + took + " ms")
+    assert.ok(chart.length <= 110 && chart.every((e) => e.rank >= 1 && e.rank <= 100 && e.title.length <= 300 && e.artist.length <= 300),
+      name + ": " + chart.length + " rows")
+  }
+  assert.deepEqual(TimeMachine.parseChart(pages["200,000 rows"], 100).map((e) => e.rank), Array.from({ length: 100 }, (_, i) => i + 1))
+  assert.equal(TimeMachine.parseChart(pages["200,000 rows"], 30).length, 30)
+  assert.equal(TimeMachine.parseChart(pages["200,000 rows at one place"], 100).length, 110)
+  // Attributes are short: within a cell's first 500 characters.
+  assert.deepEqual(TimeMachine.parseChart(table("|1 || " + "a=".repeat(200) + 'b | "A" || B')).map((e) => e.title), ["A"])
+  assert.equal(TimeMachine.parseChart(pages["a long attribute"])[0].title.length, 300)
+})
+
+test("a chart read back from the cache is held to the same", () => {
+  const entry = (rank, title, artist) => ({ rank, title, titles: [title], artist })
+  const good = [entry(1, "A", "X"), { rank: 2, title: "B / C", titles: ["B", "C"], artist: "Y" }]
+  assert.deepEqual(TimeMachine.cachedChart({ chart: good }, 1996), good)
+  const bad = [entry(0, "A", "X"), entry(101, "A", "X"), entry(1.5, "A", "X"), entry("1", "A", "X"), entry(1, "", "X"),
+    entry(1, "A", ""), entry(1, "A".repeat(301), "X"), entry(1, "A", "X".repeat(301)), { rank: 1, titles: [3], artist: "X" },
+    null, 7, { rank: 1, titles: "A", artist: "X" }]
+  assert.deepEqual(TimeMachine.cachedChart({ chart: bad.concat(good) }, 1996), good)
+  assert.deepEqual(TimeMachine.cachedChart({ chart: [entry(40, "A", "X")] }, 1950), [])
+  const many = Array.from({ length: 200000 }, (_, i) => entry(1 + (i % 100), "A", "X"))
+  assert.equal(TimeMachine.cachedChart({ chart: many }, 1996).length, 110)
+  assert.deepEqual(TimeMachine.cachedChart({ chart: "no" }, 1996), [])
+  assert.deepEqual(TimeMachine.cachedChart(null, 1996), [])
+
+  const found = { 1: { kind: "song", id: "a", title: "A", lyrics: "long" }, 2: null, 31: { id: "b" }, x: { id: "c" }, 3: "no" }
+  for (let i = 32; i < 200000; i++) found[i] = { id: String(i) }
+  assert.deepEqual(TimeMachine.cachedFound({ found }, 1950), { 1: { kind: "song", id: "a", title: "A" }, 2: null })
+  assert.equal(Object.keys(TimeMachine.cachedFound({ found }, 1996)).length, 72)
+  assert.deepEqual(TimeMachine.cachedFound({ found: [1, 2] }, 1996), {})
+  assert.deepEqual(TimeMachine.cachedFound(null, 1996), {})
+})
+
 test("titles match across punctuation, case, accents and a version in brackets", () => {
   const key = TimeMachine.titleKey
   assert.equal(key("Macarena (Bayside Boys Mix)"), key("Macarena"))

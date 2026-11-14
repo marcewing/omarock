@@ -5367,6 +5367,45 @@ def time_machine_scenario(host, output, socket_path, failures):
           "a chart that can't be read says why: " + str(host.state()["browseInfo"].get("emptyText")), failures)
     host.call("back")
 
+    # Wikipedia's answer is read only so far: 1983's page is too big to be a
+    # chart's (2 MiB), turned down and not kept.
+    charts_dir = BRIDGE["config"].parents[2] / ".cache/omarock/charts"
+    pick("1983")
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1983" and not host.state()["browseLoading"], "1983's chart")
+    check("too big to read" in (host.state()["browseInfo"].get("emptyText") or "") and not (charts_dir / "1983.json").exists(),
+          "a page too big to be a chart's is turned down, and not kept: " + str(host.state()["browseInfo"].get("emptyText")), failures)
+    host.call("back")
+    # 1982's is 1985's chart in a page made to slow a parser down (the old
+    # one held the shell 7 s): it reads in a moment, the panel answering.
+    started = time.monotonic()
+    pick("1982")
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 100 of 1982" and len(host.state()["rows"]) == 14, "1982's chart",
+             timeout=10)
+    took = time.monotonic() - started
+    titles = [r.split(":", 1)[1] for r in host.state()["rows"][2:]]
+    check(titles[:6] == ["New Day Rising", "Celebrated Summer", "Keep On Loving You", "Careless Whisper",
+                         "Makes No Sense at All / Love Is All Around", "See a Little Light"] and took < 5,
+          f"a page made to slow the parser reads as 1985's chart, in {took:.1f} s: " + ", ".join(titles[:3]), failures)
+    host.call("back")
+
+    # A chart read back from the cache is held to its size: 1950's (a top
+    # 30) kept with 40 places, its songs known not to be on Apple Music.
+    charts_dir.mkdir(parents=True, exist_ok=True)
+    (charts_dir / "1950.json").write_text(json.dumps({"page": "1950", "chart": [
+        {"rank": n, "title": f"Old Song {n}", "titles": [f"Old Song {n}"], "artist": f"Old Band {n}"} for n in range(1, 41)]}))
+    (charts_dir / "apple-1950.json").write_text(json.dumps({"found": {str(n): None for n in range(1, 41)}}))
+    charts_asked, searches = len(chart_requests()), len(bridge_requests("/v1/search"))
+    pick("1950")
+    host.call("press", "T")
+    wait_for(lambda: host.state()["browse"] == "top100:Top 30 of 1950" and "found on" in host.state()["subtitles"][0], "1950's chart")
+    s = host.state()
+    check(len(s["rows"]) == 32 and s["rows"][-1] == "chartmiss:Old Song 30" and s["subtitles"][0] == "0 of 30 found on Apple Music"
+          and len(chart_requests()) == charts_asked and len(bridge_requests("/v1/search")) == searches,
+          "a cached chart past its size reads as its 30 places, from the cache alone: " + s["subtitles"][0], failures)
+    host.call("back")
+
     # Off: everything again, and no Top 100.
     pick("off")
     s = host.state()

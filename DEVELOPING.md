@@ -177,7 +177,8 @@ everything else:
 - `fake_sxm.py` for omarock-sxm;
 - `fake_radio.py` for Radio Browser;
 - `fake_charts.py` for Wikipedia: 1985's chart, in the shapes Wikipedia's pages
-  use, and no page for any other year;
+  use (1984's the same), 1982's in a page made to slow a parser down, 1983's
+  too big to read, and no page for any other year;
 - `fake-systemctl` and `fake-terminal`, first on the panel's PATH: a systemctl
   that only logs and keeps the units "enabled" in the test HOME, and Omarchy's
   terminal launcher, which plays a setup or removal out on the test HOME's
@@ -325,6 +326,20 @@ is installed by `./install spotify`. It ends with "0 failure(s)".
   `|1 || "Title" || Artist` rows, a rank as a row header on its own line
   (2021 on), artists spanning rows, sort values, references, double A-sides
   and ties (two songs at 50 in 1958, at 100 in 1969).
+- The page comes from the network and is parsed on the shell's one thread,
+  which every plugin and the bar share. So `ChartClient` reads at most 1 MiB
+  of it (curl's `--max-filesize`, which stops a transfer as it passes; the
+  real pages are 4 to 17 KB) in 20 s, and `parseChart` doesn't read it over
+  and over: the patterns it used before grew with the square of a page full
+  of `<!--` never closed, or of `{|` with no table (70 ms for 20 KB in the
+  shell, so minutes for 1 MiB), and now a hostile 1 MiB page takes under
+  0.1 s there. It reads no more rows than the chart has (and a
+  few for headings and ties), keeps places 1 to the chart's size, each title
+  and artist at most 300 characters, and looks for a cell's attributes in its
+  first 500; a chart or songs read back from `~/.cache/omarock/charts` are
+  held to the same. Rewritten so, it gives the charts the patterns gave for
+  all 77 years, and their text on 600,000 random strings
+  (`tests/timemachine.test.js` keeps 20,000).
 - Checked against the real catalogs (read-only searches): 99 of 1996's 100 and
   99 of 1965's 100 found on Apple Music, 15 of 15 sampled on Spotify. Some
   1960s songs are only there as later re-recordings, which then stand in.

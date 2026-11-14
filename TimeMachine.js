@@ -105,6 +105,136 @@ function filterLibraryGenre(data, year) {
 }
 
 // ---------- The chart, from Wikipedia's wikitext ----------
+//
+// The page comes from the network, so nothing here reads it over and over:
+// a page made to slow it down (a "<!--" never closed, a thousand "[[")
+// reads as fast as any page its size. The patterns left go back at most
+// over the run they've just read (spaces, or text without braces). The
+// chart stops at its size, and each title and artist at TEXT_MAX characters.
+
+// Wikipedia's longest are about 110.
+var TEXT_MAX = 300
+// A cell's attributes: 37 characters at most on Wikipedia's pages.
+var ATTRS_MAX = 500
+// A table's heading rows and a tie (two songs at 100 in 1969) take a few
+// rows past the chart's size: three at most on Wikipedia's pages.
+var EXTRA_ROWS = 10
+
+var REF = /<ref/gi
+var REF_END = /<\/ref>/gi
+var URL_END = /[\s\]]/g
+
+// JavaScript's \s, by character code.
+function isSpace(code) {
+  return (code >= 9 && code <= 13) || code === 32 || code === 160 || code === 5760 || (code >= 8192 && code <= 8202)
+    || code === 8232 || code === 8233 || code === 8239 || code === 8287 || code === 12288 || code === 65279
+}
+
+// Where pattern (a /g one) next matches at or after from; -1 if nowhere.
+function search(pattern, s, from) {
+  pattern.lastIndex = from
+  var match = pattern.exec(s)
+  return match ? match.index : -1
+}
+
+// Comments gone; one never closed stays, with what follows it.
+function dropComments(s) {
+  var out = []
+  var pos = 0
+  for (var open = s.indexOf("<!--"); open >= 0; open = s.indexOf("<!--", pos)) {
+    var close = s.indexOf("-->", open + 4)
+    if (close < 0) break
+    out.push(s.slice(pos, open))
+    pos = close + 3
+  }
+  out.push(s.slice(pos))
+  return out.join("")
+}
+
+// References gone: <ref … /> first, then <ref …>…</ref>.
+function dropRefs(s) {
+  var out = []
+  var pos = 0
+  var from = 0
+  for (var open = search(REF, s, 0); open >= 0; open = search(REF, s, from)) {
+    var gt = s.indexOf(">", open + 4)
+    if (gt < 0) break
+    if (gt > open + 4 && s.charAt(gt - 1) === "/") {
+      out.push(s.slice(pos, open))
+      pos = gt + 1
+    }
+    // A <ref before that > ends there too, as this one did.
+    from = gt + 1
+  }
+  out.push(s.slice(pos))
+  s = out.join("")
+  out = []
+  pos = 0
+  for (;;) {
+    var start = search(REF, s, pos)
+    var end = start < 0 ? -1 : s.indexOf(">", start + 4)
+    var close = end < 0 ? -1 : search(REF_END, s, end + 1)
+    if (close < 0) break
+    out.push(s.slice(pos, start))
+    pos = close + 6
+  }
+  out.push(s.slice(pos))
+  return out.join("")
+}
+
+// Line breaks as " / ", then the other tags gone. Up to the last >, each <
+// has a > ahead, so the pattern reads on to it once; after it, none closes.
+function dropTags(s) {
+  s = s.replace(/<br\s*\/?>/gi, " / ")
+  var last = s.lastIndexOf(">")
+  return s.slice(0, last + 1).replace(/<[^>]+>/g, "") + s.slice(last + 1)
+}
+
+// Links as their words: [[Page]], [[Page|words]].
+function linkWords(s) {
+  var out = []
+  var pos = 0
+  var from = 0
+  // The first | ahead (-1: none, -2: not looked for yet).
+  var bar = -2
+  for (var open = s.indexOf("[["); open >= 0; open = s.indexOf("[[", from)) {
+    var close = s.indexOf("]", open + 2)
+    if (close < 0) break
+    if (s.charAt(close + 1) === "]") {
+      if (bar !== -1 && bar < open + 2) bar = s.indexOf("|", open + 2)
+      out.push(s.slice(pos, open), s.slice(bar >= 0 && bar < close ? bar + 1 : open + 2, close))
+      pos = close + 2
+    }
+    // A [[ before that ] ends there too, as this one did.
+    from = close + 1
+  }
+  out.push(s.slice(pos))
+  return out.join("")
+}
+
+// Web links as their words: [https://… words].
+function urlWords(s) {
+  var out = []
+  var pos = 0
+  var from = 0
+  for (var open = s.indexOf("[http"); open >= 0; open = s.indexOf("[http", from)) {
+    var start = s.substr(open + 5, 3) === "://" ? open + 8 : s.substr(open + 5, 4) === "s://" ? open + 9 : -1
+    from = open + 1
+    if (start < 0) continue
+    // The address ends at a space (the words follow) or a ]; a link before
+    // it ends there too.
+    var stop = search(URL_END, s, start)
+    if (stop < 0) break
+    from = stop
+    if (stop === start || s.charAt(stop) === "]") continue
+    var close = s.indexOf("]", stop + 1)
+    if (close < 0) break
+    out.push(s.slice(pos, open), s.slice(stop + 1, close))
+    pos = from = close + 1
+  }
+  out.push(s.slice(pos))
+  return out.join("")
+}
 
 // Templates: the words of the ones that hold some ({{nowrap|…}},
 // {{sort|key|text}}), none of the others (references, notes).
@@ -120,57 +250,92 @@ function template(body) {
 // Wikitext as plain text: links as their words; templates, references,
 // comments and markup gone.
 function plainText(text) {
-  var s = String(text || "")
-  s = s.replace(/<!--[\s\S]*?-->/g, "")
-  s = s.replace(/<ref[^>]*\/>/gi, "").replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, "")
-  s = s.replace(/<br\s*\/?>/gi, " / ").replace(/<[^>]+>/g, "")
+  var s = dropTags(dropRefs(dropComments(String(text || ""))))
   // Innermost first, so a template inside another goes too.
   for (var guard = 0; guard < 10 && /\{\{[^{}]*\}\}/.test(s); guard++)
     s = s.replace(/\{\{([^{}]*)\}\}/g, function(all, body) { return template(body) })
-  s = s.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, "$1")
-  s = s.replace(/\[https?:\/\/[^\s\]]+\s([^\]]*)\]/g, "$1")
+  s = urlWords(linkWords(s))
   s = s.replace(/'{2,}/g, "")
   s = s.replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&#0?39;/g, "'")
     .replace(/&ndash;/g, "–").replace(/&mdash;/g, "—")
   return s.replace(/\s+/g, " ").trim()
 }
 
+// Whether a cell starts with attributes: name=value again and again, the
+// value in quotes or a word (rowspan="2", data-sort-value=Flack). A
+// pattern for it, a repeat inside a repeat, can take forever on a long
+// one; this reads it once, keeping each place it could be at (a bit each).
+function isAttributes(s) {
+  var START = 1, NAME = 2, BEFORE = 4, AFTER = 8, QUOTED = 16, QUOTED1 = 32, WORD = 64, DONE = 128
+  var at = START
+  for (var i = 0; i < s.length && at !== 0; i++) {
+    var code = s.charCodeAt(i)
+    var c = s.charAt(i)
+    var space = isSpace(code)
+    var letter = (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || code === 45
+    var next = 0
+    if (at & (START | DONE)) next |= space ? at & (START | DONE) : letter ? NAME : 0
+    if (at & NAME) next |= letter ? NAME : space ? BEFORE : c === "=" ? AFTER : 0
+    if (at & BEFORE) next |= space ? BEFORE : c === "=" ? AFTER : 0
+    if (at & AFTER) next |= space ? AFTER : c === "|" ? 0 : c === '"' ? QUOTED | WORD : c === "'" ? QUOTED1 | WORD : WORD
+    if (at & QUOTED) next |= c === '"' ? DONE : QUOTED
+    if (at & QUOTED1) next |= c === "'" ? DONE : QUOTED1
+    if (at & WORD) next |= space ? DONE : c === "|" ? 0 : letter ? WORD | NAME : WORD
+    at = next
+  }
+  return (at & (DONE | WORD)) !== 0
+}
+
 // A cell's attributes (rowspan="2", data-sort-value="…") and its text: the
-// attributes end at the first | outside links and templates.
+// attributes end at the first | outside links and templates, within
+// ATTRS_MAX characters.
 function splitCell(cell) {
   var depth = 0
-  for (var i = 0; i < cell.length; i++) {
-    var two = cell.substr(i, 2)
-    if (two === "[[" || two === "{{") { depth++; i++ }
-    else if (two === "]]" || two === "}}") { depth--; i++ }
-    else if (cell.charAt(i) === "|" && depth === 0) {
+  for (var i = 0; i < cell.length && i <= ATTRS_MAX; i++) {
+    var c = cell.charAt(i)
+    var d = cell.charAt(i + 1)
+    if ((c === "[" || c === "{") && d === c) { depth++; i++ }
+    else if ((c === "]" || c === "}") && d === c) { depth--; i++ }
+    else if (c === "|" && depth === 0) {
       var attrs = cell.slice(0, i)
-      if (/^\s*([a-z-]+\s*=\s*("[^"]*"|'[^']*'|[^\s|]+)\s*)+$/i.test(attrs)) return { attrs: attrs, text: cell.slice(i + 1) }
+      if (isAttributes(attrs)) return { attrs: attrs, text: cell.slice(i + 1) }
       break
     }
   }
   return { attrs: "", text: cell }
 }
 
-// The chart in a year's page: [{ rank, title, titles, artist }], in order.
-// Its first wikitable has a row per song: the number, the title in quotes
-// (two for a double A-side, "A" / "B"), the artist. A cell spanning rows
-// (rowspan, one artist's two songs in a row) counts for each.
-function parseChart(wikitext) {
+// Where the first wikitable starts: a "{|" with "wikitable" after it on its
+// line; -1 if there's none.
+function firstTable(text) {
+  // The first "wikitable" ahead (-2: not looked for yet).
+  var word = -2
+  for (var open = text.indexOf("{|"); open >= 0; ) {
+    var end = text.indexOf("\n", open)
+    if (end < 0) end = text.length
+    if (word !== -1 && word < open + 2) word = text.indexOf("wikitable", open + 2)
+    if (word < 0) return -1
+    if (word < end) return open
+    open = text.indexOf("{|", end)
+  }
+  return -1
+}
+
+// The chart in a year's page: [{ rank, title, titles, artist }], in order,
+// its places 1 to size (chartSize). Its first wikitable has a row per song:
+// the number, the title in quotes (two for a double A-side, "A" / "B"), the
+// artist. A cell spanning rows (rowspan, one artist's two songs in a row)
+// counts for each.
+function parseChart(wikitext, size) {
   var text = String(wikitext || "")
-  var start = text.search(/\{\|[^\n]*wikitable/)
+  var places = size > 0 ? size : 100
+  var start = firstTable(text)
   if (start < 0) return []
   var end = text.indexOf("\n|}", start)
-  var body = text.slice(start, end < 0 ? text.length : end)
+  var stop = end < 0 ? text.length : end
   var spans = [null, null, null]
   var out = []
-  body.split(/\n\|-[^\n]*/).slice(1).forEach(function(row) {
-    var cells = []
-    row.split("\n").forEach(function(line) {
-      var lead = line.charAt(0)
-      if ((lead !== "|" && lead !== "!") || line.charAt(1) === "+" || line.charAt(1) === "}") return
-      line.slice(1).split(lead === "!" ? /!!|\|\|/ : "||").forEach(function(cell) { cells.push(cell) })
-    })
+  function row(cells) {
     if (cells.length === 0) return
     var filled = []
     var next = 0
@@ -183,19 +348,71 @@ function parseChart(wikitext) {
       var cell = cells[next++]
       if (cell === undefined) { filled.push(""); continue }
       var parts = splitCell(cell)
+      var words = plainText(parts.text).slice(0, TEXT_MAX).trim()
       var span = parseInt((parts.attrs.match(/rowspan\s*=\s*["']?(\d+)/i) || [])[1], 10)
-      spans[col] = span > 1 ? { text: parts.text, left: span - 1 } : null
-      filled.push(parts.text)
+      spans[col] = span > 1 ? { text: words, left: span - 1 } : null
+      filled.push(words)
     }
-    var rank = parseInt(plainText(filled[0]), 10)
-    if (!(rank > 0)) return
-    var title = plainText(filled[1])
+    var rank = parseInt(filled[0], 10)
+    if (!(rank > 0 && rank <= places)) return
+    var title = filled[1]
     var titles = (title.match(/"[^"]+"/g) || []).map(function(t) { return t.slice(1, -1).trim() })
     if (titles.length === 0) titles = [title.replace(/"/g, "").trim()]
-    var artist = plainText(filled[2])
+    var artist = filled[2]
     if (titles[0] === "" || artist === "") return
     out.push({ rank: rank, title: titles.join(" / "), titles: titles, artist: artist })
-  })
+  }
+  // A row starts at each |- line, after the table's own line. No more rows
+  // are read than the chart has, and a few for headings and ties.
+  var cells = null
+  var rows = 0
+  for (var at = text.indexOf("\n", start); at >= 0 && at < stop; ) {
+    var next = text.indexOf("\n", at + 1)
+    if (next < 0 || next > stop) next = stop
+    var line = text.slice(at + 1, next)
+    var lead = line.charAt(0)
+    at = next
+    if (lead === "|" && line.charAt(1) === "-") {
+      if (cells) row(cells)
+      cells = ++rows > places + EXTRA_ROWS ? null : []
+      if (!cells) break
+    } else if (cells && (lead === "|" || lead === "!") && line.charAt(1) !== "+" && line.charAt(1) !== "}") {
+      line.slice(1).split(lead === "!" ? /!!|\|\|/ : "||").forEach(function(cell) { cells.push(cell) })
+    }
+  }
+  if (cells) row(cells)
+  return out
+}
+
+// A chart read back from the cache, held to what parseChart gives: places 1
+// to the year's chart size, short text, and no more rows.
+function cachedChart(data, year) {
+  var size = chartSize(year)
+  var rows = data && Array.isArray(data.chart) ? data.chart : []
+  var out = []
+  for (var i = 0; i < rows.length && out.length < size + EXTRA_ROWS; i++) {
+    var entry = rows[i]
+    if (!entry || typeof entry.rank !== "number" || entry.rank % 1 !== 0 || entry.rank < 1 || entry.rank > size
+        || !Array.isArray(entry.titles) || entry.titles.length === 0 || typeof entry.artist !== "string") continue
+    var titles = entry.titles
+    if (!titles.every(function(t) { return typeof t === "string" }) || titles[0] === "" || titles.join("").length > TEXT_MAX
+        || entry.artist === "" || entry.artist.length > TEXT_MAX) continue
+    out.push({ rank: entry.rank, title: titles.join(" / "), titles: titles.slice(), artist: entry.artist })
+  }
+  return out
+}
+
+// The songs found before, read back from the cache ({ found: rank -> song
+// or null }): only the chart's places, each song as keep() keeps it.
+function cachedFound(data, year) {
+  var found = data && data.found && typeof data.found === "object" ? data.found : {}
+  var out = {}
+  for (var rank = 1; rank <= chartSize(year); rank++) {
+    if (!Object.prototype.hasOwnProperty.call(found, rank)) continue
+    var song = found[rank]
+    if (song === null) out[rank] = null
+    else if (song && typeof song === "object" && !Array.isArray(song)) out[rank] = keep(song)
+  }
   return out
 }
 
@@ -368,7 +585,10 @@ if (typeof module !== "undefined") {
     filterGenre: filterGenre,
     filterLibraryGenre: filterLibraryGenre,
     plainText: plainText,
+    isAttributes: isAttributes,
     parseChart: parseChart,
+    cachedChart: cachedChart,
+    cachedFound: cachedFound,
     titleKey: titleKey,
     artistNames: artistNames,
     searchText: searchText,

@@ -14,6 +14,10 @@ Item {
   // Wikipedia, or the harness's stand-in.
   property string source: "https://en.wikipedia.org"
   property string cacheDir: ""
+  // The most read of an answer or a cache file (a year's page is under 20
+  // KB), and how long Wikipedia has to answer.
+  property int maxBytes: 1048576
+  property int maxSeconds: 20
   // Searches in flight at once: Apple Music's, and Spotify's (its Web API
   // allows a development app fewer calls).
   property int parallel: 3
@@ -35,43 +39,112 @@ Item {
   function chart(year, callback) {
     if (Store.charts[year]) { callback(Store.charts[year], ""); return }
     root.readCache(year + ".json", function(data) {
-      if (data && data.chart && data.chart.length > 0) {
-        Store.charts[year] = data.chart
-        callback(data.chart, "")
+      var cached = TimeMachine.cachedChart(data, year)
+      if (cached.length > 0) {
+        Store.charts[year] = cached
+        callback(cached, "")
         return
       }
       root.fetchChart(year, callback)
     })
   }
 
+  // Wikipedia's page for a year, one at a time; asked for again while it's
+  // on its way, the answer goes to both.
+  property var fetches: []
   function fetchChart(year, callback) {
-    var page = TimeMachine.chartPage(year)
+    if (Store.charts[year]) { callback(Store.charts[year], ""); return }
+    var waiting = (fetcher.current ? [fetcher.current] : []).concat(root.fetches)
+    for (var i = 0; i < waiting.length; i++)
+      if (waiting[i].year === year) { waiting[i].callbacks.push(callback); return }
+    root.fetches = root.fetches.concat([{ year: year, callbacks: [callback] }])
+    Qt.callLater(root.nextFetch)
+  }
+  function nextFetch() {
+    if (fetcher.current || root.fetches.length === 0) return
+    fetcher.current = root.fetches[0]
+    root.fetches = root.fetches.slice(1)
+    fetcher.code = -1
+    fetcher.body = null
+    fetcher.late = false
     var url = root.source + "/w/api.php?action=parse&format=json&formatversion=2&redirects=1&prop=wikitext&page="
-      + encodeURIComponent(page)
-    var request = new XMLHttpRequest()
-    var timeout = Qt.createQmlObject("import QtQuick; Timer { interval: 20000 }", root)
-    timeout.triggered.connect(function() { request.abort() })
-    request.onreadystatechange = function() {
-      // Gone with a plugin reload, as in the other clients.
-      if (request.readyState !== XMLHttpRequest.DONE || !root || typeof root.fetchChart !== "function") return
-      timeout.destroy()
-      var data = null
-      try { data = request.responseText ? JSON.parse(request.responseText) : null } catch (e) {}
-      if (request.status === 0) { callback(null, "Can't reach Wikipedia for " + year + "'s chart"); return }
+      + encodeURIComponent(TimeMachine.chartPage(fetcher.current.year))
+    // curl stops at maxBytes (63), as they arrive since curl 8.4, and at
+    // maxSeconds (28). Wikipedia asks API clients to say who they are.
+    fetcher.command = ["curl", "-s", "--proto", "=http,https", "--max-filesize", String(root.maxBytes),
+      "--max-time", String(root.maxSeconds), "-A", root.userAgent, "-H", "Api-User-Agent: " + root.userAgent, "--url", url]
+    fetcher.running = true
+    fetchDeadline.restart()
+  }
+  Process {
+    id: fetcher
+    property var current: null
+    // Its exit code (-1 until it exits) and what it wrote (null until it ends).
+    property int code: -1
+    property var body: null
+    property bool late: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        fetcher.body = text || ""
+        fetcher.finish()
+      }
+    }
+    stderr: StdioCollector {}
+    onExited: function(exitCode) {
+      fetcher.code = exitCode
+      fetcher.finish()
+    }
+    function finish() {
+      if (fetcher.code < 0 || fetcher.body === null || !fetcher.current) return
+      fetchDeadline.stop()
+      var fetch = fetcher.current
+      var body = fetcher.body
+      fetcher.current = null
+      fetcher.body = null
+      Qt.callLater(root.nextFetch)
+      root.fetched(fetch, fetcher.late ? 28 : fetcher.code, body)
+    }
+  }
+  // curl's own deadline, should it not keep it.
+  Timer {
+    id: fetchDeadline
+    interval: (root.maxSeconds + 5) * 1000
+    onTriggered: if (fetcher.running) {
+      fetcher.late = true
+      fetcher.running = false
+    }
+  }
+
+  // What came of a fetch (curl's exit code, and the answer): the chart, or
+  // why not, for each that asked.
+  function fetched(fetch, code, text) {
+    var year = fetch.year
+    var page = TimeMachine.chartPage(year)
+    var chart = null
+    var error = ""
+    var data = null
+    if (code === 63 || text.length > root.maxBytes)
+      error = "Wikipedia's page for " + year + "'s chart is too big to read"
+    else if (code !== 0) error = "Can't reach Wikipedia for " + year + "'s chart"
+    else {
+      try { data = text ? JSON.parse(text) : null } catch (e) {}
       if (data && data.error)
-        return callback(null, data.error.code === "missingtitle" ? "Wikipedia has no page for " + year + "'s chart"
-          : "Wikipedia said: " + (data.error.info || data.error.code))
-      var chart = data && data.parse ? TimeMachine.parseChart(data.parse.wikitext) : []
-      if (chart.length < 10) { callback(null, "Couldn't read " + year + "'s chart on Wikipedia (" + page + ")"); return }
+        error = data.error.code === "missingtitle" ? "Wikipedia has no page for " + year + "'s chart"
+          : "Wikipedia said: " + String(data.error.info || data.error.code).slice(0, 200)
+      else {
+        chart = data && data.parse ? TimeMachine.parseChart(data.parse.wikitext, TimeMachine.chartSize(year)) : []
+        if (chart.length < 10) {
+          chart = null
+          error = "Couldn't read " + year + "'s chart on Wikipedia (" + page + ")"
+        }
+      }
+    }
+    if (chart) {
       Store.charts[year] = chart
       root.writeCache(year + ".json", { page: page, chart: chart })
-      callback(chart, "")
     }
-    request.open("GET", url)
-    // Wikipedia asks API clients to say who they are.
-    request.setRequestHeader("Api-User-Agent", root.userAgent)
-    request.send()
-    timeout.start()
+    fetch.callbacks.forEach(function(callback) { callback(chart, error) })
   }
 
   // Look for the chart's songs on target (an AppleClient), those not known
@@ -142,10 +215,12 @@ Item {
   function readFound(key, then) {
     var state = Store.states[key] || (Store.states[key] = { looking: false, error: "", read: false })
     if (state.read) { then(); return }
+    var year = parseInt(key.slice(key.indexOf(":") + 1), 10)
     root.readCache(key.replace(":", "-") + ".json", function(data) {
-      if (!state.read && data && data.found) {
+      if (!state.read && data) {
+        var cached = TimeMachine.cachedFound(data, year)
         var have = Store.found[key] || (Store.found[key] = {})
-        for (var rank in data.found) if (have[rank] === undefined) have[rank] = data.found[rank]
+        for (var rank in cached) if (have[rank] === undefined) have[rank] = cached[rank]
       }
       state.read = true
       then()
@@ -195,7 +270,7 @@ Item {
     if (reader.running || root.reads.length === 0) return
     reader.current = root.reads[0]
     root.reads = root.reads.slice(1)
-    reader.command = ["cat", reader.current.path]
+    reader.command = ["head", "-c", String(root.maxBytes), reader.current.path]
     reader.running = true
   }
   Process {
