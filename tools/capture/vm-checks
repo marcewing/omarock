@@ -233,7 +233,8 @@ limit=120 run fw-again spotify
 check "the next ./install spotify takes them out first, and the marker ($(tagged) left)" \
   bash -c "(( \$(sudo ufw status numbered | grep -c '# omarock-pairing') == 0 )) && [[ ! -f '$marker' ]] && grep -q 'An earlier pairing may have left' '$work/logs/fw-again.log'"
 pair_crash b
-sudo systemctl start omarock-pairing-firewall.service
+# --wait: a simple service is "started" at once; the check needs its run over.
+sudo systemctl start --wait omarock-pairing-firewall.service
 check "the root timer's run takes out every tagged rule ($(tagged) left)" [ "$(tagged)" = 0 ]
 pair_crash c
 sudo systemctl stop omarock-pairing-firewall.timer
