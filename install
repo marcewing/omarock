@@ -1149,6 +1149,17 @@ sp_up() { [[ -n $(sp_health) ]]; }
 # PROTO", as ufw takes it after allow and delete allow.
 added_rules=()
 firewall_timer=omarock-pairing-firewall
+# Each rule carries this comment, so whatever closes them takes out every rule
+# a pairing opened, whichever run opened it. The marker file says some may be
+# open: ufw keeps rules across a reboot, and the root timer isn't kept.
+pairing_tag=omarock-pairing
+pairing_marker=$state_dir/pairing-firewall
+pairing_close="ufw status numbered | sed -n 's/^\\[ *\\([0-9]*\\)\\].*# $pairing_tag *\$/\\1/p' | sort -rn | while read -r n; do ufw --force delete \"\$n\" >/dev/null; done"
+close_pairing_rules() {  # leftovers from an earlier pairing, if the marker says so
+  [[ -f $pairing_marker ]] || return 0
+  explain "An earlier pairing may have left Soloist's firewall rules open (the machine restarted during it, say). They come out now."
+  run sudo sh -c "$pairing_close" && rm -f "$pairing_marker"
+}
 lan_networks() {
   local dev
   dev=$(ip -j route show default 2>/dev/null | jq -r '.[0].dev // empty')
@@ -1161,9 +1172,9 @@ lan_networks() {
   } | awk '!seen[$0]++' | { grep -qs '^IPV6=yes' /etc/default/ufw && cat || grep -v ':'; }
 }
 cleanup_firewall() {
-  local r
-  for r in "${added_rules[@]}"; do run sudo ufw delete allow $r >/dev/null; done
-  ((${#added_rules[@]})) && sudo systemctl stop "$firewall_timer.timer" 2>/dev/null
+  ((${#added_rules[@]})) || return 0
+  run sudo sh -c "$pairing_close" && rm -f "$pairing_marker"
+  sudo systemctl stop "$firewall_timer.timer" 2>/dev/null
   added_rules=()
 }
 # How this run went, into setup.json for omarock's settings: running while it
@@ -1236,6 +1247,7 @@ step_spotify() {
     ok "Soloist is signed in to your account"
   else
     explain "Now you must pair Soloist with your account."
+    close_pairing_rules
     if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
       local port nets=()
       port=$(ss -ltnpH 2>/dev/null | awk '/"soloist"/ && $4 !~ /^127\./ {n = split($4, a, ":"); print a[n]; exit}')
@@ -1248,22 +1260,24 @@ step_spotify() {
         explain "Your firewall (ufw) hides Soloist from the network, so we will need to open it temporarily for the pairing. This opens its port ($port/tcp) and mDNS (5353/udp) to your local network only (${nets[*]}) while you pair. The ports will close again afterwards, or in 11 minutes at the latest, even if this window is closed."
       fi
       if [[ -n $port ]] && ((${#nets[@]})) && confirm "Open them for the pairing (sudo ufw)?"; then
-        local net spec rule script=""
+        local net spec rule
+        # Root takes them out again even if this terminal is closed (sudo
+        # couldn't ask for the password then): armed before the first one
+        # goes in, and it takes out every tagged rule, so a run that replaces
+        # this timer loses none.
+        sudo systemctl stop "$firewall_timer.timer" 2>/dev/null
+        mkdir -p "$state_dir" && date +%s >"$pairing_marker"
+        run sudo systemd-run --quiet --collect --unit="$firewall_timer" --on-active=11min /bin/sh -c "$pairing_close" \
+          || note "if this window is closed before the pairing ends, the rules stay: ./install spotify takes them out next time"
         for net in "${nets[@]}"; do
           for spec in "$port tcp" "5353 udp"; do
             rule="from $net to any port ${spec% *} proto ${spec#* }"
             # One that was there already stays, and isn't taken out after.
             sudo ufw show added 2>/dev/null | matches -xF "ufw allow $rule" && continue
-            run sudo ufw allow $rule >/dev/null && added_rules+=("$rule") && script+="ufw delete allow $rule >/dev/null; "
+            run sudo ufw allow $rule comment "$pairing_tag" >/dev/null && added_rules+=("$rule")
           done
         done
-        # Root takes them out again even if this terminal is closed (sudo
-        # couldn't ask for the password then).
-        if [[ -n $script ]]; then
-          sudo systemctl stop "$firewall_timer.timer" 2>/dev/null
-          run sudo systemd-run --quiet --collect --unit="$firewall_timer" --on-active=11min /bin/sh -c "$script" \
-            || note "if this window is closed before the pairing ends, the rules stay: sudo ufw status numbered"
-        fi
+        ((${#added_rules[@]})) || { sudo systemctl stop "$firewall_timer.timer" 2>/dev/null; rm -f "$pairing_marker"; }
       fi
     fi
     explain $'Now, open Spotify on your phone or computer, on this network,\n'"then open Connect to a device, pick $(hostname), and play something."
@@ -1676,6 +1690,7 @@ un_plugin() {
 # accounts and keys go too, its switch goes off, and a no stops the run.
 un_spotify() {
   local paths keys=() with=${1:-}
+  close_pairing_rules
   [[ -n $with ]] && keys=("$config/spotify.json" "$config/soloist-key" "$config/spotify-token.json")
   mapfile -t paths < <(present "$units/omarock-spotify.service" "$units/omarock-soloist.service" "$share/spotify" \
     "$HOME/.local/lib/omarock-soloist" "$HOME/.local/share/omarock-soloist" "$HOME/.cache/omarock-soloist" "${keys[@]}")
@@ -1728,6 +1743,31 @@ un_sxm() {
 
 # ./install --remove apple-music: the bridge's address and token here, and
 # the patches that were for its stream. The bridge on the Mac stays.
+# The bridge's stream in mpd (its address has a secret, which stays good for as
+# long as the Mac keeps its token): out of the queue, which mpd also keeps in
+# its state file; the stored playlists that hold it are named. Matched by the
+# secret, which travels in the environment, never on a command line.
+streams_left=()
+un_streams() {
+  local stream pos name
+  stream=$(jq -r '.stream // empty' "$config/apple.json" 2>/dev/null)
+  [[ -z $stream ]] && stream=$(setting appleStream "")
+  [[ $stream == http*://*/omarock-?*.ogg ]] || return 0
+  command -v mpc >/dev/null && mpc status >/dev/null 2>&1 || return 0
+  export OMAROCK_SECRET="/${stream##*/}"
+  mapfile -t pos < <(mpc -f '%position% %file%' playlist 2>/dev/null \
+    | awk 'index($2, ENVIRON["OMAROCK_SECRET"]) {print $1}' | sort -rn)
+  if ((${#pos[@]})); then
+    explain "mpd's queue has the Mac's stream (its address has a secret): it comes out."
+    for name in "${pos[@]}"; do run mpc -q del "$name"; done
+  fi
+  while IFS= read -r name; do
+    mpc playlist "$name" 2>/dev/null | awk 'index($0, ENVIRON["OMAROCK_SECRET"]) {found = 1} END {exit !found}' && streams_left+=("$name")
+  done < <(mpc lsplaylists 2>/dev/null)
+  unset OMAROCK_SECRET
+  ((${#streams_left[@]})) && note "mpd's playlists with the Mac's stream in them (its address has a secret): ${streams_left[*]}. Take it out of them, or delete them, if mpd will ever be open to others"
+  return 0
+}
 un_apple() {
   local token paths flac mpris
   token=$(setting appleTokenFile "")
@@ -1745,6 +1785,7 @@ un_apple() {
   explain "This deletes the bridge's address and its token here$( ((${#flac[@]} + ${#mpris[@]})) && echo ", and omarock's patched builds for the bridge's stream: mpd and the media keys go back to Arch's own (mpd restarts, so anything playing stops for a moment)"):"
   listing "${paths[@]}" "${flac[@]}" "${mpris[@]}"
   confirm "Remove Apple Music from this machine?" || return 1
+  un_streams
   run rm -rf "${paths[@]}" "${flac[@]}" "${mpris[@]}"
   if ((${#flac[@]} + ${#mpris[@]})); then
     rmdir "$units/mpd.service.d" "$units/mpd-mpris.service.d" 2>/dev/null
@@ -1963,6 +2004,7 @@ un_mpd() {
     && note "the patched mpd-mpris you kept still looks for mpd on the socket: ./install --remove apple-music takes it out"
   if [[ -n $gone ]] && ! grep -q '^[[:space:]]*bind_to_address' "$conf"; then
     note "mpd listens where it does by default now: port 6600 on every network interface, and its socket"
+    ((${#streams_left[@]})) && bad "and anyone who reaches it can read the Mac's stream address in mpd's playlists ${streams_left[*]}: take it out of them, or delete them"
   fi
 }
 
@@ -2015,6 +2057,7 @@ uninstall() {
   un_sxm
   un_patches
   un_bus
+  un_streams
   un_mpd
   un_config
   un_history

@@ -208,8 +208,39 @@ check "it's installed and checked" [ "$(installed built)" = $((now - 60)) -a "$(
 "$repo/tools/omarock-doctor" >"$work/logs/doctor.log" 2>&1
 check "the doctor: only your account reaches Soloist's control port" grep -q "only your account reaches Soloist's control port" "$work/logs/doctor.log"
 
+echo "== the pairing's firewall rules (tagged; closed even after a crash and a reboot)"
+sudo ufw status | matches '^Status: active' || { sudo ufw allow 22/tcp >/dev/null; sudo ufw --force enable >/dev/null; }
+tagged() { sudo ufw status numbered | grep -c '# omarock-pairing' || true; }
+marker=${XDG_STATE_HOME:-$HOME/.local/state}/omarock/pairing-firewall
+printf '%s\n' "Install this Soloist?=n" "Open them for the pairing (sudo ufw)?=y" "Sign in now?=n" >"$work/answers-fw"
+pair_crash() {  # NAME: ./install spotify opens the rules, then dies (SIGKILL: no traps) during the wait
+  local pid
+  (cd "$repo" && OMAROCK_INSTALL_ANSWERS=$work/answers-fw exec ./install spotify) >"$work/logs/fw-$1.log" 2>&1 &
+  pid=$!
+  for _ in $(seq 60); do sleep 1; (($(tagged) > 0)) && break; done
+  sleep 2
+  kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+}
+pair_crash a
+check "the pairing opens tagged rules, its root timer is armed and the marker written ($(tagged) rules)" \
+  bash -c "(( \$(sudo ufw status numbered | grep -c '# omarock-pairing') > 0 )) && [[ -f '$marker' ]] && systemctl is-active -q omarock-pairing-firewall.timer"
+sudo systemctl stop omarock-pairing-firewall.timer  # as a reboot would drop it
+"$repo/tools/omarock-doctor" >"$work/logs/doctor-fw.log" 2>&1 || true
+check "after a crash and a reboot the rules stay, and the doctor says so" \
+  bash -c "(( \$(sudo ufw status numbered | grep -c '# omarock-pairing') > 0 )) && grep -q \"firewall rules may still be open\" '$work/logs/doctor-fw.log'"
+printf '%s\n' "Install this Soloist?=n" "Open them for the pairing (sudo ufw)?=n" "Sign in now?=n" >"$work/answers-fw-again"
+limit=120 run fw-again spotify
+check "the next ./install spotify takes them out first, and the marker ($(tagged) left)" \
+  bash -c "(( \$(sudo ufw status numbered | grep -c '# omarock-pairing') == 0 )) && [[ ! -f '$marker' ]] && grep -q 'An earlier pairing may have left' '$work/logs/fw-again.log'"
+pair_crash b
+sudo systemctl start omarock-pairing-firewall.service
+check "the root timer's run takes out every tagged rule ($(tagged) left)" [ "$(tagged)" = 0 ]
+pair_crash c
+sudo systemctl stop omarock-pairing-firewall.timer
+
 echo "== taken off again"
 for p in siriusxm spotify; do : >"$work/answers-rm-$p"; run_y rm-$p --remove $p; done
+check "--remove spotify took out a pairing's leftover rules ($(tagged) left)" [ "$(tagged)" = 0 ]
 printf '%s\n' "Take omarock off=y" >"$work/answers-uninstall"; run_y uninstall --uninstall
 rm -f ~/Downloads/soloist_release_x86_64.tar.gz
 

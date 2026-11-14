@@ -234,6 +234,10 @@ if [[ $(setting spotify false) == true ]] || [[ -e $HOME/.config/systemd/user/om
       fi
     fi
   fi
+  pairing=${XDG_STATE_HOME:-$HOME/.local/state}/omarock/pairing-firewall
+  if [[ -f $pairing ]]; then
+    bad "a pairing's firewall rules may still be open (since $(date -d "@$(<"$pairing")" '+%b %-d %H:%M' 2>/dev/null)): ./install spotify takes them out (sudo ufw status numbered lists them, tagged omarock-pairing)"
+  fi
   if uid=$(held_by_other "$(setting spotifyService http://127.0.0.1:8730)"); then
     bad "another account (uid $uid) holds omarock-spotify's port, so omarock doesn't use it: it could have bound it while omarock-spotify was down"
   fi
