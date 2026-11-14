@@ -56,7 +56,12 @@ Item {
   }
 
   visible: open
+  // From the first key typed the card stays where it is, so the lines that
+  // come and go under the field never move it.
+  property real cardHeld: -1
+
   onOpenChanged: if (open) {
+    root.cardHeld = -1
     field.text = ""
     Qt.callLater(function() { if (root.open) field.forceActiveFocus() })
   }
@@ -75,7 +80,10 @@ Item {
     id: card
     width: Math.min(parent.width - Style.space(24), Style.space(440))
     height: Math.min(parent.height - Style.space(24), card.contentTopInset + card.contentBottomInset + body.implicitHeight)
-    anchors.centerIn: parent
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: root.cardHeld >= 0
+      ? Math.max(Style.space(12), Math.min(root.cardHeld, parent.height - Style.space(12) - height))
+      : Math.round((parent.height - height) / 2)
     color: Commons.Color.popups.background
     borderSpec: Border.flat(Commons.Color.accent, Style.normalBorderWidth)
     padding: Style.space(16)
@@ -126,6 +134,7 @@ Item {
         placeholderText: "A year from " + root.firstYear + " to " + root.lastYear
         foreground: root.foreground
         font.family: root.fontFamily
+        onTextChanged: if (root.open && text !== "" && root.cardHeld < 0) root.cardHeld = card.y
         onKeyPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
             root.canceled()

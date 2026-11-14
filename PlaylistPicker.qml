@@ -21,6 +21,12 @@ Item {
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
   property int index: 0
+  // From the first key typed the box stays as it is: the card where it was,
+  // the list as tall as it was (it scrolls within that; it only grows), so
+  // the field never moves under the typing.
+  property real listHeld: 0
+  property real cardHeld: -1
+  readonly property real listCap: Math.min(Style.space(300), Math.max(Style.space(80), root.height - Style.space(260)))
 
   signal picked(string name, bool isNew)
   signal canceled()
@@ -77,6 +83,8 @@ Item {
     field.text = ""
     root.index = 0
     root.newChosen = false
+    root.listHeld = 0
+    root.cardHeld = -1
     Qt.callLater(function() { if (root.open) field.forceActiveFocus() })
   }
   // A new name moves the cursor to the first match, or stays on the new row.
@@ -102,7 +110,10 @@ Item {
     id: card
     width: Math.min(parent.width - Style.space(24), Style.space(440))
     height: Math.min(parent.height - Style.space(24), card.contentTopInset + card.contentBottomInset + body.implicitHeight)
-    anchors.centerIn: parent
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: root.cardHeld >= 0
+      ? Math.max(Style.space(12), Math.min(root.cardHeld, parent.height - Style.space(12) - height))
+      : Math.round((parent.height - height) / 2)
     color: Commons.Color.popups.background
     borderSpec: Border.flat(Commons.Color.accent, Style.normalBorderWidth)
     padding: Style.space(16)
@@ -153,6 +164,10 @@ Item {
         placeholderText: root.playlists.length > 0 ? "Find a playlist, or name a new one" : "Name the new playlist"
         foreground: root.foreground
         font.family: root.fontFamily
+        onTextChanged: if (root.open && text !== "" && root.cardHeld < 0) {
+          root.listHeld = list.height
+          root.cardHeld = card.y
+        }
         onKeyPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
             root.canceled()
@@ -173,8 +188,11 @@ Item {
 
       ListView {
         id: list
+        objectName: "pickerList"
         width: parent.width
-        height: Math.min(contentHeight, Style.space(300), Math.max(Style.space(80), root.height - Style.space(260)))
+        readonly property real wanted: Math.min(contentHeight, root.listCap)
+        height: Math.min(root.listCap, Math.max(root.listHeld, wanted))
+        onWantedChanged: if (root.cardHeld >= 0 && wanted > root.listHeld) root.listHeld = wanted
         visible: root.choices.length > 0
         clip: true
         spacing: Style.space(2)

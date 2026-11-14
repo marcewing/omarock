@@ -3218,13 +3218,19 @@ def playlists_scenario(host, output, socket_path, failures):
     host.call("press", "Down")
     host.call("press", "A")
     wait_for(lambda: host.state()["pickerOpen"], "picker")
+    host.settle(.3)
     s = host.state()
     check(s["pickerTitle"] == "Basement Tapes" and s["pickerChoices"] == ["Late Night", "new:"],
           "A opens the picker for the album: " + str(s["pickerChoices"]), failures)
+    opened_at, opened_list = s["pickerFieldY"], s["pickerListHeight"]
     host.call("typeKeys", "Road Trip")
     host.settle(.3)
     s = host.state()
     check(s["pickerChoices"] == ["new:Road Trip"], "a new name offers a new playlist", failures)
+    # Fewer rows: the box keeps its size and place, so the field doesn't move.
+    check(s["pickerFieldY"] == opened_at and opened_at > 0 and s["pickerListHeight"] == opened_list,
+          "the field and the list stay put as rows go: field %s, list %s (opened %s, %s)"
+          % (s["pickerFieldY"], s["pickerListHeight"], opened_at, opened_list), failures)
     host.grab(output / "compact-picker.png")
     host.call("press", "Return")
     picked(host, socket_path, "Road Trip", 6)
@@ -5096,11 +5102,24 @@ def time_machine_scenario(host, output, socket_path, failures):
     s = host.state()
     check(s["timeMachine"]["picker"]["warning"] == "Anything in the queue from after the year you enter will be removed from it.",
           "t asks for a year, warning that the queue's songs from after it will go: " + s["timeMachine"]["picker"]["warning"], failures)
+    opened_at = s["timeMachine"]["picker"]["fieldY"]
+    # 1900 adds a line under the field (the years it goes back to); the field
+    # stays where it was as the lines under it come and go.
+    host.call("typeKeys", "1900")
+    host.settle(.3)
+    s = host.state()
+    check(s["timeMachine"]["picker"]["fieldY"] == opened_at and opened_at > 0,
+          "a line coming under the field doesn't move it: %s, opened at %s" % (s["timeMachine"]["picker"]["fieldY"], opened_at), failures)
+    for _ in range(4):
+        host.call("press", "Backspace")
     host.call("typeKeys", "1988")
     wait_for(lambda: host.state()["timeMachine"]["picker"]["valid"], "1988 typed")
+    host.settle(.3)
     s = host.state()
     check(s["timeMachine"]["picker"]["warning"] == "2 songs in the queue are from after 1988, and will be removed from it.",
           "with a year typed, it says how many: " + s["timeMachine"]["picker"]["warning"], failures)
+    check(s["timeMachine"]["picker"]["fieldY"] == opened_at,
+          "nor its going: %s, opened at %s" % (s["timeMachine"]["picker"]["fieldY"], opened_at), failures)
     host.grab(output / "compact-time-machine-picker.png")
     host.call("press", "Escape")
     wait_for(lambda: not host.state()["timeMachine"]["picker"]["open"], "Esc closes it")
@@ -6606,7 +6625,16 @@ def guarded_fields_scenario(host, output, failures):
     wait_for(lambda: host.state()["opened"], "open")
     keys("Down", "A")
     wait_for(lambda: host.state()["pickerOpen"], "the picker")
+    host.settle(.3)
+    s = host.state()
+    opened_at, opened_list, opened_rows = s["pickerFieldY"], s["pickerListHeight"], len(s["pickerChoices"])
     host.call("typeKeys", "Ne")
+    host.settle(.3)
+    s = host.state()
+    check(len(s["pickerChoices"]) < opened_rows and s["pickerFieldY"] == opened_at and opened_at > 0
+          and s["pickerListHeight"] == opened_list,
+          "as typing leaves fewer rows, the picker's field and list stay put: field %s, list %s, %d rows (opened %s, %s, %d)"
+          % (s["pickerFieldY"], s["pickerListHeight"], len(s["pickerChoices"]), opened_at, opened_list, opened_rows), failures)
     keys("Backspace")
     clip("w Mix")
     keys("Ctrl+V")

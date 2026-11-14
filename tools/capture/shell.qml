@@ -56,6 +56,12 @@ ShellRoot {
     return null
   }
 
+  // A field's top in its window, rounded; -1 while it isn't shown.
+  function fieldY(within, name) {
+    var f = host.findNamed(within, name)
+    return f ? Math.round(f.mapToItem(null, 0, 0).y) : -1
+  }
+
   // The line of key hints as shown: its text, height and lines.
   function hintLine() {
     var p = popup()
@@ -446,6 +452,9 @@ ShellRoot {
         pickerTitle: p.picker.title, pickerIndex: p.picker.index,
         pickerChoices: p.picker.choices.map(function(c) { return (c.isNew ? "new:" : "") + c.name }),
         playlists: p.picker.playlists.map(function(pl) { return pl.name }),
+        // Where the picker's box is, and its field, in the panel's window.
+        pickerFieldY: host.fieldY(p.picker, "pickerField"),
+        pickerListHeight: host.findNamed(p.picker, "pickerList") ? Math.round(host.findNamed(p.picker, "pickerList").height) : -1,
         pointerArmed: p.pointerArmed, listY: p.listView ? Math.round(p.listView.contentY) : -1, listIndex: p.listView ? p.listView.currentIndex : -2, appleMode: p.appleMode, appleConfigured: p.appleConfigured, appleStream: p.appleStream,
         sxmMode: p.sxmMode, radioMode: p.radioMode, source: p.source, sources: p.sources,
         // The radio's local stations (favorites among them), in radio mode.
@@ -503,7 +512,8 @@ ShellRoot {
           top100: host.findNamed(popup() ? popup().contentItem[0].parent.parent : null, "top100Button")
             ? host.findNamed(popup().contentItem[0].parent.parent, "top100Button").text : "",
           picker: { open: p.yearPickerOpen, typed: p.yearPicker.typed, valid: p.yearPicker.valid,
-            warning: p.yearPicker.warning, later: p.yearPicker.laterCount },
+            warning: p.yearPicker.warning, later: p.yearPicker.laterCount,
+            fieldY: host.fieldY(p.yearPicker, "yearField") },
           songItems: p.browseTop && p.browseTop.songItems ? p.browseTop.songItems.length : -1 },
         clientName: p.clientName, elsewhere: p.bridgeMode ? p.bridge.elsewhere : "",
         playerExtra: p.bridgeMode ? p.bridgeExtra : "",
