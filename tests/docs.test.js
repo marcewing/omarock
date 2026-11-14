@@ -26,6 +26,8 @@ const rules = [
   // A login on curl's or anything's command line.
   [/(^|\s)(-u|--user)\s+\S+:\S+/, "a login on a command line"],
   [/--password[ =]\S/, "a password on a command line"],
+  // Another account's runtime folder: /run/user/UID, ${XDG_RUNTIME_DIR} or %t.
+  [/\/run\/user\/\d/, "a user id written into a runtime path"],
 ]
 
 test("no doc or setup window shows a secret on a command line", () => {
@@ -53,6 +55,10 @@ test("the rules catch what they're for", () => {
   assert.ok(!caught("on a command line (`curl -H \"Authorization: Bearer …\"`)"))
   assert.ok(!caught("its unit passes `--api-key @key`"))
   assert.ok(!caught("tools/omarock-am authorize"))
+  assert.ok(caught("MPD_HOST=/run/user/1000/mpd/socket"))
+  assert.ok(!caught("MPD_HOST=${XDG_RUNTIME_DIR}/mpd/socket"))
+  assert.ok(!caught('mpd-mpris -no-instance -network unix -host "%t/mpd/socket"'))
+  assert.ok(!caught('bind_to_address "/run/user/UID/mpd/socket"'))
 })
 
 // An Omarchy plugin install copies the whole repository into

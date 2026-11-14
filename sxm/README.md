@@ -5,9 +5,12 @@ account and serves each **live channel** as one continuous stream, which mpd
 plays like an internet radio station. It plays nothing itself, so the sound
 goes wherever mpd's goes. It listens on 127.0.0.1:8720 only, and answers only
 your account's programs (another account on the machine is refused: the
-kernel's socket table says who's at the other end of each connection), and of
-those only omarock's own requests, never a web page's. On-demand shows and Xtra
-channels aren't included.
+kernel's socket table says who's at the other end of each connection). Its API
+answers only omarock's own requests, never a web page's. The streams and cover
+art answer any of your programs by address, a browser tab included (mpd and
+the panel's images can't send omarock's header), so a page you open could play
+a channel through your account. On-demand shows and Xtra channels aren't
+included.
 
 ## Read this first: it's unofficial
 
@@ -53,8 +56,8 @@ asking for the login itself. By hand:
    ```bash
    curl -s -H 'X-Omarock: 1' 127.0.0.1:8720/v1/health
    ```
-   It should say `"account": true` and `"loggedIn": true`. (omarock-sxm answers
-   only requests with that header, so a web page can't use it.)
+   It should say `"account": true` and `"loggedIn": true`. (omarock-sxm's API
+   answers only requests with that header, so a web page can't use it.)
 4. **Switch SiriusXM on** in omarock's settings (`,` in the panel). A SiriusXM
    button appears in the panel, and `m` goes around to it. The login can be
    changed there later too.

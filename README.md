@@ -188,8 +188,8 @@ has no logins, so whoever can reach a TCP port of mpd's can read the queue (with
 Apple Music, the private address of the Mac's stream) and change what plays: on
 localhost, every account on this machine; on mpd's default, port 6600 on every
 network interface, your network too. Add
-`bind_to_address "/run/user/1000/mpd/socket"` to mpd.conf (your user id in place
-of 1000), with a drop-in that makes the folder:
+`bind_to_address "/run/user/UID/mpd/socket"` to mpd.conf, with your user id
+(`id -u`) for UID, and a drop-in that makes the folder:
 
 ```ini
 # ~/.config/systemd/user/mpd.service.d/runtime-dir.conf
@@ -203,12 +203,12 @@ an address of its own, mpd no longer listens on port 6600. Leave mpd's packaged
 
 **Other mpd clients** (`mpc`, ncmpcpp, rmpc) look for mpd on TCP unless
 `MPD_HOST` says where it is. This sets it for everything you start, from your
-next login (until then, `export MPD_HOST=/run/user/1000/mpd/socket` in a
+next login (until then, `export MPD_HOST=$XDG_RUNTIME_DIR/mpd/socket` in a
 terminal):
 
 ```ini
 # ~/.config/environment.d/omarock-mpd.conf
-MPD_HOST=/run/user/1000/mpd/socket
+MPD_HOST=${XDG_RUNTIME_DIR}/mpd/socket
 ```
 
 A client set to `localhost:6600` in its own settings needs the socket's path
@@ -249,7 +249,7 @@ It also looks for mpd on TCP unless it's told where mpd is (it doesn't read
 # ~/.config/systemd/user/mpd-mpris.service.d/mpd-socket.conf
 [Service]
 ExecStart=
-ExecStart=mpd-mpris -no-instance -network unix -host "/run/user/1000/mpd/socket"
+ExecStart=mpd-mpris -no-instance -network unix -host "%t/mpd/socket"
 ```
 
 Then `systemctl --user daemon-reload && systemctl --user enable --now mpd-mpris`.
