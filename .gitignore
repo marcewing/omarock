@@ -12,3 +12,9 @@ apple-bridge/app/Local.xcconfig
 
 # Personal notes for this checkout (Claude Code reads it; git never sees it)
 CLAUDE.local.md
+
+# Coding-agent instructions stay out of the tree: an Omarchy plugin install copies
+# all of it (DEVELOPING.md, "Coding agents"). Keep your own here.
+/CLAUDE.md
+/AGENTS.md
+/.claude/

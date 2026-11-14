@@ -1,5 +1,37 @@
 # Developing omarock
 
+## Coding agents
+
+The tree has no instructions for coding agents: no `CLAUDE.md`, `AGENTS.md`,
+`.claude/` or `.agents/`. An Omarchy plugin install copies the whole repository
+into `~/.config/omarchy/plugins/`, so an agent someone runs over `~/.config`
+would find them and follow them without being asked. `tests/docs.test.js`
+keeps it that way. To use them, opt in:
+- The setup skill is `docs/claude/omarock-setup/`: copy it into
+  `~/.claude/skills/`, then run `claude` in the clone.
+- To work on omarock with Claude Code, import this file from your own,
+  untracked `CLAUDE.local.md`: a line `@DEVELOPING.md`.
+
+An agent helping set up or fix someone's system:
+- **Never prints secrets:** anything in `~/.config/omarock/` that holds a key, a
+  token or a password (`soloist-key`, `spotify-token.json`, `siriusxm.json`,
+  `bridge-token`). It checks that they exist and their permissions, not their
+  contents.
+- **Asks before changing system config:** mpd.conf,
+  `~/.config/omarchy/shell.json`, PipeWire or WirePlumber config, systemd
+  units. It backs a file up before editing it, and says what changed.
+- **Treats the audio bus's output as a safety choice.** Some machines have
+  outputs that must never carry music (a radio transmitter's audio interface,
+  say). The bus plays only into the output `tools/install-audio --output`
+  pinned; the agent never picks it, or changes it, without the user.
+- **Leaves starting music to the user.** It doesn't play, skip or switch
+  sources on someone's system just to test.
+- **Installs services from a commit** (`tools/install-audio`,
+  `tools/install-spotify`), never runs them from the working tree.
+
+Tests never touch the user's real mpd, PipeWire or services: fakes, a scratch
+mpd with mpd's `null` output, or a private PipeWire.
+
 ## Layout
 
 | File | What it is |

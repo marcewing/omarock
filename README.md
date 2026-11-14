@@ -136,9 +136,11 @@ steps is for, and what to do if the installer runs into a problem.
 ## Install by hand (not recommended)
 
 
-**Using Claude Code?** Run `claude` in the clone directory and ask it to set omarock up. Its
-`omarock-setup` skill knows the steps and the usual snags, and checks before it
-changes anything.
+**Using Claude Code?** omarock has a setup skill that knows the steps and the
+usual snags, and checks before it changes anything. It isn't installed with the
+plugin (an agent you run elsewhere shouldn't find it without your say-so), so
+copy it in yourself: `cp -r docs/claude/omarock-setup ~/.claude/skills/` from the
+clone, then run `claude` in the clone directory and ask it to set omarock up.
 
 To install omarock by hand instead, follow the three steps below.
 

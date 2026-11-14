@@ -54,3 +54,18 @@ test("the rules catch what they're for", () => {
   assert.ok(!caught("its unit passes `--api-key @key`"))
   assert.ok(!caught("tools/omarock-am authorize"))
 })
+
+// An Omarchy plugin install copies the whole repository into
+// ~/.config/omarchy/plugins/: instructions for coding agents in it would be
+// found, and followed, by an agent someone runs over ~/.config, without their
+// opting in. The setup skill lives in docs/claude/ instead (DEVELOPING.md).
+test("no coding-agent instructions in the tree", () => {
+  const files = require("node:child_process")
+    .execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean)
+  const agents = files.filter(f =>
+    /(^|\/)(CLAUDE|AGENTS|GEMINI)(\.local)?\.md$/i.test(f)
+    || /(^|\/)\.(claude|agents|cursor|windsurf)\//.test(f)
+    || /(^|\/)\.(cursorrules|windsurfrules|clinerules)$/.test(f)
+    || /(^|\/)\.github\/(copilot-instructions\.md|instructions\/|prompts\/)/.test(f))
+  assert.deepEqual(agents, [])
+})
