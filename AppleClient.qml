@@ -69,6 +69,17 @@ Item {
   readonly property bool rejoins: root.rejoinAfterChange && root.health.minBitrate !== true
 
   property string token: ""
+  // A bridge saved by its .local name: while the Mac is away, any account on
+  // this machine can publish that name through avahi and would be sent the
+  // token. So the name is looked up before each health check (getent), and
+  // requests go only while it doesn't point at this machine.
+  readonly property string localHost: {
+    var m = /^https?:\/\/([^\/:\[\]]+\.local)\.?(:\d+)?(\/|$)/i.exec(root.baseUrl)
+    return m ? m[1].toLowerCase() : ""
+  }
+  property string hostVerified: ""
+  property bool pointsHere: false
+  readonly property string pointsHereText: root.localHost + " points to this machine, not your Mac: something here is answering for its name, so omarock sends it nothing"
   property bool reachable: false
   // How often a request failed outright (reachable went false), for tests.
   property int dropouts: 0
@@ -142,6 +153,10 @@ Item {
   function request(method, path, body, callback, timeoutMs) {
     if (!root.configured) {
       if (callback) callback(null, root.service + " isn't set up")
+      return
+    }
+    if (root.localHost !== "" && root.hostVerified !== root.localHost) {
+      if (callback) callback(null, root.pointsHere ? root.pointsHereText : root.unreachableText)
       return
     }
     var xhr = new XMLHttpRequest()
@@ -251,7 +266,31 @@ Item {
   // answered at least once (or failed to).
   property var health: ({})
   property bool healthKnown: false
+  // The .local name's addresses, and this machine's, from one helper; then
+  // the health check. Its output is a few lines (one name's addresses).
+  Process {
+    id: hostCheck
+    property var waiting: []
+    command: ["sh", "-c", "getent ahosts \"$1\" | awk '{print $1}' | sort -u | head -n 64; echo ==; ip -o addr show | awk '{sub(/\\/.*/, \"\", $4); print $4}' | head -n 256", "sh", root.localHost]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var parts = text.split("==")
+        var found = (parts[0] || "").split("\n").filter(function(a) { return a !== "" })
+        var mine = (parts[1] || "").split("\n").filter(function(a) { return a !== "" })
+        root.pointsHere = found.some(function(a) { return /^127\./.test(a) || a === "::1" || mine.indexOf(a) >= 0 })
+        root.hostVerified = found.length > 0 && !root.pointsHere ? root.localHost : ""
+        var waiting = hostCheck.waiting
+        hostCheck.waiting = []
+        waiting.forEach(function(callback) { root.checkHealthNow(callback) })
+      }
+    }
+  }
   function checkHealth(callback) {
+    if (root.localHost === "") return root.checkHealthNow(callback)
+    hostCheck.waiting = hostCheck.waiting.concat([callback || null])
+    if (!hostCheck.running) hostCheck.running = true
+  }
+  function checkHealthNow(callback) {
     root.get("/v1/health", function(data, error) {
       root.health = data || {}
       root.healthKnown = true

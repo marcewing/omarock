@@ -1,0 +1,9 @@
+#!/bin/bash
+# The harness's getent: a name in the test HOME's .fake-hosts ("NAME ADDRESS"
+# lines) answers as that address, as a .local name another account published
+# through avahi would; anything else goes to the real getent.
+if [[ ${1:-} == ahosts && -r $HOME/.fake-hosts ]]; then
+  a=$(awk -v n="${2:-}" 'tolower($1) == tolower(n) {print $2; exit}' "$HOME/.fake-hosts")
+  [[ -n $a ]] && { printf '%s STREAM %s\n%s DGRAM\n' "$a" "$2" "$a"; exit 0; }
+fi
+exec /usr/bin/getent "$@"

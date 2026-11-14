@@ -22,7 +22,8 @@
 #                                    On a failure, the bridge's reason on stderr,
 #                                    and the exit code: 3 not the code, 4 no code
 #                                    open on the Mac, 5 a bridge that can't pair
-#                                    (before 0.10.0), 6 no answer, 7 not saved
+#                                    (before 0.10.0), 6 no answer, 7 not saved,
+#                                    9 its name points at this machine
 #   omarock-account bridge-check URL whether the bridge at URL takes the token saved
 #                                    here: exit 0 if it does, 1 if it refuses it,
 #                                    6 if it doesn't answer, 8 if there's none
@@ -51,14 +52,35 @@ restart() { systemctl --user try-restart "$1" 2>/dev/null || true; }
 # one (from bridge 0.9.0 the stream's address has a secret, given only with
 # it). The token goes to curl on stdin, never on its command line.
 apple_stream() {  # BRIDGE
-  local token=""
+  local token="" h=${1#*://}
+  h=${h%%/*}
+  points_here "${h%:[0-9]*}" && return 0
   [[ -r $config/bridge-token ]] && token=$(<"$config/bridge-token")
   printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "${token//[$'\n\r "\\']/}" \
     | curl -s -m 5 -K - "$1/v1/health" 2>/dev/null | jq -r '.stream // empty' 2>/dev/null
 }
+# Whether HOST, a name (an address typed as one is taken as it is), points at
+# this machine: something here answering for the Mac's .local name, which any
+# account can publish through avahi while the Mac is away. A pairing code or
+# the token never goes there.
+points_here() {
+  local host=$1 a mine
+  [[ $host =~ ^[0-9.]+$ || $host == *:* ]] && return 1
+  mine=$(ip -o addr show 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}')
+  while read -r a _; do
+    [[ $a == 127.* || $a == ::1 ]] && return 0
+    grep -qxF -- "$a" <<<"$mine" && return 0
+  done < <(getent ahosts "$host" 2>/dev/null)
+  return 1
+}
 bridge_url() {  # URL: the bridge's address, checked
-  local b=${1%/}
+  local b=${1%/} h
   [[ $b =~ ^https?://[^/]+$ ]] || { echo "omarock-account: not a bridge's address: $1" >&2; exit 2; }
+  h=${b#*://}; h=${h%:[0-9]*}
+  if points_here "$h"; then
+    echo "$h points to this machine, not a Mac: something here is answering for that name, so omarock sends it nothing." >&2
+    exit 9
+  fi
   printf '%s' "$b"
 }
 write_apple() {  # BRIDGE STREAM: apple.json, readable only by you
@@ -111,7 +133,7 @@ print(json.dumps({"username": login.get("username", ""), "password": login.get("
     fi
     true ;;
   bridge-pair)
-    bridge=$(bridge_url "${2:-}") || exit 2
+    bridge=$(bridge_url "${2:-}") || exit $?
     # Only the digits count ("048 213" is 048213), so they go into the JSON as they are.
     code=$(value | tr -cd '0-9') || exit 2
     [[ ${#code} == 6 ]] || { echo "A pairing code is 6 digits." >&2; exit 3; }
@@ -145,7 +167,7 @@ print(json.dumps({"username": login.get("username", ""), "password": login.get("
         echo "$said" >&2; exit 6 ;;
     esac ;;
   bridge-check)
-    bridge=$(bridge_url "${2:-}") || exit 2
+    bridge=$(bridge_url "${2:-}") || exit $?
     [[ -s $config/bridge-token ]] || exit 8
     token=$(<"$config/bridge-token")
     status=$(printf 'header = "Authorization: Bearer %s"\n' "${token//[$'\n\r "\\']/}" \

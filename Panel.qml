@@ -110,6 +110,7 @@ Panel {
   // Apple Music and Spotify share the bridge's API, rows and views.
   readonly property bool bridgeMode: appleMode || spotifyMode
   readonly property var bridge: spotifyMode ? spotify : apple
+  readonly property var appleClient: apple  // for the harness
   // The service the rows on screen come from: the one playing, or the one
   // a lookup is in.
   readonly property var browseBridge: lookupService === "apple" ? apple : lookupService === "spotify" ? spotify : bridge
@@ -5354,7 +5355,7 @@ Panel {
   }
   Process {
     id: networkReader
-    command: ["sh", "-c", "command -v avahi-browse >/dev/null && timeout 5 avahi-browse -rpt _omarock._tcp 2>/dev/null"]
+    command: ["sh", "-c", "command -v avahi-browse >/dev/null && timeout 5 avahi-browse -lrpt _omarock._tcp 2>/dev/null"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

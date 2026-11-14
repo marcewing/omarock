@@ -407,6 +407,7 @@ ShellRoot {
         settingValues: p.settingValues, settingNotes: p.settingNotes, widgetSettings: host.widget.settings,
         appleReady: p.player.ready === true && p.appleMode, appleSeq: p.appleMode ? (p.player.bridgeStatus.seq || 0) : -1,
         appleDropouts: p.appleMode ? p.player.dropouts : 0, appleError: p.appleMode ? p.player.lastError : "",
+        appleLastError: p.appleClient.lastError,
         bridgeSong: p.bridgeMode ? p.bridge.song : null, playingIds: p.bridgeMode ? p.playingIds() : null,
         // Apple Music as heard: how far behind (mpd's lag, measured), whether
         // a change waits for its sound, and the card's time as shown.

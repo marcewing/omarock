@@ -282,7 +282,8 @@ function pairState(code, stderr) {
   if (code === 0) return { kind: "ok", text: "Paired with the bridge" }
   var fallback = { 3: "That isn't the code the Mac shows", 4: "No pairing code is open on the Mac: run ./install pair there",
     5: "The bridge on the Mac is older than 0.10.0, and can't pair: update it there (git pull, then ./install)",
-    6: "The bridge didn't answer", 7: "Couldn't save the bridge's token" }
+    6: "The bridge didn't answer", 7: "Couldn't save the bridge's token",
+    9: "That name points to this machine, not a Mac: omarock sends it nothing" }
   return { kind: "bad", text: said || fallback[code] || "Pairing didn't work (" + code + ")" }
 }
 

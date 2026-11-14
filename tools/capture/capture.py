@@ -87,6 +87,7 @@ def prepare(work):
     (fakes / "omarchy-launch-floating-terminal-with-presentation").symlink_to(TOOLS / "fake-terminal")
     (fakes / "tailscale").symlink_to(TOOLS / "fake-tailscale")
     (fakes / "avahi-browse").symlink_to(TOOLS / "fake-avahi-browse")
+    (fakes / "getent").symlink_to(TOOLS / "fake-getent")
     (fakes / "pactl").symlink_to(TOOLS / "fake-pactl")
     # Never the real compositor: hyprctl only logs, and lists no windows.
     (fakes / "hyprctl").symlink_to(TOOLS / "fake-hyprctl")
@@ -4218,6 +4219,27 @@ def apple_network_scenario(host, output, socket_path, failures):
         host.call("setupClick", "setupCancel")
         wait_for(lambda: not host.state()["setupWindow"]["open"], "closed")
         avahi.unlink()
+
+        # The Mac's .local name pointing at this machine: any account here can
+        # publish it through avahi while the Mac is away. Neither pairing nor
+        # the panel sends it anything (the release review of 1.0.6).
+        hosts = home / ".fake-hosts"
+        hosts.write_text("studio-mac.local 127.0.0.1\n")
+        named = f"http://studio-mac.local:{port}"
+        paired = lambda: [r for r in map(json.loads, BRIDGE["log"].read_text().splitlines()) if r["path"] == "/v1/pair"]
+        before = len(paired())
+        r = subprocess.run([tool, "bridge-pair", named], input="048213\n", env=dict(env, PATH=f"{work / 'bin'}:/usr/bin:/bin"),
+                           text=True, capture_output=True, timeout=30)
+        check(r.returncode == 9 and "points to this machine" in r.stderr and len(paired()) == before,
+              "pairing with a Mac whose name points here: refused, and no code sent: " + repr((r.returncode, r.stderr)), failures)
+        sent = len(BRIDGE["log"].read_text().splitlines())
+        BRIDGE["config"].write_text(json.dumps({"bridge": named, "stream": f"{named}/omarock-{secret}.ogg"}))
+        host.call("setSource", "apple")
+        wait_for(lambda: "points to this machine" in host.state()["appleLastError"], "the name refused")
+        check(len(BRIDGE["log"].read_text().splitlines()) == sent,
+              "the panel sends nothing to a Mac whose name points here, and says why: " + host.state()["appleLastError"], failures)
+        hosts.unlink()
+        host.call("setSource", "local")
     finally:
         fake_bridge("secretstream", {"on": False})
         BRIDGE["config"].write_text(json.dumps({"bridge": url, "stream": old}))
