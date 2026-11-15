@@ -33,6 +33,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_mpd import png  # noqa: E402
+from hostile import Hostile  # noqa: E402
 
 PORT = 0
 
@@ -245,6 +246,8 @@ class Bridge:
         # waits until it's over and is answered then, as one sent into a
         # network that drops packets is once the network is back.
         self.closed_until = self.offline_until = 0.0
+        # Answers a hostile server could give (hostile.py): POST /v1/fake/hostile.
+        self.hostile = Hostile()
         # The library: a copy of Zen Arcade, and two playlists of songs.
         zen = dict(public(CATALOG_ALBUMS["c-al-1"]), id="l-al-1", source="library", catalogId="c-al-1")
         self.library_albums = [zen]
@@ -531,6 +534,10 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(length) or b"{}") if length else {}
         parts = [p for p in url.path.split("/") if p]
+        if url.path == "/v1/fake/hostile":
+            return self.reply(200, bridge.hostile.set(body))
+        if bridge.hostile.applies(url.path):
+            return bridge.hostile.answer(self)
         if parts[:1] == ["art"]:
             size = int(parts[2].split("x")[0])
             color = parts[1]

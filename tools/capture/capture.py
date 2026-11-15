@@ -321,6 +321,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     apple_network_scenario(host, output, socket_path, failures)
     time_machine_scenario(host, output, socket_path, failures)
     guarded_fields_scenario(host, output, failures)
+    bounded_scenario(host, failures)
 
     # mpd goes away: the panel says so instead of failing silently.
     host.call("close")
@@ -6734,6 +6735,120 @@ def teardown_scenario(host, socket_path, failures):
     check(True, "the long poll answered after the widget was gone", failures)
 
 
+def bounded_scenario(host, failures):
+    """The marketplace's review (Medium, 11-14): the panel read every answer
+    whole, with Qt's XMLHttpRequest, and parsed it on the shell's one thread,
+    where Qt 6.12's JSON.parse crashes the whole shell on one array of more
+    than about 540,000 members (1.2 MB of [0,0,…]); the radio's and SiriusXM's
+    requests had no deadline. Now every client's request goes through curl
+    (Fetch.qml), capped and on time, and every answer is looked over before
+    it's parsed (Reply.js). Here the fakes answer as a hostile server could
+    (hostile.py): the shell stays up, each request fails within its
+    deadline with its client's usual words, the shell's memory stays
+    bounded, and afterwards each works as before. And a curl that can't
+    start, or never ends, is a failed request, not a lost one."""
+    home = Path(host.env["HOME"])
+    qs = BRIDGE["qs"]
+    bridge, spotify, sxm, radio = (f"http://127.0.0.1:{BRIDGE['port']}", BRIDGE["spotify"],
+                                   host.env.get("OMAROCK_SXM") or BRIDGE["sxm"], BRIDGE["radio"])
+    BRIDGE["config"].write_text(json.dumps({"bridge": bridge, "stream": bridge + "/omarock.ogg"}))
+    host.call("open")
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    alive = lambda: qs.poll() is None and host.call("ready", quiet=True) == "true"
+    rss = lambda: int(re.search(r"VmRSS:\s+(\d+)", Path(f"/proc/{qs.pid}/status").read_text()).group(1)) // 1024
+    probes = [0]
+
+    def hostile(base, mode, paths):
+        if base == radio:
+            urllib.request.urlopen(base + "/fake/hostile?" + urllib.parse.urlencode({"mode": mode or "", "paths": ",".join(paths)}),
+                                   timeout=5).read()
+            return
+        request = urllib.request.Request(base + "/v1/fake/hostile", data=json.dumps({"mode": mode, "paths": paths}).encode(),
+                                         method="POST", headers={"Authorization": "Bearer fake-bridge-token",
+                                                                 "Content-Type": "application/json", "X-Omarock": "1"})
+        urllib.request.urlopen(request, timeout=5).read()
+
+    def probe(client, kind, arg, timeout_ms, wait=30):
+        probes[0] += 1
+        name = f"p{probes[0]}"
+        said = host.call("probe", name, client, kind, arg, timeout_ms)
+        if said != "ok": raise RuntimeError(f"probe {client}: {said}")
+        wait_for(lambda: host.call("probeResult", name) not in ("null", ""), f"{client}'s answer to {arg}", timeout=wait)
+        return json.loads(host.call("probeResult", name))
+
+    before = rss()
+    # Each client, the path it asks, its cap's error and its deadline's.
+    clients = [
+        ("apple", bridge, "get", "/v1/library/playlists", "/v1/library",
+         "The Apple Music bridge's answer was too big to read", "The Apple Music bridge didn't answer"),
+        ("apple", bridge, "get", "/v1/status", "/v1/status",
+         "The Apple Music bridge's answer was too big to read", "The Apple Music bridge didn't answer"),
+        ("spotify", spotify, "health", "/v1/library/playlists", "/v1/library",
+         "omarock-spotify's answer was too big to read", "omarock-spotify didn't answer"),
+        ("sxm", sxm, "health", "/v1/channels", "/v1/channels",
+         "SiriusXM's answer was too big to read", "omarock-sxm didn't answer"),
+        ("radio", radio, "get", radio + "/json/stations/byuuid?uuids=st-kexp", "/json/stations/byuuid",
+         "Radio Browser's answer was too big to read", "Radio Browser didn't answer"),
+        ("setup", bridge, "get", bridge + "/v1/health", "/v1/health", "status 0", "status 0"),
+    ]
+    for client, base, kind, arg, path, big, late in clients:
+        normal = probe(client, kind, arg, 5000)
+        check(normal["ok"], f"{client} {path}: answered as before ({normal['summary']})", failures)
+        for mode in ("dense", "endless", "trickle"):
+            hostile(base, mode, [path])
+            timeout = 5000 if client == "setup" else 3000
+            got = probe(client, kind, arg, timeout)
+            hostile(base, None, [])
+            want = late if mode == "trickle" else big
+            quick = got["ms"] < 3000 if mode != "trickle" else timeout - 100 <= got["ms"] <= timeout + 2500
+            check(not got["ok"] and got["error"] == want and quick and alive(),
+                  f"{client} {path}, {mode}: \"{got['error']}\" in {got['ms']} ms, the shell up", failures)
+        again = probe(client, kind, arg, 5000)
+        check(again["ok"], f"{client} {path}: and then as before", failures)
+    grew = rss() - before
+    check(grew < 300, f"the shell's memory grew {grew} MB through it all (endless answers read only to their cap)", failures)
+
+    # Nothing from the requests on a command line: curl has its config on stdin.
+    lines = logged_argv(home, lambda: (probe("apple", "get", "/v1/library/playlists", 5000),
+                                       probe("sxm", "get", "/v1/channels", 5000)))
+    curls = lines.count("/curl\n-q\n-K\n-\n")
+    check(curls >= 2 and "fake-bridge-token" not in lines and bridge not in lines and "/v1/" not in lines,
+          f"curl's command line has no address, header or token ({curls} curls)", failures)
+
+    # curl's --resolve: the name reaches the address given, without a lookup.
+    port = BRIDGE["port"]
+    got = probe("apple", "resolve", f"http://bridge.example:{port}/v1/health bridge.example:{port}:127.0.0.1", 5000)
+    check(got["ok"] and '"ok": true' in got["summary"], f"resolve: bridge.example reaches the bridge ({got['error']})", failures)
+
+    # A curl that can't start: the request fails at once, the next one goes.
+    host.call("setCurl", "apple", "/nonexistent/curl")
+    got = probe("apple", "get", "/v1/genres", 5000)
+    host.call("setCurl", "apple", "")
+    check(not got["ok"] and got["error"] == "Can't reach the Apple Music bridge on the Mac" and got["ms"] < 1500,
+          f"a curl that can't start: \"{got['error']}\" in {got['ms']} ms", failures)
+    check(probe("apple", "get", "/v1/genres", 5000)["ok"], "and the next request goes through", failures)
+    # One that never ends, SIGTERM or not: given up on, and killed.
+    host.call("setCurl", "sxm", str(TOOLS / "stuck-curl"))
+    got = probe("sxm", "get", "/v1/channels", 2000)
+    host.call("setCurl", "sxm", "")
+    check(not got["ok"] and got["error"] == "omarock-sxm didn't answer" and 3000 <= got["ms"] <= 5000,
+          f"a curl that never ends: \"{got['error']}\" in {got['ms']} ms", failures)
+    check(probe("sxm", "get", "/v1/channels", 5000)["ok"], "and the next request goes through", failures)
+    # Time Machine's chart fetch (finding 6): one that can't start is an
+    # error, the next year's waits for nothing, and once curl can start a
+    # fetch goes on as before (the fake Wikipedia has no page for 1990).
+    host.call("setCurl", "charts", "/nonexistent/curl")
+    first, second = probe("charts", "get", "1990", 0), probe("charts", "get", "1991", 0)
+    host.call("setCurl", "charts", "")
+    check(first["error"] == "Can't reach Wikipedia for 1990's chart" and second["error"] == "Can't reach Wikipedia for 1991's chart"
+          and max(first["ms"], second["ms"]) < 1500, f"a chart's curl that can't start: \"{first['error']}\", \"{second['error']}\"", failures)
+    got = probe("charts", "get", "1990", 0)
+    check(got["error"] == "Wikipedia has no page for 1990's chart", f"and then the fetch goes on: \"{got['error']}\"", failures)
+    check(alive(), "the shell is up after all of it", failures)
+    BRIDGE["config"].unlink()
+    host.call("close")
+
+
 def start_private_pipewire(env, runtime):
     """A PipeWire of the harness's own (its private runtime directory, so
     never the real one): no device monitors, one silent output standing in for
@@ -7156,6 +7271,7 @@ def main():
             host = Host(env, shell)
             with log.open("w") as stream:
                 qs = subprocess.Popen(["qs", "-p", str(shell)], env=env, stdout=stream, stderr=subprocess.STDOUT)
+                BRIDGE["qs"] = qs
                 try:
                     wait_for(lambda: host.call("ready", quiet=True) == "true", "panel connected to fake mpd")
                     if real: real_scenario(host, output, failures)
@@ -7199,6 +7315,7 @@ def main():
                             elif name == "elsewhere": elsewhere_scenario(host, socket_path, failures)
                             elif name == "reconnect": reconnect_scenario(host, socket_path, failures)
                             elif name == "outages": outages_scenario(host, socket_path, failures)
+                            elif name == "bounded": bounded_scenario(host, failures)
                             elif name == "apple-genres": apple_genres_scenario(host, output, socket_path, failures)
                             elif name == "apple-network": apple_network_scenario(host, output, socket_path, failures)
                             elif name == "list-tuning": list_tuning_scenario(host, failures)

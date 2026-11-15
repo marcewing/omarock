@@ -17,6 +17,8 @@ ShellRoot {
   property var panel: null
   // Tab's asks for the bar's next panel: { widget (asked as omarock's widget), direction }.
   property var panelSwitches: []
+  // The answers to probe's requests, by id.
+  property var probes: ({})
 
   function findPanel(item) {
     var data = item.data
@@ -773,6 +775,55 @@ ShellRoot {
       var next = Object.assign({}, host.widget.settings)
       next[key] = isJson ? JSON.parse(value) : value
       host.widget.settings = next
+    }
+    // A request from one of the panel's HTTP clients (Panel.clients), its
+    // answer kept for probeResult, { ms, ok, error, summary }: kind "get"
+    // (the client's own request: a path for the bridge, Spotify and
+    // SiriusXM, an address for the radio and the setup window, a year for
+    // the charts), "health" (its health check, then the request), or
+    // "resolve" (its Fetch, arg "url host:port:address").
+    function probe(id: string, client: string, kind: string, arg: string, timeoutMs: int): string {
+      var c = host.panel.clients[client]
+      if (!c) return "no client " + client
+      var started = Date.now()
+      var all = Object.assign({}, host.probes)
+      delete all[id]
+      host.probes = all
+      function done(ok, error, summary) {
+        var now = Object.assign({}, host.probes)
+        now[id] = { ms: Date.now() - started, ok: ok, error: String(error || ""), summary: summary || "" }
+        host.probes = now
+      }
+      function size(data) { return data === null || data === undefined ? "" : JSON.stringify(data).length + " characters" }
+      if (kind === "resolve") {
+        var parts = arg.split(" ")
+        c.http.request({ url: parts[0], resolve: parts[1], timeoutMs: timeoutMs }, function(r) {
+          done(r.status === 200 && r.text !== null, "status " + r.status, r.text || "")
+        })
+      } else if (client === "radio") {
+        c.xhr(arg, function(data, error) { done(data !== null, error, size(data)) }, timeoutMs)
+      } else if (client === "setup") {
+        c.get(arg, "", function(status, data) { done(status === 200 && !!data, "status " + status, size(data)) })
+      } else if (client === "charts") {
+        c.fetchChart(parseInt(arg, 10), function(chart, error) { done(!!chart, error, chart ? chart.length + " songs" : "") })
+      } else {
+        var go = function() {
+          c.request("GET", arg, null, function(data, error) { done(error === "" && data !== null, error, size(data)) }, timeoutMs)
+        }
+        if (kind === "health") c.checkHealth(go)
+        else go()
+      }
+      return "ok"
+    }
+    function probeResult(id: string): string { return JSON.stringify(host.probes[id] || null) }
+    // The program a client's HTTP runs in place of curl: one that can't
+    // start, or one that never ends ("" for curl again).
+    function setCurl(client: string, program: string): string {
+      var c = host.panel.clients[client]
+      if (!c) return "no client " + client
+      if (client === "charts") c.curl = program || "curl"
+      else c.http.curl = program || "curl"
+      return "ok"
     }
     // Destroy the widget, panel and all.
     function unload(): void { widgetLoader.source = "" }

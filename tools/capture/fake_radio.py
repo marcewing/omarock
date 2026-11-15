@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_mpd import png  # noqa: E402
+from hostile import Hostile  # noqa: E402
 
 PORT = 0
 STATIONS = [
@@ -82,6 +83,11 @@ class Handler(BaseHTTPRequestHandler):
         with open(self.server.log_path, "a") as log:
             log.write(json.dumps({"path": url.path, "query": query}) + "\n")
         parts = [p for p in url.path.split("/") if p]
+        # Answers a hostile server could give (hostile.py).
+        if url.path == "/fake/hostile":
+            return self.reply(200, self.server.hostile.set(query))
+        if self.server.hostile.applies(url.path):
+            return self.server.hostile.answer(self)
         if parts[:1] == ["logo"]:
             color = parts[1].split(".")[0]
             top = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
@@ -118,6 +124,7 @@ def main():
     server.daemon_threads = True
     PORT = server.server_address[1]
     server.log_path = log
+    server.hostile = Hostile()
     port_file.write_text(str(PORT))
     print("fake radio ready", flush=True)
     server.serve_forever()

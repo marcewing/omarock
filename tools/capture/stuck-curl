@@ -1,0 +1,5 @@
+#!/bin/sh
+# A curl that never ends, SIGTERM or not, for the harness: the panel's HTTP
+# (Fetch.qml) has to give up on it at its deadline, and kill it.
+trap '' TERM
+exec sleep 600

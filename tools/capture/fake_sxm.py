@@ -16,6 +16,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_mpd import png  # noqa: E402
+from hostile import Hostile, settings_from  # noqa: E402
 
 PORT = 0
 CHANNELS = [
@@ -41,6 +42,8 @@ class State:
         # Out of reach (POST /v1/fake/offline {closed}, seconds): every other
         # request, art too, closes unanswered, as when omarock-sxm is gone.
         self.closed_until = 0.0
+        # Answers a hostile server could give (hostile.py): POST /v1/fake/hostile.
+        self.hostile = Hostile()
 
 
 def art(color):
@@ -73,6 +76,10 @@ class Handler(BaseHTTPRequestHandler):
         # As omarock-sxm: only requests that say they're omarock's.
         if parts[:1] == ["v1"] and self.headers.get("X-Omarock") != "1":
             return self.reply(403, {"error": "Only omarock asks here (X-Omarock: 1)."})
+        if parts == ["v1", "fake", "hostile"]:
+            return self.reply(200, state.hostile.set(settings_from(self.rfile.read(int(self.headers.get("Content-Length") or 0)))))
+        if state.hostile.applies(self.path.split("?")[0]):
+            return state.hostile.answer(self)
         if parts[:1] == ["art"]:
             color, size = parts[1], int(parts[2].split("x")[0])
             top = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
