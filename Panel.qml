@@ -808,7 +808,7 @@ Panel {
 
   function tuneStation(station) {
     if (!Radio.playable(station)) {
-      root.say(station.name.trim() + " only streams HLS, which mpd can't play")
+      root.say(station.name.trim() + " " + Radio.unplayable(station))
       return
     }
     root.playLive(Radio.streamUrl(station), root.streamPrefixes(), station.name.trim())

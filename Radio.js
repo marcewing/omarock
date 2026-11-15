@@ -23,9 +23,26 @@ function isRadio(file) {
   return uuidOf(file) !== ""
 }
 
+// Only http and https: mpd plays many other kinds of address (sftp://,
+// which sends your SSH keys to the server it names; nfs://, alsa://...), and
+// a station's comes from whichever Radio Browser server answered.
+function streamOk(url) {
+  return /^https?:\/\/[^\s#]+$/i.test(String(url || ""))
+}
+
 // mpd can't play HLS.
 function playable(station) {
-  return !!station.url_resolved && station.hls !== 1
+  return streamOk(station.url_resolved) && station.hls !== 1
+}
+
+// Why a station can't play, or "".
+function unplayable(station) {
+  return !streamOk(station.url_resolved) ? "isn't an http or https stream" : station.hls === 1 ? "only streams HLS, which mpd can't play" : ""
+}
+
+// Radio Browser's own servers, as its list names them (de1.api.radio-browser.info).
+function serverOk(name) {
+  return /^[a-z0-9-]+\.api\.radio-browser\.info$/i.test(String(name || ""))
 }
 
 function nameOf(station) {
@@ -43,7 +60,7 @@ function stationRow(station, section, playingUuid, favoriteUuids) {
   var favorite = favoriteUuids.indexOf(station.stationuuid) >= 0
   var ok = playable(station)
   return { kind: "station", section: section || "", lead: "󰐹", title: nameOf(station), name: nameOf(station),
-    subtitle: ok ? describe(station) : "Can't play: HLS only", detail: favorite ? FAVORITE : "",
+    subtitle: ok ? describe(station) : station.hls === 1 ? "Can't play: HLS only" : "Can't play: not an http or https stream", detail: favorite ? FAVORITE : "",
     stationUuid: station.stationuuid, favorite: favorite, artwork: station.favicon ? { url: station.favicon } : undefined,
     noQueue: true, missing: !ok, playing: station.stationuuid === playingUuid }
 }
@@ -341,6 +358,9 @@ if (typeof module !== "undefined") {
     uuidOf: uuidOf,
     isRadio: isRadio,
     playable: playable,
+    streamOk: streamOk,
+    unplayable: unplayable,
+    serverOk: serverOk,
     describe: describe,
     listRows: listRows,
     localPlace: localPlace,

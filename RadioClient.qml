@@ -210,7 +210,7 @@ Item {
     if (root.api !== "") return callback(root.api)
     if (root.server !== "") return callback(root.server)
     root.xhr("https://all.api.radio-browser.info/json/servers", function(list) {
-      var names = (list || []).map(function(s) { return s.name }).filter(function(n) { return n })
+      var names = (list || []).map(function(s) { return s && s.name }).filter(Radio.serverOk)
       root.server = "https://" + (names.length > 0 ? names[Math.floor(Math.random() * names.length)] : "de1.api.radio-browser.info")
       callback(root.server)
     })
@@ -462,6 +462,10 @@ Item {
         root.mpd.removeFromPlaylist(root.playlist, at, function(error) { if (callback) callback(error, false) })
       })
     } else {
+      if (!Radio.streamOk(station.url_resolved)) {
+        if (callback) callback(Radio.nameOf(station) + " " + Radio.unplayable(station), false)
+        return
+      }
       root.mpd.send(Mpd.command("playlistadd", [root.playlist, Radio.streamUrl(station)]), function(lines, error) {
         if (callback) callback(error, true)
       })

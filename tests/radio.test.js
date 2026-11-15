@@ -116,3 +116,24 @@ test("listRows without an area ends with how to set one", () => {
   // With an area, no note.
   assert.ok(Radio.listRows([kexp], [wjrr], "u2", "Florida").every(r => r.kind === "station"))
 })
+
+test("only http and https streams play: mpd's other kinds of address never reach it", () => {
+  for (const url of ["sftp://198.51.100.7:22/x", "scp://h/x", "file:///etc/passwd", "alsa://hw:0", "nfs://h/x",
+    "cdda:///1", "/home/someone/x.wav", "smb://h/x", "", "http://h/x#already", "https://h/a b"]) {
+    const station = { ...kexp, url_resolved: url }
+    assert.equal(Radio.streamOk(url), false, url)
+    assert.equal(Radio.playable(station), false, url)
+    assert.equal(Radio.unplayable(station), "isn't an http or https stream", url)
+  }
+  assert.equal(Radio.playable(wjrr), true)
+  assert.equal(Radio.playable(kexp), true)
+  assert.equal(Radio.unplayable(hlsOnly), "only streams HLS, which mpd can't play")
+})
+
+test("only Radio Browser's own servers are asked", () => {
+  assert.equal(Radio.serverOk("de1.api.radio-browser.info"), true)
+  assert.equal(Radio.serverOk("at1.api.radio-browser.info"), true)
+  for (const name of ["evil.example", "de1.api.radio-browser.info.evil.example", "de1.api.radio-browser.info/x",
+    "x@de1.api.radio-browser.info", "", null, undefined, 7])
+    assert.equal(Radio.serverOk(name), false, String(name))
+})
