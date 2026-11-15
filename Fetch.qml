@@ -166,7 +166,9 @@ Item {
       }
       function end() {
         if (job.code < 0 || !job.outEnded || !job.errEnded) return
-        job.ended(job.code, out.data ? out.data.byteLength : 0, out.text, err.text)
+        // The text only of an answer that came whole: one cut at the cap
+        // would be made a string of megabytes for nothing.
+        job.ended(job.code, out.data ? out.data.byteLength : 0, job.code === 0 ? out.text : "", err.text)
       }
     }
   }
