@@ -114,6 +114,9 @@ function filterLibraryGenre(data, year) {
 
 // Wikipedia's longest are about 110.
 var TEXT_MAX = 300
+// The longest a service's title can be and still be a chart's: a chart
+// title, and a version's words after it.
+var SONG_TITLE_MAX = 2 * TEXT_MAX
 // A cell's attributes: 37 characters at most on Wikipedia's pages.
 var ATTRS_MAX = 500
 // A table's heading rows and a tie (two songs at 100 in 1969) take a few
@@ -426,9 +429,12 @@ function fold(text) {
 
 // A title as both sides name it: "Macarena (Bayside Boys Mix)" is
 // "Macarena - Bayside Boys Remix", "Yeah! feat. Lil Jon" is "Yeah!", "Don't
-// Cry" is "Dont Cry".
+// Cry" is "Dont Cry". Its patterns go back over each run of spaces (and the
+// first over an open bracket), so their time grows with the square of a
+// title's length, and a service's titles come from its answer: only the
+// first SONG_TITLE_MAX characters are read.
 function titleKey(title) {
-  var s = fold(title)
+  var s = fold(String(title || "").slice(0, SONG_TITLE_MAX))
   var bare = s.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, " ").replace(/\s+-\s+.*$/, "").replace(/\s+(feat\.?|featuring|ft\.)\s.*$/, "")
   if (bare.replace(/[^a-z0-9]/g, "") !== "") s = bare
   return s.replace(/&/g, " and ").replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim()
@@ -483,6 +489,8 @@ function bestMatch(entry, songs, year) {
   var best = null
   var bestScore = 0
   ;(songs || []).forEach(function(song, i) {
+    // Too long to be a chart's title, whatever it starts with.
+    if (String(song.title || "").length > SONG_TITLE_MAX) return
     var key = titleKey(song.title)
     if (key === "") return
     var title = keys.indexOf(key) >= 0 ? 2 : keys.some(function(k) { return sameSong(key, k) }) ? 1 : 0

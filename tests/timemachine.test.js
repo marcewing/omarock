@@ -183,6 +183,22 @@ test("titles match across punctuation, case, accents and a version in brackets",
   assert.equal(key("7"), "7")
 })
 
+test("a service's long titles don't hold the shell: titleKey reads 600 characters, bestMatch passes longer ones by", () => {
+  // Spaces and open brackets are what its patterns go back over: 200,000
+  // of them took minutes, all of it on the shell's one thread.
+  const long = [" ".repeat(200000), "(".repeat(200000), "a(".repeat(100000), "Yeah!" + " ".repeat(200000) + "x",
+    "Yeah! - " + " -".repeat(100000), "Yeah! feat." + " feat.".repeat(40000)]
+  const entry = { rank: 1, titles: ["Yeah!"], artist: "Usher" }
+  const start = Date.now()
+  for (const title of long) TimeMachine.titleKey(title)
+  const songs = long.map((title, i) => ({ kind: "song", id: "s" + i, title, artist: "Usher", year: 2004 }))
+  assert.equal(TimeMachine.bestMatch(entry, songs, 2004), null)
+  assert.ok(Date.now() - start < 500, (Date.now() - start) + " ms")
+  // A title just short enough still matches.
+  const fits = "Yeah! (" + "x".repeat(580) + ")"
+  assert.equal(TimeMachine.bestMatch(entry, [{ kind: "song", id: "y", title: fits, artist: "Usher", year: 2004 }], 2004).id, "y")
+})
+
 test("an artist credit's names, and what to search for", () => {
   assert.deepEqual(TimeMachine.artistNames("Usher featuring Lil Jon and Ludacris"), ["usher", "lil jon", "ludacris"])
   assert.deepEqual(TimeMachine.artistNames("Dionne and Friends (Dionne Warwick, Gladys Knight, Elton John and Stevie Wonder)"),
