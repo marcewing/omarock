@@ -307,7 +307,7 @@ Item {
     id: hostCheck
     deadline: 8000
     property var waiting: []
-    command: ["sh", "-c", "timeout -k 1 5 getent ahosts \"$1\" | awk '{print $1}' | sort -u | head -n 64; echo ==; ip -o addr show | awk '{sub(/\\/.*/, \"\", $4); print $4}' | head -n 256", "sh", root.localHost]
+    command: ["timeout", "-k", "1", "7", "sh", "-c", "timeout -k 1 5 getent ahosts \"$1\" | awk '{print $1}' | sort -u | head -n 64; echo ==; ip -o addr show | awk '{sub(/\\/.*/, \"\", $4); print $4}' | head -n 256", "sh", root.localHost]
     stdout: StdioCollector {
       onStreamFinished: {
         // Stopped before it listed this machine's addresses: nothing found.

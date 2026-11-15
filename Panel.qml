@@ -3809,9 +3809,11 @@ Panel {
   }
 
   // What's set up (tools/omarock-sources state), for the settings screen.
+  // timeout(1) stops the tool and what it runs (systemctl), whose output
+  // the panel waits on.
   Job {
     id: sourcesReader
-    command: [root.sourcesTool, "state"]
+    command: ["timeout", "-k", "2", "15", root.sourcesTool, "state"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -3863,7 +3865,7 @@ Panel {
   // What's set (tools/omarock-account show), for the settings screen.
   Job {
     id: accountReader
-    command: [root.accountTool, "show"]
+    command: ["timeout", "-k", "2", "15", root.accountTool, "show"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
