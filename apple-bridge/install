@@ -640,11 +640,13 @@ step_handoff() {
 pair_api() { control $1 /pair${2:-}; }  # METHOD [PATH]
 pair_state="" pair_left="" pair_tries=5
 pair_value() { print -r -- "$pair_state" | plutil -extract "$1" raw -o - - 2>/dev/null; }
+# A count from it, or nothing: only digits reach math.
+pair_number() { local n=$(pair_value "$1"); [[ $n == <-> ]] && print -r -- $n; }
 # While waiting: the code's state, and a note when a wrong code was tried (on fd 3,
 # since wait_until silences the check). Done once the code is closed.
 pair_closed() {
   pair_state=$(pair_api GET) && [[ -n $pair_state ]] || return 1
-  local left=$(pair_value triesLeft)
+  local left=$(pair_number triesLeft)
   if [[ -n $left && $left != $pair_left ]]; then
     pair_left=$left
     print -u3 -r -- $'\r\e[K'"  ${yellow}–${reset} a wrong code was tried: $left $( (( left == 1 )) && print try || print tries) left"
@@ -661,7 +663,7 @@ step_pair() {
     bad "the bridge didn't open a pairing code${pair_state:+: $(pair_value error)}"
     return 1
   fi
-  pair_tries=$(pair_value tries) pair_left=$(pair_value tries) secs=$(pair_value expiresIn)
+  pair_tries=$(pair_number tries) pair_left=$(pair_number tries) secs=$(pair_number expiresIn)
   shown="${code[1,3]} ${code[4,6]}"
   echo
   if [[ -z $answers ]] && (( $+commands[gum] )); then
@@ -727,8 +729,9 @@ pair_only() {
 # Listeners on the stream, as the running bridge counts them (its /v1/health, from
 # 0.13.0, which tells this Mac). Nothing if it can't tell: no bridge, an older one, or
 # its Icecast isn't up. Never Icecast's admin password: whatever holds 127.0.0.1:8000
-# would get it.
-listeners() { health_value listeners; }
+# would get it. Only digits: zsh's math runs any $(…) in an array subscript, and over
+# TCP the answer can be from whatever holds the port.
+listeners() { local n=$(health_value listeners); [[ $n == <-> ]] && print -r -- $n; }
 # The bridge's Icecast: it can outlive a bridge, so by its config.
 icecast_pattern() { print -r -- "icecast -c $support/icecast.xml"; }
 gone() { ! kill -0 $1 2>/dev/null; }

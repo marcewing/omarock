@@ -56,7 +56,13 @@ bridge_health() {
     curl -s -m 5 "http://127.0.0.1:${$(plutil -extract port raw -o - "$support/config.json" 2>/dev/null || true):-8710}/v1/health" 2>/dev/null ||
     true
 }
-listeners() { bridge_health | plutil -extract listeners raw -o - - 2>/dev/null || true; }
+# Only digits: zsh's math runs any $(…) in an array subscript, and over TCP the answer
+# can be from whatever holds the port.
+listeners() {
+  local n
+  n=$(bridge_health | plutil -extract listeners raw -o - - 2>/dev/null || true)
+  [[ $n == <-> ]] && print -r -- "$n" || true
+}
 
 # Forgets the installed app's launch agent through SMAppService, which stops it too: a
 # bootout alone leaves SMAppService's record enabled, and the next install's bridge then
