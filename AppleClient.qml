@@ -72,8 +72,11 @@ Item {
   property string token: ""
   // A bridge saved by its .local name: while the Mac is away, any account on
   // this machine can publish that name through avahi and would be sent the
-  // token. So the name is looked up before each health check (getent), and
-  // requests go only while it doesn't point at this machine.
+  // token. So the name is looked up before each health check
+  // (tools/omarock-resolve: avahi itself says whether the answer is a record
+  // published here), requests go only while it doesn't point at this
+  // machine, and only to the address it gave (hostAddress: Fetch's
+  // resolve), never to the name looked up again.
   readonly property string localHost: {
     var m = /^https?:\/\/([^\/:\[\]]+\.local)\.?(:\d+)?(\/|$)/i.exec(root.baseUrl)
     return m ? m[1].toLowerCase() : ""
@@ -87,7 +90,12 @@ Item {
   readonly property string heldText: root.bridgeName + "'s port (127.0.0.1:" + root.loopbackPort + ") is held by another account" + (listener.owner !== "" ? " (uid " + listener.owner + ")" : "") + ", so omarock doesn't use it"
   ListenerCheck { id: listener; port: root.loopbackPort }
   property string hostVerified: ""
+  property string hostAddress: ""
   property bool pointsHere: false
+  readonly property int hostPort: {
+    var m = /^https?:\/\/[^\/]+:(\d+)(\/|$)/.exec(root.baseUrl)
+    return m ? parseInt(m[1], 10) : /^https:/.test(root.baseUrl) ? 443 : 80
+  }
   readonly property string pointsHereText: root.localHost + " points to this machine, not your Mac: something here is answering for its name, so omarock sends it nothing"
   property bool reachable: false
   // How often a request failed outright (reachable went false), for tests.
@@ -182,8 +190,10 @@ Item {
     // What tells omarock-spotify the request is omarock's, not a web page's.
     headers["X-Omarock"] = "1"
     root.inflight = root.inflight.concat([entry])
+    var resolve = root.localHost === "" ? ""
+      : root.localHost + ":" + root.hostPort + ":" + (root.hostAddress.indexOf(":") >= 0 ? "[" + root.hostAddress + "]" : root.hostAddress)
     fetch.request({ url: root.baseUrl + path, method: method, headers: headers, json: body, maxBytes: cap,
-                    timeoutMs: timeoutMs || 10000 }, function(reply) {
+                    timeoutMs: timeoutMs || 10000, resolve: resolve }, function(reply) {
       // A reply that arrives after a plugin reload destroyed this client
       // (Apple Music's long poll, say) has nowhere to go. Mid-teardown the
       // client may still be there with its functions gone ("Property
@@ -298,25 +308,42 @@ Item {
   // answered at least once (or failed to).
   property var health: ({})
   property bool healthKnown: false
-  // The .local name's addresses, and this machine's, from one helper; then
-  // the health check. Its output is a few lines (one name's addresses). The
-  // lookup has 5 s (mDNS can take that long for a name that doesn't answer);
-  // one that can't run, or runs over (Job), finds no address, so the waiting
-  // checks still go, and find the name not verified.
+  // The .local name, looked up by tools/omarock-resolve: its address, or
+  // why not, as "=" and its exit code (0 the address, 9 this machine), then
+  // the health check. Up to 12 s (avahi waits 6 s on each address family);
+  // one that can't run, or runs over (Job), finds nothing, so the waiting
+  // checks still go, and find the name not verified. The verdict is for the
+  // name asked about: one changed meanwhile is looked up again.
+  readonly property string resolveTool: decodeURIComponent(String(Qt.resolvedUrl("tools/omarock-resolve")).replace(/^file:\/\//, ""))
   Job {
     id: hostCheck
-    deadline: 8000
+    deadline: 16000
     property var waiting: []
-    command: ["timeout", "-k", "1", "7", "sh", "-c", "timeout -k 1 5 getent ahosts \"$1\" | awk '{print $1}' | sort -u | head -n 64; echo ==; ip -o addr show | awk '{sub(/\\/.*/, \"\", $4); print $4}' | head -n 256", "sh", root.localHost]
+    property string asked: ""
+    command: ["bash", "-c", "timeout -k 1 13 \"$0\" \"$1\" 2>/dev/null | head -c 256; echo \"=${PIPESTATUS[0]}\"", root.resolveTool, hostCheck.asked]
     stdout: StdioCollector {
       onStreamFinished: {
-        // Stopped before it listed this machine's addresses: nothing found.
-        var parts = text.indexOf("==") >= 0 ? text.split("==") : []
-        var found = (parts[0] || "").split("\n").filter(function(a) { return a !== "" })
-        var mine = (parts[1] || "").split("\n").filter(function(a) { return a !== "" })
-        root.pointsHere = found.some(function(a) { return /^127\./.test(a) || a === "::1" || mine.indexOf(a) >= 0 })
-        root.hostVerified = found.length > 0 && !root.pointsHere ? root.localHost : ""
-        var waiting = hostCheck.waiting
+        if (!root || typeof root.checkHealthNow !== "function") return
+        var waiting
+        if (hostCheck.asked !== root.localHost) {
+          if (root.localHost === "") {
+            waiting = hostCheck.waiting
+            hostCheck.waiting = []
+            waiting.forEach(function(callback) { root.checkHealthNow(callback) })
+            return
+          }
+          hostCheck.asked = root.localHost
+          Qt.callLater(function() { if (root && !hostCheck.running) hostCheck.running = true })
+          return
+        }
+        var lines = text.split("\n").filter(function(l) { return l !== "" })
+        var code = (lines.filter(function(l) { return /^=\d+$/.test(l) })[0] || "=127").slice(1)
+        var address = lines[0] || ""
+        var ok = code === "0" && (/^[0-9.]+$/.test(address) || /^[0-9a-f:]+$/i.test(address))
+        root.pointsHere = code === "9"
+        root.hostAddress = ok ? address : ""
+        root.hostVerified = ok ? hostCheck.asked : ""
+        waiting = hostCheck.waiting
         hostCheck.waiting = []
         waiting.forEach(function(callback) { root.checkHealthNow(callback) })
       }
@@ -326,7 +353,10 @@ Item {
     if (root.loopbackPort > 0) return listener.verify(function() { root.checkHealthNow(callback) })
     if (root.localHost === "") return root.checkHealthNow(callback)
     hostCheck.waiting = hostCheck.waiting.concat([callback || null])
-    if (!hostCheck.running) hostCheck.running = true
+    if (!hostCheck.running) {
+      hostCheck.asked = root.localHost
+      hostCheck.running = true
+    }
   }
   function checkHealthNow(callback) {
     root.get("/v1/health", function(data, error) {

@@ -88,7 +88,6 @@ def prepare(work):
     (fakes / "omarchy-launch-floating-terminal-with-presentation").symlink_to(TOOLS / "fake-terminal")
     (fakes / "tailscale").symlink_to(TOOLS / "fake-tailscale")
     (fakes / "avahi-browse").symlink_to(TOOLS / "fake-avahi-browse")
-    (fakes / "getent").symlink_to(TOOLS / "fake-getent")
     # Never the real avahi: .local names as the test HOME's .fake-hosts says.
     (fakes / "busctl").symlink_to(TOOLS / "fake-busctl")
     (fakes / "pactl").symlink_to(TOOLS / "fake-pactl")

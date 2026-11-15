@@ -882,7 +882,9 @@ Panel {
       // mpd joins the stream at once, so the panel switches. With a bridge
       // before 0.7.0 the stream is near-empty until the Mac resumes, so mpd
       // rejoins once it has (AppleClient.catchUp), or else it stays behind.
-      client.playStream(root.appleStream, root.streamPrefixes())
+      // By the address its .local name was checked to lead to, never the
+      // name, which mpd would look up again each time it connects.
+      client.playStream(Apple.streamAt(root.appleStream, apple.localHost, apple.hostAddress), root.streamPrefixes())
       apple.post("/v1/resume", {}, apple.catchUp, true)
       root.clearSearch()
       root.say("Apple Music")
@@ -3974,7 +3976,7 @@ Panel {
     mpd: client
     clientName: root.clientName
     active: root.mpdOnApple
-    streamUrl: root.appleStream
+    streamUrl: Apple.streamAt(root.appleStream, apple.localHost, apple.hostAddress)
     streamDrop: root.streamPrefixes()
     checksToken: true
     refusedHint: ": the settings' Apple Music tab copies the new one"
