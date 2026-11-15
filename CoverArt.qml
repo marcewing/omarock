@@ -3,15 +3,19 @@ import qs.Commons
 import qs.Commons as Commons
 
 // Album cover, or a quiet music-note tile when the album has none (common
-// until beets has fetched it, and for compilations and bootlegs).
+// until beets has fetched it, and for compilations and bootlegs), and while a
+// remote one is fetched, or when it's refused.
 Item {
   id: root
 
   property string source: ""
+  // The panel's ArtCache: a remote cover shows only as the file it made.
+  property var art: null
   property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
 
-  readonly property bool showingImage: image.status === Image.Ready && root.source !== ""
+  readonly property string shown: root.art ? root.art.local(root.source) : root.source.indexOf("file://") === 0 ? root.source : ""
+  readonly property bool showingImage: image.status === Image.Ready && root.shown !== ""
 
   Rectangle {
     anchors.fill: parent
@@ -34,7 +38,7 @@ Item {
   Image {
     id: image
     anchors.fill: parent
-    source: root.source
+    source: root.shown
     asynchronous: true
     cache: true
     smooth: true

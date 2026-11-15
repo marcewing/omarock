@@ -13,6 +13,8 @@ Item {
   // An MpdClient, or an AppleClient in Apple Music or Spotify mode (the same shape).
   required property var mpd
   property string coverUrl: ""
+  // The panel's ArtCache: a remote cover shows only as its file.
+  property var art: null
   // What mpd is, in "Can't reach …"; and a line of details under the album.
   property string sourceName: "mpd"
   // What to check, when it can't be reached (else mpd's or the bridge's).
@@ -313,6 +315,7 @@ Item {
         width: Style.space(88)
         height: width
         source: root.coverUrl
+        art: root.art
         foreground: root.foreground
         fontFamily: root.fontFamily
 
@@ -335,6 +338,7 @@ Item {
       width: parent.width
       height: width
       source: root.coverUrl
+      art: root.art
       foreground: root.foreground
       fontFamily: root.fontFamily
 

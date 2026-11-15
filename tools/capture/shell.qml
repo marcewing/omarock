@@ -223,6 +223,19 @@ ShellRoot {
     return out
   }
 
+  // Every Image under item, shown or not (the items with sourceSize, status
+  // and fillMode), with its CoverArt's objectName, if it has one.
+  function imagesIn(item, window, out) {
+    if (!item) return out
+    if (item.sourceSize !== undefined && typeof item.status === "number" && typeof item.fillMode === "number"
+        && item.source !== undefined)
+      out.push({ window: window, name: item.objectName || (item.parent ? item.parent.objectName : "") || "",
+        source: String(item.source), status: item.status, shown: item.visible === true })
+    var children = item.children || []
+    for (var i = 0; i < children.length; i++) host.imagesIn(children[i], window, out)
+    return out
+  }
+
   function rootOf(item) {
     while (item && item.parent) item = item.parent
     return item
@@ -366,6 +379,19 @@ ShellRoot {
       host.textInputsIn(strip, "bar", out)
       return JSON.stringify(out)
     }
+    // Every Image in the panel's windows and the bar, shown or not: [{ window,
+    // name, source, status (Image.Ready is 1), shown }].
+    function images(): string {
+      var p = popup()
+      var out = []
+      if (p) host.imagesIn(host.rootOf(p.contentItem[0]), "panel", out)
+      host.imagesIn(host.panel.keysWindow.contentItem, "keys", out)
+      host.imagesIn(host.panel.setupWindow.contentItem, "setup", out)
+      host.imagesIn(strip, "bar", out)
+      return JSON.stringify(out)
+    }
+    // What the art cache says of an address: "file", "refused: why", "waiting" or "".
+    function artState(url: string): string { return host.panel.art ? host.panel.art.stateOf(url) : "no cache" }
     // The text input with the keys: its text, cursor and selection, why its
     // last paste was turned down, whether its cursor shows.
     function field(): string {
@@ -532,6 +558,7 @@ ShellRoot {
           fields: p.infoCard.card.groups.reduce(function(all, g) {
             return all.concat(g.fields.map(function(f) { return g.title + ": " + f.label + " = " + f.value })) }, []) } : null,
         bar: { showSong: host.widget.showSong, text: host.widget.songText, cover: host.widget.coverUrl,
+               coverFile: host.widget.coverFile,
                queueEmpty: host.widget.queueEmpty, playing: host.widget.playing,
                width: host.widget.implicitWidth, indicatorWidth: host.widget.openPanelIndicatorWidth,
                coverWidth: host.findNamed(host.widget, "cover") ? host.findNamed(host.widget, "cover").width : 0,
@@ -661,6 +688,7 @@ ShellRoot {
     }
     // The list scrolled to y, as a mouse wheel would.
     function scrollList(y: real): void { host.panel.listView.contentY = y }
+    function scrollListToEnd(): void { host.panel.listView.positionViewAtEnd() }
     // The row in the middle of the list as it's scrolled.
     function rowAtMiddle(): int {
       var list = host.panel.listView

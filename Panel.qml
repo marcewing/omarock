@@ -436,6 +436,10 @@ Panel {
 
   readonly property bool connected: client.ready && (!bridgeMode || bridge.ready) && (!sxmMode || sxm.available)
   readonly property bool playing: player.status.state === "play"
+  // Covers are addresses here (coverUrl, rowCoverUrl, infoCover); a remote
+  // one shows only as the file the art cache makes of it (ArtCache,
+  // tools/omarock-art), which every CoverArt and the bar's cover ask.
+  readonly property var art: artCache
   readonly property string coverUrl: bridgeMode ? Apple.artUrl(bridge.song ? bridge.song.artwork : null, 360)
     : sxmMode ? (sxm.available ? Apple.artUrl({ url: (sxm.now && sxm.now.art) || (sxm.channel && sxm.channel.logo) || "" }, 360) : "")
     : radioMode ? radio.art
@@ -448,11 +452,10 @@ Panel {
   readonly property bool confirmOpen: confirmTarget !== null
   readonly property bool infoOpen: infoCard !== null
   // The info card's cover: a local album's (by a song of it), a station's
-  // logo once it's known to load, else Apple Music's artwork or a channel's.
+  // logo, else Apple Music's artwork or a channel's.
   readonly property string infoCoverUrl: !root.infoCard ? ""
     : root.infoCard.coverFile ? (root.coverUrls[Mpd.directoryOf(root.infoCard.coverFile)] || "")
-    : root.infoCard.logo ? radio.logoUrl(root.infoCard.logo)
-    : root.infoCard.coverUrl
+    : root.infoCard.logo || root.infoCard.coverUrl
   readonly property var rows: browsing ? browseRows : searchMode ? resultRows : queueRows
   // Which list the keys work in. The same list redrawn (a station tuned, the
   // song moved on) stays where it is; another (a search typed, a level
@@ -2771,12 +2774,10 @@ Panel {
   // A row's cover, asked for when the row is created (so only rows that
   // come into view cost a lookup), and its URL once known. A row has either
   // coverFile (a song of the album) or cover ({ album, artist } to look up).
+  // A remote cover (a station's logo, Apple Music's artwork) is asked of
+  // the art cache as its row shows it.
   function requestCover(row) {
-    if (row.kind === "station") {
-      if (row.artwork) radio.checkLogo(row.artwork.url)
-      return
-    }
-    if (row.apple) return
+    if (row.kind === "station" || row.apple) return
     if (row.coverFile) {
       client.cover(row.coverFile)
     } else if (row.cover) {
@@ -2792,7 +2793,7 @@ Panel {
   }
 
   function rowCoverUrl(row) {
-    if (row.kind === "station") return row.artwork ? radio.logoUrl(row.artwork.url) : ""
+    if (row.kind === "station") return row.artwork ? row.artwork.url : ""
     if (row.artwork) return Apple.artUrl(row.artwork, 36)
     var file = row.coverFile || (row.cover ? root.albumCoverFiles[row.cover.album + "\u0000" + row.cover.artist] || "" : "")
     return file ? (root.coverUrls[Mpd.directoryOf(file)] || "") : ""
@@ -3617,7 +3618,6 @@ Panel {
       var station = radio.stations[request.uuid]
       if (!station) { root.say("Radio Browser hasn't sent this station's details"); return }
       var playing = request.uuid === radio.currentUuid
-      radio.checkLogo(station.favicon)
       show(Info.station(station, { favorite: radio.isFavorite(request.uuid), now: playing ? radio.song : null }),
         { logo: station.favicon || "" }, false)
     } else if (request.type === "channel") {
@@ -3948,6 +3948,8 @@ Panel {
       home + "/.local/share/omarock-soloist", home + "/.cache/omarock-soloist"]
   }
 
+  ArtCache { id: artCache }
+
   RadioClient {
     id: radio
     api: root.radioBrowser
@@ -3956,6 +3958,7 @@ Panel {
     timeZone: root.setting("timeZone", "")
     cacheDir: Quickshell.env("HOME") + "/.cache/omarock"
     mpd: client
+    covers: artCache
     active: root.radioMode
     onCurrentUuidChanged: if (currentUuid !== "") root.lastStation = currentUuid
     onTuneRequested: function(station) { root.tuneStation(station) }
@@ -4268,6 +4271,7 @@ Panel {
         visible: root.infoOpen
         info: root.infoCard ? root.infoCard.card : null
         coverUrl: root.infoCoverUrl
+        art: root.art
         loading: !!root.infoCard && root.infoCard.loading
         wide: root.expanded
         actionText: root.infoLibraryAction
@@ -4762,6 +4766,7 @@ Panel {
           playingFile: root.playingFile
           libraryMark: !!listRoot.album && listRoot.album.owned[entryColumn.index] === true
           coverUrl: root.rowCoverUrl(entryColumn.modelData)
+          art: root.art
           foreground: root.foreground
           fontFamily: root.fontFamily
           onHoveredRow: if (listRoot.role === "current") root.hoverRow(entryColumn.index)
@@ -4837,6 +4842,7 @@ Panel {
         width: visible ? Style.space(44) : 0
         height: Style.space(44)
         source: heading.cover
+        art: root.art
         foreground: root.foreground
         fontFamily: root.fontFamily
       }
@@ -5028,6 +5034,7 @@ Panel {
         width: visible ? Style.space(44) : 0
         height: width
         source: root.infoCover(root.browseInfo)
+        art: root.art
         foreground: root.foreground
         fontFamily: root.fontFamily
       }
@@ -5541,6 +5548,7 @@ Panel {
         width: parent.width
         mpd: root.player
         coverUrl: root.coverUrl
+        art: root.art
         sourceName: root.spotifyMode ? "omarock-spotify" : root.appleMode ? "Apple Music on the Mac" : root.sxmMode ? "SiriusXM (omarock-sxm)" : "mpd"
         checkText: root.spotifyMode ? "Check it with: systemctl --user status omarock-spotify" : ""
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""
@@ -5690,6 +5698,7 @@ Panel {
         large: true
         mpd: root.player
         coverUrl: root.coverUrl
+        art: root.art
         sourceName: root.spotifyMode ? "omarock-spotify" : root.appleMode ? "Apple Music on the Mac" : root.sxmMode ? "SiriusXM (omarock-sxm)" : "mpd"
         checkText: root.spotifyMode ? "Check it with: systemctl --user status omarock-spotify" : ""
         extraText: root.bridgeMode ? root.bridgeExtra : root.sxmMode ? root.sxmExtra : root.radioMode ? root.radioExtra : ""

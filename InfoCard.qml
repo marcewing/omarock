@@ -13,6 +13,8 @@ Rectangle {
   // Info.js's card.
   property var info: null
   property string coverUrl: ""
+  // The panel's ArtCache: a remote cover shows only as its file.
+  property var art: null
   property bool loading: false
   property color foreground: Commons.Color.foreground
   property color dim: Qt.darker(foreground, 1.5)
@@ -172,6 +174,7 @@ Rectangle {
           width: Style.space(root.wide ? 150 : 96)
           height: width
           source: root.coverUrl
+          art: root.art
           foreground: root.foreground
           fontFamily: root.fontFamily
         }

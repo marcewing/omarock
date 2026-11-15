@@ -45,6 +45,7 @@ mpd with mpd's `null` output, or a private PipeWire.
 | `Mpd.js` | Pure helpers: quoting, parsing, accent-insensitive patterns, albums, covers |
 | `PlayerCard.qml` | Now playing, seek, transport, volume |
 | `TrackRow.qml`, `CoverArt.qml` | A row of any list, and a cover with a placeholder |
+| `ArtCache.qml`, `ArtStore.js` | Remote cover art (Apple Music's, Spotify's, SiriusXM's, a station's logo, a stream's ICY artwork) as the local files `tools/omarock-art` makes of it, the only thing a cover's Image is given (below, "Covers, fetched and checked outside the shell"); one answer serves every panel (`ArtStore.js`) |
 | `KeysHelp.qml`, `InfoCard.qml`, `PlaylistPicker.qml` | The key list (`?`, over the panel or in its own window), the info card (`i`), the playlist picker (`A`) |
 | `Hints.js` | Pure helpers: the hint line's keys, fitted to its fixed number of lines |
 | `Paging.js` | Pure helpers: where PgUp and PgDn take the cursor (the first or last row in full view, then a page on), for the panel's lists, the settings and the playlist picker |
@@ -68,8 +69,8 @@ mpd with mpd's `null` output, or a private PipeWire.
 | `sxm/` | omarock-sxm, the SiriusXM relay |
 | `apple-bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
 | `patches/` | The mpd-mpris patch that makes Apple Music's stream play well, and the mpd one (merged upstream) |
-| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-mpd-mpris`; `pin-sxm` writes `sxm/requirements.txt`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`, `omarock-resolve`), and the test harness (`capture/`) |
-| `tests/` | node tests for the pure helpers |
+| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-mpd-mpris`; `pin-sxm` writes `sxm/requirements.txt`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`, `omarock-resolve`), the panel's cover fetcher (`omarock-art`), and the test harness (`capture/`) |
+| `tests/` | node tests for the pure helpers, and `test_art.py` for `tools/omarock-art` |
 
 ## How it works
 
@@ -232,6 +233,32 @@ mpd with mpd's `null` output, or a private PipeWire.
   request has an `Origin` or `Sec-Fetch-` header, as every browser's does and
   omarock-spotify's and the Spotify apps' never do: it looks at the request
   with `MSG_PEEK` (Soloist still reads all of it), for up to a second.
+- **Covers, fetched and checked outside the shell.** Qt's `Image` reads a
+  remote image whole, with no limit on its size or on how long it takes, then
+  decodes whatever its bytes say it is (Omarchy's Qt reads SVG, PDF, TIFF and
+  WebP among its image formats), on the thread the bar and every plugin
+  share; and a station's logo (Radio Browser's `favicon`) or a stream's ICY
+  artwork is anyone's to choose. So no Image in omarock is given a remote
+  address. `CoverArt` and the bar's cover show `ArtCache.local(url)`: mpd's
+  own covers (`file://`) as they are, anything else only as a file
+  `tools/omarock-art` made of it, and nothing (the note) until then or when
+  it's refused. Asking is what fetches: a batch of addresses to each of three
+  helpers at once, on stdin, the newest first (the rows in view). For each,
+  the helper takes http or https only, at most 3 redirects (each checked, none
+  from https to http), 10 s and 2 MiB in all, refused as it reads, and a
+  server on this machine only if this account runs it (the socket table, as
+  above). It keeps only what the bytes say: JPEG and PNG of at most 4096 a
+  side, a PNG cut to IHDR, PLTE, tRNS, IDAT and IEND, its image data
+  inflating to its size and no more, a JPEG cut to its frame, tables and
+  scans and its JFIF and Adobe markers; a Windows icon (most favicons) or a
+  GIF's first frame it draws into a PNG; SVG, WebP and the rest are refused.
+  Files go in `~/.cache/omarock/art` (0700, its files 0600), named by the
+  address's SHA-256. A refusal is remembered, a day, or 2 minutes for one that
+  may pass (a server that didn't answer), so a bad address isn't fetched
+  again each time its row comes into view; files unused for 30 days go.
+  `tests/test_art.py` runs the helper against `tools/capture/fake_art.py`'s
+  good and hostile art, and `--only remote-art` checks the panel with it
+  (below).
 - **The Mac's .local name, checked.** Any account here can publish a .local
   name through avahi while the Mac is away, and would then get what's sent
   to it: the bridge's token, a pairing code, the stream's secret.
@@ -284,6 +311,7 @@ tools/capture/capture.py --real-mpd [out-dir]           # read-only, your mpd
 tools/capture/capture.py --bus --only bus-volume        # with a private PipeWire
 python3 -I audio/test-bus.py
 python3 -I spotify/test_service.py
+python3 -I tests/test_art.py
 python3 -I spotify/test_soloist_shim.py
 dbus-run-session -- python3 -I spotify/test_mpris.py
 apple-bridge/test-scripts.zsh                           # on a Mac: the bridge scripts
@@ -299,7 +327,13 @@ everything else:
 - `fake_bridge.py` stands in for the Apple Music bridge, and, with `--spotify`,
   for omarock-spotify, watching the fake mpd as the real service watches mpd;
 - `fake_sxm.py` for omarock-sxm;
-- `fake_radio.py` for Radio Browser;
+- `fake_radio.py` for Radio Browser; its "Artcheck" stations' logos are
+  `fake_art.py`'s art, good and hostile (an endless body, too big, 60 zTXt
+  chunks of 7 MiB, an SVG, a PDF, a PNG claiming 30000 pixels a side, a
+  redirect loop, one to `file://`, a trickle), served under `/art/`.
+  `--only remote-art` checks that the good ones show and the rest show the
+  note, that the shell's memory stays put, and that no Image in the panel, the
+  bar or the setup windows has a remote source;
 - `fake_charts.py` for Wikipedia: 1985's chart, in the shapes Wikipedia's pages
   use (1984's the same), 1982's in a page made to slow a parser down, 1983's
   too big to read, and no page for any other year;

@@ -22,8 +22,10 @@ CursorSurface {
   // A song of an Apple Music or Spotify album you have only some of, that
   // is in your library: a check by its length.
   property bool libraryMark: false
-  // The album cover, for album rows that have one.
+  // The album cover, for album rows that have one, and the panel's ArtCache
+  // (a remote cover shows only as its file).
   property string coverUrl: ""
+  property var art: null
   property color dim: Qt.darker(foreground, 1.5)
   property string fontFamily: Style.font.family
 
@@ -105,6 +107,7 @@ CursorSurface {
       width: visible ? Style.space(36) : 0
       height: width
       source: row.coverUrl
+      art: row.art
       foreground: row.foreground
       fontFamily: row.fontFamily
     }

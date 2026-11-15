@@ -34,6 +34,9 @@ BarWidget {
   readonly property string artist: panel ? panel.songArtist : ""
   readonly property string album: panel ? panel.songAlbum : ""
   readonly property string coverUrl: panel ? panel.coverUrl : ""
+  // What the cover shows: a local file, as the panel's ArtCache makes one of
+  // a remote cover.
+  readonly property string coverFile: panel && panel.art ? panel.art.local(coverUrl) : ""
   readonly property bool popoutSwitchClosing: panel ? panel.popoutSwitchClosing === true : false
 
   readonly property bool showSong: hasSong && !vertical
@@ -129,7 +132,7 @@ BarWidget {
           id: cover
           anchors.fill: parent
           anchors.margins: 1
-          source: root.showSong ? root.coverUrl : ""
+          source: root.showSong ? root.coverFile : ""
           sourceSize.width: Math.round(width * Screen.devicePixelRatio)
           sourceSize.height: Math.round(height * Screen.devicePixelRatio)
           fillMode: Image.PreserveAspectCrop
@@ -139,7 +142,7 @@ BarWidget {
 
         Text {
           anchors.centerIn: parent
-          visible: root.coverUrl === "" || cover.status === Image.Error
+          visible: root.coverFile === "" || cover.status === Image.Error
           textFormat: Text.PlainText
           text: "󰝚"
           color: root.barForeground

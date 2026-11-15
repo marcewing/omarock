@@ -46,8 +46,8 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
                 "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js", "StdinProcess.qml", "ListenerCheck.qml",
-                "GuardedField.qml", "Editing.js", "Job.qml", "Reply.js", "Fetch.qml",
-                "tools/omarock-account", "tools/omarock-sources", "tools/update-soloist", "tools/omarock-resolve"]
+                "GuardedField.qml", "Editing.js", "Job.qml", "Reply.js", "Fetch.qml", "ArtCache.qml", "ArtStore.js",
+                "tools/omarock-account", "tools/omarock-sources", "tools/update-soloist", "tools/omarock-resolve", "tools/omarock-art"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
 # The fake Apple Music bridge, when one runs: { port, log }.
@@ -321,6 +321,7 @@ def scenarios(host, output, socket_path, command_log, failures):
     time_machine_scenario(host, output, socket_path, failures)
     guarded_fields_scenario(host, output, failures)
     bounded_scenario(host, failures)
+    remote_art_scenario(host, output, socket_path, failures)
 
     # mpd goes away: the panel says so instead of failing silently.
     host.call("close")
@@ -1594,6 +1595,8 @@ def radio_scenario(host, output, socket_path, failures):
     art = BRIDGE["radio"] + "/logo/aa5500.png"
     mpd_client(socket_path, 'fake_stream_title "Days Of The New - text=\\"Touch, Peel & Stand\\" song_spot=\\"M\\" amgArtworkURL=\\"' + art + '\\""')
     wait_for(lambda: host.state()["nowPlaying"].startswith("Touch, Peel & Stand"), "the song")
+    # The art shows once tools/omarock-art has made a file of it.
+    wait_for(lambda: host.state()["coverUrl"] == art, "the song's art", timeout=10)
     s = host.state()
     check(s["nowPlaying"] == "Touch, Peel & Stand · Days Of The New" and s["coverUrl"] == art,
           "the station's title becomes the song and its art: " + s["nowPlaying"], failures)
@@ -4463,6 +4466,153 @@ def search_covers_scenario(host, failures):
     host.call("close")
 
 
+def remote_art_scenario(host, output, socket_path, failures):
+    """The marketplace's review (Medium): Qt's Image reads a remote image
+    whole, then decodes whatever its bytes say it is, on the thread the bar
+    and every plugin share, and a station's logo (Radio Browser's favicon) or
+    a stream's ICY artwork is anyone's to choose; the panel's own check
+    (an XHR) read the logo whole too. So no Image ever gets a remote address:
+    tools/omarock-art fetches and checks each, and an Image shows its file.
+    The "Artcheck" stations' logos (fake_art.py) are good and hostile; the
+    good ones show, the rest show the note, and nothing remote reaches an
+    Image, in the panel, the bar or the setup windows."""
+    import hashlib
+    base = BRIDGE["radio"] + "/art/"
+    art_dir = Path(host.env["HOME"]) / ".cache/omarock/art"
+    good = ["good.jpg", "good.png", "ztxt.png", "favicon.ico", "logo.gif"]
+    bad = ["endless.png", "big.png", "big-chunked.png", "logo.svg", "not-an-image.png", "huge.png", "pdf.png",
+           "loop", "to-file", "trickle.png"]
+
+    def rss():
+        for line in Path(f"/proc/{BRIDGE['qs_pid']}/status").read_text().splitlines():
+            if line.startswith("VmRSS:"): return int(line.split()[1]) * 1024
+        return 0
+
+    def images():
+        return json.loads(host.call("images"))
+
+    def remote(found):
+        """Images whose source is anything but a local file (or none)."""
+        return [f"{i['window']}:{i['name']} {i['source'][:80]}" for i in found
+                if i["source"] and not i["source"].startswith("file://")]
+
+    def showing(url, found):
+        """An Image showing the file made of url: [shown and ready]."""
+        key = hashlib.sha256(url.encode()).hexdigest()
+        return [i["shown"] and i["status"] == 1 for i in found if key in i["source"]]
+
+    def walk(what):
+        found = images()
+        check(found and not remote(found), f"{what}: no Image has a remote source ({len(found)} Images): "
+              + "; ".join(remote(found)[:4]), failures)
+        return found
+
+    bridge = f"http://127.0.0.1:{BRIDGE['port']}"
+    BRIDGE["config"].write_text(json.dumps({"bridge": bridge, "stream": bridge + "/omarock.ogg"}))
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    wait_for(lambda: host.state()["appleConfigured"], "apple.json read")
+    to_source(host, "radio")
+    host.settle(1)
+    before = rss()
+    host.call("press", "/")
+    host.call("typeKeys", "artcheck")
+    wait_for(lambda: host.state()["query"] == "artcheck" and not host.state()["searching"], "station search")
+    rows = host.state()["rows"]
+    check(len(rows) == len(good + bad) and all(r.startswith("station:Artcheck ") for r in rows),
+          "search finds a station for each logo: " + ", ".join(rows[:3]), failures)
+    urls = {n: base + n for n in good + bad}
+
+    def settle(names, what, timeout):
+        """Wait until each of names is fetched or refused (they're asked for as
+        their rows come into view); their states, as far as they got."""
+        def states():
+            return {n: host.call("artState", urls[n]) for n in names}
+        try:
+            wait_for(lambda: all(v.split(":")[0] in ("file", "refused") for v in states().values()), what, timeout=timeout)
+        except RuntimeError:
+            pass
+        return states()
+
+    states = settle(good, "the good logos, at the top", 20)
+    check(all(states[n] == "file" for n in good), "the good logos (JPEG, PNG, one with 60 zTXt chunks, an icon, a GIF) "
+          "are fetched: " + repr(states), failures)
+    host.settle(1)
+    found = walk("the station list")
+    shown = {n: showing(urls[n], found) for n in good}
+    check(all(shown[n] == [True] for n in good), "each good logo shows in its row: " + repr(shown), failures)
+    host.grab(output / "compact-art.png")
+    # The rest, the list scrolled to its end: each row's logo is asked for as
+    # it comes into view.
+    host.call("scrollListToEnd")
+    states = settle(bad, "the rest", 45)
+    check(all(states[n].startswith("refused") for n in bad), "the rest are refused (an endless body, too big, SVG, "
+          "not an image, 30000 pixels a side, PDF, a redirect loop, a redirect to file://, a trickle): "
+          + repr({n: states[n] for n in bad}), failures)
+    host.settle(1)
+    found = walk("the station list, scrolled")
+    check(not any(showing(urls[n], found) for n in bad), "nothing of theirs is shown", failures)
+    grown = rss() - before
+    check(grown < 100 * 1024 * 1024, f"the shell's memory stays put ({grown / 1048576:.0f} MiB more)", failures)
+    made = [p for p in art_dir.iterdir() if not p.name.startswith(".")] if art_dir.exists() else []
+    ztxt = art_dir / (hashlib.sha256(urls["ztxt.png"].encode()).hexdigest() + ".png")
+    check(art_dir.exists() and art_dir.stat().st_mode & 0o777 == 0o700
+          and made and all(p.stat().st_mode & 0o777 == 0o600 for p in made),
+          f"the cache folder is 0700 and its {len(made)} files 0600", failures)
+    check(ztxt.exists() and b"zTXt" not in ztxt.read_bytes() and b"tEXt" not in ztxt.read_bytes()
+          and ztxt.stat().st_size < 1000, "the zTXt PNG is kept without its text", failures)
+
+    # Tuned: the station's logo on the card and the bar; a song's ICY art
+    # once it has a file, the station's logo when it's refused.
+    host.call("scrollList", 0)
+    host.call("press", "Return")
+    wait_for(lambda: "http://radio.example/st-art-good.jpg#omarock-radio=st-art-good.jpg" in mpd_files(socket_path), "tuned")
+    wait_for(lambda: host.state()["bar"]["coverFile"] != "", "the bar's cover")
+    host.settle(1)
+    s = host.state()
+    check(s["coverUrl"] == urls["good.jpg"] and showing(urls["good.jpg"], images()).count(True) >= 2,
+          "the station's logo on the card and the bar", failures)
+    mpd_client(socket_path, 'fake_stream_title "Days Of The New - text=\\"Shelf In The Room\\" song_spot=\\"M\\" amgArtworkURL=\\"'
+               + urls["endless.png"] + '\\""')
+    wait_for(lambda: host.state()["nowPlaying"].startswith("Shelf In The Room"), "the song")
+    host.settle(1)
+    check(host.state()["coverUrl"] == urls["good.jpg"], "a song's art that's refused: the station's logo stays", failures)
+    song_art = BRIDGE["radio"] + "/logo/aa7700.png"
+    mpd_client(socket_path, 'fake_stream_title "Days Of The New - text=\\"Touch, Peel & Stand\\" song_spot=\\"M\\" amgArtworkURL=\\"'
+               + song_art + '\\""')
+    wait_for(lambda: host.state()["coverUrl"] == song_art, "the song's art", timeout=12)
+    host.settle(1)
+    check(showing(song_art, images()).count(True) >= 2, "a song's art, once fetched, on the card and the bar", failures)
+    walk("radio playing")
+    host.call("expand", "true")
+    host.settle(1)
+    walk("expanded, radio playing")
+    host.grab(output / "expanded-art.png")
+    host.call("expand", "false")
+
+    # Apple Music's art goes the same way, in the card, the bar, the list and
+    # the info card.
+    to_source(host, "apple")
+    wait_for(lambda: host.state()["appleMode"] and host.state()["bar"]["coverFile"] != "", "Apple Music's cover", timeout=15)
+    host.settle(1.5)
+    s = host.state()
+    check(showing(s["coverUrl"], images()).count(True) >= 2, "Apple Music's cover on the card and the bar", failures)
+    host.call("press", "i")
+    wait_for(lambda: host.state()["info"] is not None, "the info card")
+    wait_for(lambda: any(showing(host.state()["info"]["cover"], images())), "the info card's cover", timeout=10)
+    walk("Apple Music, its info card open")
+    host.call("press", "Escape")
+    host.call("openSetup", "apple-music")
+    host.settle(1)
+    walk("a setup window open")
+    host.call("setupClick", "setupCancel")
+    # Set up… closed the panel, for the setup window to have the keys.
+    host.call("open")
+    wait_for(lambda: host.state()["opened"], "open")
+    to_source(host, "local")
+    host.call("close")
+
+
 def history_scenario(host, output, socket_path, failures):
     """Marc, 10-27: a History "of everything the user played", from every
     source, with the source shown, on by default and kept 7 days (both
@@ -7271,6 +7421,7 @@ def main():
             with log.open("w") as stream:
                 qs = subprocess.Popen(["qs", "-p", str(shell)], env=env, stdout=stream, stderr=subprocess.STDOUT)
                 BRIDGE["qs"] = qs
+                BRIDGE["qs_pid"] = qs.pid
                 try:
                     wait_for(lambda: host.call("ready", quiet=True) == "true", "panel connected to fake mpd")
                     if real: real_scenario(host, output, failures)
@@ -7322,6 +7473,7 @@ def main():
                             elif name == "hover-scroll": hover_scroll_scenario(host, failures)
                             elif name == "paging": paging_scenario(host, output, failures)
                             elif name == "search-covers": search_covers_scenario(host, failures)
+                            elif name == "remote-art": remote_art_scenario(host, output, socket_path, failures)
                             elif name == "history": history_scenario(host, output, socket_path, failures)
                             elif name == "time-machine": time_machine_scenario(host, output, socket_path, failures)
                             elif name == "favorite-follow": favorite_follow_scenario(host, output, failures)

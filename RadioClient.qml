@@ -60,10 +60,9 @@ Item {
   onAreaTextChanged: if (root.cacheRead) root.findArea()
   onTimeZoneChanged: if (root.cacheRead) root.findArea()
   readonly property string playlist: "Radio"
-  // Logo and artwork URLs checked before an Image loads them: url -> "ok",
-  // "bad" or "pending". Radio Browser's logos are often dead links, and a
-  // failed Image logs to the journal; a failed check doesn't.
-  property var logos: ({})
+  // The panel's ArtCache, which fetches and checks logos and artwork (an
+  // Image only ever shows its files): whether a song's art has one to show.
+  property var covers: null
 
   readonly property string currentUuid: root.mpd ? Radio.uuidOf(root.mpd.currentSong.file || "") : ""
   readonly property var station: root.stations[root.currentUuid] || null
@@ -498,35 +497,6 @@ Item {
     }
   }
 
-  // A logo's URL once it's known to load, else "" (and a check starts).
-  function logoUrl(url) {
-    return url && root.logos[url] === "ok" ? url : ""
-  }
-
-  function checkLogo(url) {
-    if (!url || root.logos[url] !== undefined) return
-    root.setLogo(url, "pending")
-    var request = new XMLHttpRequest()
-    request.onreadystatechange = function() {
-      // A reply that arrives after a plugin reload destroyed this client
-      // (Apple Music's long poll, say) has nowhere to go. Mid-teardown the
-      // client may still be there with its functions gone ("Property
-      // 'logTiming' … is not a function").
-      if (request.readyState !== XMLHttpRequest.DONE || !root || typeof root.xhr !== "function") return
-      var type = request.getResponseHeader("Content-Type") || ""
-      root.setLogo(url, request.status >= 200 && request.status < 300 && type.indexOf("image/") === 0 ? "ok" : "bad")
-    }
-    request.open("GET", url)
-    request.responseType = "arraybuffer"
-    request.send()
-  }
-
-  function setLogo(url, state) {
-    var logos = Object.assign({}, root.logos)
-    logos[url] = state
-    root.logos = logos
-  }
-
   // Radio Browser counts plays, to rank stations; it asks clients to say.
   function click(uuid) {
     root.get("/json/url/" + encodeURIComponent(uuid), null)
@@ -553,10 +523,10 @@ Item {
     root.refreshLocal(true)
   }
 
-  // The now playing card's art: the song's, else the station's logo.
-  readonly property string art: root.logoUrl(root.song.art) || root.logoUrl(root.station ? root.station.favicon : "")
-  onSongChanged: root.checkLogo(root.song.art)
-  onStationChanged: if (root.station) root.checkLogo(root.station.favicon)
+  // The now playing card's art: the song's once there's a file of it to
+  // show, else the station's logo.
+  readonly property string art: root.song.art && root.covers && root.covers.local(root.song.art) !== "" ? root.song.art
+    : root.station ? root.station.favicon || "" : ""
 
   // The station playing, looked up if it isn't known yet (after a restart).
   // And what it sends learned from (titleTimer).

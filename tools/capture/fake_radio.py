@@ -2,12 +2,13 @@
 """A fake Radio Browser (radio-browser.info's JSON API), for testing the
 panel's radio: a few stations, search by name, tag, region, country and
 distance (as Radio Browser does, any part of the name, tag or region), lookup by uuid,
-the click counter, and logos it draws itself. No audio (the fake mpd never
-fetches the streams). Every request is logged (path) for the tests.
+the click counter, and logos it draws itself. The "Artcheck" stations' logos
+are fake_art's, good and hostile, served here under /art/. No audio (the fake
+mpd never fetches the streams). Every request is logged (path) for the tests.
 
     fake_radio.py <port-file> <request-log>
 """
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import math
 from pathlib import Path
@@ -18,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_mpd import png  # noqa: E402
 from hostile import Hostile  # noqa: E402
+from fake_art import Server as ArtServer, serve as serve_art  # noqa: E402
 
 PORT = 0
 STATIONS = [
@@ -40,6 +42,12 @@ STATIONS = [
     ("st-wmpg", "WMPG Portland", "Portland, ME", "area-test", "MP3", 128, 0, 250, "aa6a2a"),
     ("st-cbc", "CBC Radio One Vancouver", "British Columbia", "area-test", "AAC", 96, 0, 600, "c02020"),
 ]
+# For the covers (tools/omarock-art): a station for each of fake_art's logos,
+# found by searching "artcheck", in this order.
+ART = ["good.jpg", "good.png", "ztxt.png", "favicon.ico", "logo.gif", "endless.png", "big.png", "big-chunked.png",
+       "logo.svg", "not-an-image.png", "huge.png", "pdf.png", "loop", "to-file", "trickle.png"]
+STATIONS += [(f"st-art-{n}", f"Artcheck {n}", "Nowhere", "test", "MP3", 128, 0, 50 - i, "808080")
+             for i, n in enumerate(ART)]
 # Where some are, beyond the US and its region field.
 EXTRA = {
     "st-kopb": {"geo_lat": 45.52, "geo_long": -122.68},
@@ -55,9 +63,10 @@ def km(a, b, c, d):
 
 def station(row):
     uuid, name, state, tags, codec, bitrate, hls, clicks, color = row
+    favicon = f"http://127.0.0.1:{PORT}/" + (f"art/{uuid[7:]}" if uuid.startswith("st-art-") else f"logo/{color}.png")
     return dict({"stationuuid": uuid, "name": name, "url": f"http://radio.example/{uuid}",
                  "url_resolved": f"http://radio.example/{uuid}" + ("/hls.m3u8" if hls else ""),
-                 "homepage": "", "favicon": f"http://127.0.0.1:{PORT}/logo/{color}.png", "tags": tags,
+                 "homepage": "", "favicon": favicon, "tags": tags,
                  "country": "The United States Of America", "countrycode": "US", "state": state, "codec": codec,
                  "bitrate": bitrate, "hls": hls, "lastcheckok": 1, "clickcount": clicks, "votes": clicks // 10,
                  "geo_lat": None, "geo_long": None, "iso_3166_2": None}, **EXTRA.get(uuid, {}))
@@ -88,6 +97,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, self.server.hostile.set(query))
         if self.server.hostile.applies(url.path):
             return self.server.hostile.answer(self)
+        if parts[:1] == ["art"] and len(parts) == 2 and serve_art(self, parts[1]): return
         if parts[:1] == ["logo"]:
             color = parts[1].split(".")[0]
             top = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
@@ -120,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     global PORT
     port_file, log = Path(sys.argv[1]), Path(sys.argv[2])
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = ArtServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     PORT = server.server_address[1]
     server.log_path = log
