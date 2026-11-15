@@ -1,0 +1,760 @@
+#!/usr/bin/python3 -I
+"""omarock-art: cover art for omarock's panel, fetched and checked outside the
+shell.
+
+The Omarchy shell runs the bar and every plugin on one thread, and Qt's Image
+reads a remote image whole, then decodes whatever its bytes say it is (SVG,
+PDF and TIFF among them). So the panel never gives an Image a remote address:
+it gives this the addresses, one a line on stdin, and shows only the files it
+makes. For each it answers a line of JSON on stdout, as each is done:
+
+    {"url": URL, "file": "/home/you/.cache/omarock/art/HASH.png"}
+    {"url": URL, "refused": "why", "again": SECONDS}
+
+- http and https only, at most 3 redirects, each checked the same way (none
+  from https to http), and 10 s in all; at most 2 MiB read, refused as soon as
+  it's more. A server on this machine (omarock-sxm's art) only if this
+  account runs it.
+- Only what its bytes say it is, never what the server says: JPEG and PNG, at
+  most 4096 pixels a side. A PNG keeps only the chunks that draw it (IHDR,
+  PLTE, tRNS, IDAT, IEND), and its image data must inflate to its size and no
+  more; a JPEG keeps its frame, tables and scans and its JFIF and Adobe
+  markers. A Windows icon (most favicons) and a GIF (its first frame) are
+  drawn into a PNG here. SVG, WebP and the rest are refused.
+- Files go in ~/.cache/omarock/art, readable only by you, named by the
+  address's SHA-256. One already made answers at once. A refusal is remembered
+  for a day, or 2 minutes for one that may pass later (a server that didn't
+  answer), so it isn't fetched again each time its row comes into view.
+- Files unused for 30 days go, looked for once a day.
+
+    omarock-art [--dir DIR] [--deadline SECONDS] [--max-bytes N]
+"""
+import hashlib
+import http.client
+import json
+import os
+from pathlib import Path
+import socket
+import ssl
+import struct
+import sys
+import threading
+import time
+import urllib.parse
+import zlib
+
+DEADLINE = 10.0
+MAX_BYTES = 2 * 1024 * 1024
+MAX_SIDE = 4096
+MAX_GIF_SIDE = 1024
+MAX_SCANS = 100
+MAX_REDIRECTS = 3
+MAX_URLS = 64
+MAX_URL = 4096
+WORKERS = 4
+REFUSED_FOR = 24 * 3600
+FAILED_FOR = 120
+KEEP_FOR = 30 * 24 * 3600
+PRUNE_EVERY = 24 * 3600
+MAX_CACHE = 256 * 1024 * 1024
+USER_AGENT = "omarock (https://github.com/marcewing/omarock)"
+ACCEPT = "image/jpeg,image/png,image/gif,image/x-icon;q=0.9,image/*;q=0.5"
+
+
+class Refused(Exception):
+    """Why an address gets no file, and how long until it's worth asking again."""
+
+    def __init__(self, why, again=REFUSED_FOR):
+        super().__init__(why)
+        self.why, self.again = why, again
+
+
+def failed(why):
+    """A refusal that may pass later: the network, a server that didn't answer."""
+    return Refused(why, FAILED_FOR)
+
+
+# ---------- Fetching ----------
+
+_context = None
+_context_lock = threading.Lock()
+
+
+def tls():
+    global _context
+    with _context_lock:
+        if _context is None: _context = ssl.create_default_context()
+        return _context
+
+
+def parse(url):
+    try:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port
+    except ValueError:
+        raise Refused("a bad address")
+    if parts.scheme not in ("http", "https"): raise Refused("not an http or https address")
+    if not parts.hostname: raise Refused("an address with no server")
+    if parts.username is not None or parts.password is not None: raise Refused("an address with a login in it")
+    try:
+        host = parts.hostname if parts.hostname.isascii() else parts.hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        raise Refused("a bad address")
+    safe = "/%:@!$&'()*+,;=?~-._"
+    target = urllib.parse.quote(parts.path or "/", safe=safe)
+    if parts.query: target += "?" + urllib.parse.quote(parts.query, safe=safe)
+    return parts.scheme, host, port or (443 if parts.scheme == "https" else 80), target
+
+
+def resolve(host, port, until):
+    """The server's addresses. getaddrinfo can't be given a deadline, so it
+    runs on a thread of its own, left behind if it takes too long."""
+    found = {}
+
+    def look():
+        try:
+            found["addresses"] = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except (OSError, UnicodeError):
+            found["addresses"] = None
+
+    worker = threading.Thread(target=look, daemon=True)
+    worker.start()
+    worker.join(max(0, until - time.monotonic()))
+    if "addresses" not in found: raise failed("no answer in time")
+    if not found["addresses"]: raise failed("its server's name doesn't resolve")
+    return found["addresses"]
+
+
+def proc_address(ip, port):
+    """An address as /proc/net/tcp and tcp6 show it: each 32-bit word of the
+    address in hex, in this machine's byte order, then the port."""
+    raw = socket.inet_pton(socket.AF_INET6 if ":" in ip else socket.AF_INET, ip)
+    return "".join("%08X" % w for w in struct.unpack("=%dI" % (len(raw) // 4), raw)) + ":%04X" % port
+
+
+def owners(peer, ours):
+    """The accounts owning the far end of a connection made here, from the
+    kernel's socket table (as omarock-spotify checks its own callers): the far
+    end's line, its addresses swapped. One still waiting in the listener's
+    queue has no inode yet, but its account."""
+    pairs = [(peer[0], ours[0])]
+    if ":" not in peer[0]: pairs.append(("::ffff:" + peer[0], "::ffff:" + ours[0]))
+    wanted = {(proc_address(a, peer[1]), proc_address(b, ours[1])) for a, b in pairs}
+    found = []
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = Path(table).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()
+            if len(f) > 9 and (f[1], f[2]) in wanted and (f[9] != "0" or f[3] == "01"): found.append(int(f[7]))
+    return found
+
+
+def loopback(ip):
+    return ip.startswith("127.") or ip in ("::1", "localhost") or ip.startswith("::ffff:127.")
+
+
+def connect(host, port, until):
+    for family, kind, proto, _, address in resolve(host, port, until):
+        remaining = until - time.monotonic()
+        if remaining <= 0: break
+        sock = socket.socket(family, kind, proto)
+        sock.settimeout(remaining)
+        try:
+            sock.connect(address)
+        except OSError:
+            sock.close()
+            continue
+        # Any account here can listen on a loopback port the service it
+        # stands for left free (omarock-sxm's art, say): only this account's.
+        peer, ours = sock.getpeername()[:2], sock.getsockname()[:2]
+        if loopback(peer[0]):
+            found = owners(peer, ours)
+            if not found or any(uid != os.getuid() for uid in found):
+                sock.close()
+                raise failed("a server on this machine another account runs")
+        return sock
+    if time.monotonic() >= until: raise failed("no answer in time")
+    raise failed("can't reach its server")
+
+
+def shut(live):
+    """At the deadline: whatever is still being read stops."""
+    live["late"] = True
+    try:
+        live["sock"].shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+
+
+def request(scheme, host, port, target, until, max_bytes):
+    """One GET: (None, body), or (a redirect's Location, None)."""
+    live = {"sock": connect(host, port, until), "late": False}
+    stop = threading.Timer(max(0, until - time.monotonic()), shut, (live,))
+    stop.daemon = True
+    stop.start()
+
+    def remaining():
+        # A body read to its end closes the socket with it.
+        try:
+            live["sock"].settimeout(max(0.05, until - time.monotonic()))
+        except OSError:
+            pass
+
+    try:
+        if scheme == "https":
+            remaining()
+            live["sock"] = tls().wrap_socket(live["sock"], server_hostname=host)
+            connection = http.client.HTTPSConnection(host, port, context=tls())
+        else:
+            connection = http.client.HTTPConnection(host, port)
+        connection.sock = live["sock"]
+        remaining()
+        connection.request("GET", target, headers={"User-Agent": USER_AGENT, "Accept": ACCEPT,
+                                                   "Accept-Encoding": "identity"})
+        response = connection.getresponse()
+        if response.status in (301, 302, 303, 307, 308):
+            location = (response.getheader("Location") or "").strip()
+            if not location: raise Refused("a redirect to nowhere")
+            return location, None
+        if response.status != 200:
+            transient = response.status >= 500 or response.status in (408, 429)
+            raise Refused(f"its server said {response.status}", FAILED_FOR if transient else REFUSED_FOR)
+        length = (response.getheader("Content-Length") or "").strip()
+        if length.isdigit() and int(length) > max_bytes: raise Refused(too_big(max_bytes))
+        body = bytearray()
+        while not response.isclosed():
+            remaining()
+            data = response.read1(65536)
+            if not data: break
+            body += data
+            if len(body) > max_bytes: raise Refused(too_big(max_bytes))
+            if time.monotonic() >= until: raise failed("no answer in time")
+        # The deadline's shutdown reads as the end of a body sent without a length.
+        if live["late"] or time.monotonic() >= until: raise failed("no answer in time")
+        return None, bytes(body)
+    except Refused:
+        raise
+    except ssl.SSLCertVerificationError:
+        raise Refused("its server's certificate doesn't check out")
+    except (TimeoutError, socket.timeout):
+        raise failed("no answer in time")
+    except (http.client.HTTPException, ValueError, UnicodeError):
+        if live["late"]: raise failed("no answer in time")
+        raise failed("a broken answer")
+    except OSError:
+        if live["late"]: raise failed("no answer in time")
+        raise failed("can't reach its server")
+    finally:
+        stop.cancel()
+        try:
+            live["sock"].close()
+        except OSError:
+            pass
+
+
+def too_big(max_bytes):
+    return f"bigger than {max_bytes // (1024 * 1024)} MiB" if max_bytes >= 1024 * 1024 else f"bigger than {max_bytes} bytes"
+
+
+def fetch(url, until, max_bytes):
+    """The body at url, following at most MAX_REDIRECTS redirects, each to an
+    http or https address, and none from https back to http (as Qt's own
+    requests don't)."""
+    secure = False
+    for hop in range(MAX_REDIRECTS + 1):
+        scheme, host, port, target = parse(url)
+        if secure and scheme != "https": raise Refused("a redirect from https to http")
+        secure = scheme == "https"
+        location, body = request(scheme, host, port, target, until, max_bytes)
+        if location is None: return body
+        if hop == MAX_REDIRECTS: raise Refused(f"more than {MAX_REDIRECTS} redirects")
+        url = urllib.parse.urljoin(url, location)
+    raise Refused(f"more than {MAX_REDIRECTS} redirects")
+
+
+# ---------- Checking ----------
+
+def check_size(width, height, most=MAX_SIDE):
+    if not (0 < width <= most and 0 < height <= most):
+        raise Refused(f"an image of {width} by {height}, over {most} a side")
+
+
+def chunk(kind, body):
+    return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+
+def png_of(width, height, rows):
+    """A PNG of 8-bit RGBA rows, each led by its filter byte (0)."""
+    return (PNG + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 6)) + chunk(b"IEND", b""))
+
+
+PNG = b"\x89PNG\r\n\x1a\n"
+PNG_KEPT = {b"IHDR", b"PLTE", b"tRNS", b"IDAT", b"IEND"}
+CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+DEPTHS = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8), 4: (8, 16), 6: (8, 16)}
+# Adam7's passes: each one's first column and row, and its steps.
+PASSES = ((0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2))
+
+
+def png_data_size(width, height, depth, color, interlace):
+    """How many bytes a PNG's image data inflates to: a filter byte a row, then its pixels."""
+    bits = depth * CHANNELS[color]
+
+    def rows(w, h):
+        return h * (1 + (w * bits + 7) // 8) if w > 0 and h > 0 else 0
+
+    if not interlace: return rows(width, height)
+    return sum(rows((width - x + dx - 1) // dx, (height - y + dy - 1) // dy) for x, y, dx, dy in PASSES)
+
+
+def inflates_to(parts, size):
+    """Whether the image data inflates to exactly size, inflating no more than
+    that (a broken stream is refused here, not left for Qt)."""
+    stream = zlib.decompressobj()
+    got = 0
+    for part in parts:
+        while part and not stream.eof:
+            got += len(stream.decompress(part, 65536))
+            if got > size: return False
+            part = stream.unconsumed_tail
+        if stream.eof: break
+    if not stream.eof: got += len(stream.flush())
+    return stream.eof and got == size
+
+
+def clean_png(data):
+    """The PNG with only the chunks that draw it. Text, compressed text, ICC
+    profiles, Exif, animation and the rest go, unread."""
+    pos, kept, header, palette, transparency, parts = len(PNG), [PNG], None, 0, False, []
+    damaged = Refused("a damaged PNG")
+    while True:
+        if pos + 12 > len(data): raise Refused("a PNG that ends early")
+        length, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        end = pos + 12 + length
+        if end > len(data): raise Refused("a PNG that ends early")
+        if not kind.isalpha(): raise damaged
+        piece, body = data[pos:end], data[pos + 8:end - 4]
+        pos = end
+        if header is None and kind != b"IHDR": raise damaged
+        if kind not in PNG_KEPT:
+            # A critical chunk (its first letter a capital) can't be left out.
+            if not kind[0] & 0x20: raise Refused("a PNG with a part omarock doesn't know")
+            continue
+        if zlib.crc32(kind + body) != struct.unpack(">I", piece[-4:])[0]: raise damaged
+        if kind == b"IHDR":
+            if header is not None or length != 13: raise damaged
+            width, height, depth, color, compression, filtering, interlace = struct.unpack(">IIBBBBB", body)
+            if color not in DEPTHS or depth not in DEPTHS[color] or compression or filtering or interlace > 1:
+                raise damaged
+            check_size(width, height)
+            header = (width, height, depth, color, interlace)
+        elif kind == b"PLTE":
+            count = length // 3
+            if palette or parts or color in (0, 4) or length % 3 or not 0 < count <= 256: raise damaged
+            if color == 3 and count > 1 << depth: raise damaged
+            palette = count
+        elif kind == b"tRNS":
+            if transparency or parts or color in (4, 6) or (color == 3 and not palette): raise damaged
+            if (color == 0 and length != 2) or (color == 2 and length != 6) or (color == 3 and length > palette):
+                raise damaged
+            transparency = True
+        elif kind == b"IDAT":
+            parts.append(body)
+        else:
+            if length: raise damaged
+            kept.append(piece)
+            break
+        kept.append(piece)
+    width, height, depth, color, interlace = header
+    if not parts or (color == 3 and not palette): raise damaged
+    if not inflates_to(parts, png_data_size(width, height, depth, color, interlace)): raise damaged
+    return b"".join(kept)
+
+
+SOF_KEPT = {0xC0, 0xC1, 0xC2}
+# Huffman and quantization tables, the restart interval, JFIF and Adobe (the
+# colors depend on it).
+JPEG_KEPT = {0xC4, 0xDB, 0xDD, 0xE0, 0xEE}
+
+
+def clean_jpeg(data):
+    """The JPEG with only the segments that draw it: its frame, tables and
+    scans, and its JFIF and Adobe markers. Exif, XMP, ICC profiles, comments
+    and the rest go. Only baseline, extended and progressive JPEGs, of 8-bit
+    samples."""
+    kept = bytearray(b"\xff\xd8")
+    pos, frame, scans, n = 2, None, 0, len(data)
+    damaged, early = Refused("a damaged JPEG"), Refused("a JPEG that ends early")
+    while True:
+        if pos >= n or data[pos] != 0xFF: raise damaged
+        while pos < n and data[pos] == 0xFF: pos += 1
+        if pos >= n: raise early
+        marker = data[pos]
+        pos += 1
+        if marker == 0xD9: break
+        if marker in (0x00, 0x01) or 0xD0 <= marker <= 0xD8: raise damaged
+        if pos + 2 > n: raise early
+        length = data[pos] << 8 | data[pos + 1]
+        if length < 2: raise damaged
+        if pos + length > n: raise early
+        segment, body = bytes((0xFF, marker)) + data[pos:pos + length], data[pos + 2:pos + length]
+        pos += length
+        if marker in SOF_KEPT:
+            if frame or len(body) < 6: raise damaged
+            precision, height, width, components = body[0], body[1] << 8 | body[2], body[3] << 8 | body[4], body[5]
+            if precision != 8 or components not in (1, 3, 4) or len(body) != 6 + 3 * components:
+                raise Refused("a kind of JPEG omarock doesn't show")
+            check_size(width, height)
+            frame = (width, height)
+        elif marker == 0xDA:
+            if not frame or not body or not 1 <= body[0] <= 4 or len(body) != 4 + 2 * body[0]: raise damaged
+            scans += 1
+            if scans > MAX_SCANS: raise Refused("a JPEG of more than %d scans" % MAX_SCANS)
+            kept += segment
+            # The scan's coded data, up to the next marker: a 0xFF followed by
+            # anything but a stuffed 0x00, a restart marker or another 0xFF.
+            start = pos
+            while True:
+                pos = data.find(b"\xff", pos)
+                if pos < 0 or pos + 1 >= n: raise early
+                following = data[pos + 1]
+                if following == 0x00 or 0xD0 <= following <= 0xD7: pos += 2
+                elif following == 0xFF: pos += 1
+                else: break
+            kept += data[start:pos]
+            continue
+        elif 0xC3 <= marker <= 0xCF and marker != 0xC4:
+            raise Refused("a kind of JPEG omarock doesn't show")
+        elif marker not in JPEG_KEPT:
+            if 0xE1 <= marker <= 0xEF or marker == 0xFE: continue
+            raise damaged
+        kept += segment
+    if not frame or not scans: raise Refused("a JPEG with no image")
+    return bytes(kept + b"\xff\xd9")
+
+
+def icon_png(data):
+    """A Windows icon's biggest image, as a PNG: one stored as a PNG, checked
+    as one; one stored as a bitmap, drawn into one."""
+    reserved, kind, count = struct.unpack("<HHH", data[:6])
+    if reserved or kind != 1 or not 0 < count <= 64 or len(data) < 6 + 16 * count:
+        raise Refused("a damaged icon")
+    entries = []
+    for i in range(count):
+        width, height, _, _, _, bits, size, offset = struct.unpack("<BBBBHHII", data[6 + 16 * i:22 + 16 * i])
+        if size >= 8 and offset + size <= len(data):
+            entries.append(((width or 256) * (height or 256), bits, offset, size))
+    why = Refused("a damaged icon")
+    for _, _, offset, size in sorted(entries, reverse=True):
+        image = data[offset:offset + size]
+        try:
+            return clean_png(image) if image.startswith(PNG) else bitmap_png(image)
+        except (Refused, struct.error, IndexError, ValueError) as e:
+            if isinstance(e, Refused): why = e
+    raise why
+
+
+def bitmap_png(dib):
+    """An icon's bitmap (a BITMAPINFOHEADER, its colors, then its AND mask) as a PNG."""
+    header, width, height, planes, bits, compression = struct.unpack("<IiiHHI", dib[:20])
+    used = struct.unpack("<I", dib[32:36])[0]
+    if header < 40 or header > len(dib) or planes != 1 or compression or bits not in (1, 4, 8, 24, 32):
+        raise Refused("a kind of icon omarock doesn't show")
+    height //= 2
+    check_size(width, height, 256)
+    pos, palette = header, []
+    if bits <= 8:
+        count = min(used or 1 << bits, 1 << bits)
+        if pos + 4 * count > len(dib): raise Refused("a damaged icon")
+        palette = [dib[pos + 4 * i:pos + 4 * i + 3] for i in range(count)]
+        palette += [b"\0\0\0"] * ((1 << bits) - count)
+        pos += 4 * count
+    stride, mask_stride = (width * bits + 31) // 32 * 4, (width + 31) // 32 * 4
+    if pos + stride * height > len(dib): raise Refused("a damaged icon")
+    pixels = dib[pos:pos + stride * height]
+    pos += stride * height
+    mask = dib[pos:pos + mask_stride * height] if pos + mask_stride * height <= len(dib) else None
+    lines = []
+    for y in range(height):
+        row = height - 1 - y
+        line = pixels[row * stride:(row + 1) * stride]
+        rgba = bytearray(4 * width)
+        if bits == 32:
+            rgba[0::4], rgba[1::4], rgba[2::4], rgba[3::4] = line[2:4 * width:4], line[1:4 * width:4], line[0:4 * width:4], line[3:4 * width:4]
+        elif bits == 24:
+            rgba[0::4], rgba[1::4], rgba[2::4] = line[2:3 * width:3], line[1:3 * width:3], line[0:3 * width:3]
+            rgba[3::4] = b"\xff" * width
+        else:
+            for x in range(width):
+                at = x * bits
+                color = palette[line[at // 8] >> (8 - bits - at % 8) & ((1 << bits) - 1)]
+                rgba[4 * x:4 * x + 4] = bytes((color[2], color[1], color[0], 255))
+        lines.append((rgba, row))
+    # A 32-bit bitmap's alpha is its transparency, unless it's all 0 (an
+    # older icon): then, as for the others, the AND mask says.
+    use_mask = mask is not None and (bits != 32 or not any(any(rgba[3::4]) for rgba, _ in lines))
+    rows = bytearray()
+    for rgba, row in lines:
+        if use_mask:
+            bitsrow = mask[row * mask_stride:(row + 1) * mask_stride]
+            for x in range(width):
+                rgba[4 * x + 3] = 0 if bitsrow[x // 8] >> (7 - x % 8) & 1 else 255
+        rows += b"\0" + rgba
+    return png_of(width, height, rows)
+
+
+def sub_blocks(data, pos):
+    """A GIF's data sub-blocks from pos: their bytes, and where they end."""
+    out = bytearray()
+    while True:
+        size = data[pos]
+        pos += 1
+        if size == 0: return bytes(out), pos
+        if pos + size > len(data): raise Refused("a GIF that ends early")
+        out += data[pos:pos + size]
+        pos += size
+
+
+def lzw(data, minimum, count):
+    """A GIF frame's color indexes, at most count of them."""
+    if not 2 <= minimum <= 8: raise Refused("a damaged GIF")
+    clear, end = 1 << minimum, (1 << minimum) + 1
+    table = [bytes((i,)) for i in range(clear)] + [b"", b""]
+    size, out, previous, buffer, held = minimum + 1, bytearray(), None, 0, 0
+    for byte in data:
+        buffer |= byte << held
+        held += 8
+        while held >= size:
+            code = buffer & ((1 << size) - 1)
+            buffer >>= size
+            held -= size
+            if code == clear:
+                del table[clear + 2:]
+                size, previous = minimum + 1, None
+                continue
+            if code == end: return out[:count]
+            if code < len(table):
+                entry = table[code]
+                if previous is not None and len(table) < 4096: table.append(previous + entry[:1])
+            elif code == len(table) and previous is not None:
+                entry = previous + previous[:1]
+                table.append(entry)
+            else:
+                raise Refused("a damaged GIF")
+            out += entry
+            if len(out) >= count: return out[:count]
+            previous = entry
+            if len(table) == 1 << size and size < 12: size += 1
+    return out[:count]
+
+
+def gif_png(data):
+    """A GIF's first frame, as a PNG."""
+    width, height, flags = struct.unpack("<HHB", data[6:11])
+    check_size(width, height, MAX_GIF_SIDE)
+    pos, palette, transparent = 13, b"", None
+    if flags & 0x80:
+        palette = data[pos:pos + 3 * (2 << (flags & 7))]
+        pos += len(palette)
+    while True:
+        if pos >= len(data): raise Refused("a GIF that ends early")
+        block = data[pos]
+        pos += 1
+        if block == 0x21:
+            label = data[pos]
+            body, pos = sub_blocks(data, pos + 1)
+            if label == 0xF9 and len(body) >= 4 and body[0] & 1: transparent = body[3]
+        elif block == 0x2C:
+            left, top, w, h, own = struct.unpack("<HHHHB", data[pos:pos + 9])
+            pos += 9
+            if own & 0x80:
+                palette = data[pos:pos + 3 * (2 << (own & 7))]
+                pos += len(palette)
+            check_size(w, h, MAX_GIF_SIDE)
+            minimum = data[pos]
+            coded, pos = sub_blocks(data, pos + 1)
+            indexes = lzw(coded, minimum, w * h)
+            break
+        elif block == 0x3B:
+            raise Refused("a GIF with no image")
+        else:
+            raise Refused("a damaged GIF")
+    indexes += bytes(w * h - len(indexes))
+    if own & 0x40:
+        order = [y for start, step in ((0, 8), (4, 8), (2, 4), (1, 2)) for y in range(start, h, step)]
+        lines = [None] * h
+        for i, y in enumerate(order): lines[y] = indexes[i * w:(i + 1) * w]
+    else:
+        lines = [indexes[y * w:(y + 1) * w] for y in range(h)]
+    colors = palette + bytes(768 - len(palette))
+    channel = [bytes(colors[3 * i + c] for i in range(256)) for c in range(3)]
+    alpha = bytes(0 if i == transparent else 255 for i in range(256))
+    canvas = bytearray(4 * width * height)
+    across = max(0, min(w, width - left))
+    for y in range(h):
+        if top + y >= height or not across: break
+        line = lines[y][:across]
+        rgba = bytearray(4 * across)
+        rgba[0::4], rgba[1::4], rgba[2::4], rgba[3::4] = (line.translate(channel[0]), line.translate(channel[1]),
+                                                          line.translate(channel[2]), line.translate(alpha))
+        at = 4 * ((top + y) * width + left)
+        canvas[at:at + 4 * across] = rgba
+    rows = bytearray()
+    for y in range(height): rows += b"\0" + canvas[4 * y * width:4 * (y + 1) * width]
+    return png_of(width, height, rows)
+
+
+def vet(data):
+    """(the file's extension, its bytes) for an image omarock shows, as its
+    bytes say it is."""
+    try:
+        if data.startswith(PNG): return "png", clean_png(data)
+        if data.startswith(b"\xff\xd8\xff"): return "jpg", clean_jpeg(data)
+        if data[:4] == b"\0\0\1\0": return "png", icon_png(data)
+        if data[:6] in (b"GIF87a", b"GIF89a"): return "png", gif_png(data)
+    except (struct.error, IndexError, ValueError, zlib.error):
+        raise Refused("a damaged image")
+    head = data[:1024].lstrip().lower()
+    if head.startswith(b"<svg") or (head.startswith(b"<") and b"<svg" in data[:65536].lower()):
+        raise Refused("an SVG")
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP": raise Refused("a WebP image")
+    raise Refused("not a JPEG, PNG, GIF or icon")
+
+
+# ---------- The cache ----------
+
+def write(path, data):
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f: f.write(data)
+        os.replace(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def make(url, folder, deadline, max_bytes):
+    """The answer for one address: from the cache, else fetched and checked."""
+    key = hashlib.sha256(url.encode("utf-8", "surrogatepass")).hexdigest()
+    for kind in ("jpg", "png"):
+        path = folder / f"{key}.{kind}"
+        try:
+            os.utime(path, follow_symlinks=False)
+            return {"file": str(path)}
+        except FileNotFoundError:
+            pass
+    refusal = folder / f"{key}.no"
+    try:
+        held = json.loads(refusal.read_text())
+        again = float(held["until"]) - time.time()
+        if again > 0: return {"refused": str(held["why"]), "again": max(1, round(again))}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    try:
+        if len(url) > MAX_URL: raise Refused("too long an address")
+        kind, image = vet(fetch(url, time.monotonic() + deadline, max_bytes))
+    except Refused as e:
+        write(refusal, json.dumps({"why": e.why, "until": time.time() + e.again}).encode())
+        return {"refused": e.why, "again": e.again}
+    path = folder / f"{key}.{kind}"
+    write(path, image)
+    refusal.unlink(missing_ok=True)
+    return {"file": str(path)}
+
+
+def prune(folder):
+    """Once a day: files unused for KEEP_FOR go, refusals past their day, and
+    the oldest beyond MAX_CACHE in all."""
+    stamp, now = folder / ".pruned", time.time()
+    try:
+        if now - stamp.stat().st_mtime < PRUNE_EVERY: return
+    except FileNotFoundError:
+        pass
+    stamp.unlink(missing_ok=True)
+    write(stamp, b"")
+    kept = []
+    for entry in os.scandir(folder):
+        try:
+            if not entry.is_file(follow_symlinks=False) or entry.name == ".pruned": continue
+            info = entry.stat(follow_symlinks=False)
+            age = now - info.st_mtime
+            if entry.name.startswith("."):
+                if age > 3600: os.unlink(entry.path)
+            elif entry.name.endswith(".no"):
+                if age > REFUSED_FOR: os.unlink(entry.path)
+            elif age > KEEP_FOR:
+                os.unlink(entry.path)
+            else:
+                kept.append((info.st_mtime, info.st_size, entry.path))
+        except OSError:
+            pass
+    total = sum(size for _, size, _ in kept)
+    for _, size, path in sorted(kept):
+        if total <= MAX_CACHE: break
+        try:
+            os.unlink(path)
+            total -= size
+        except OSError:
+            pass
+
+
+def main():
+    os.umask(0o077)
+    args, folder, deadline, max_bytes = sys.argv[1:], None, DEADLINE, MAX_BYTES
+    while args:
+        name = args.pop(0)
+        if name == "--dir" and args: folder = Path(args.pop(0))
+        elif name == "--deadline" and args: deadline = float(args.pop(0))
+        elif name == "--max-bytes" and args: max_bytes = int(args.pop(0))
+        else: sys.exit("usage: omarock-art [--dir DIR] [--deadline SECONDS] [--max-bytes N] < urls")
+    folder = (folder or Path(os.environ.get("HOME") or Path.home()) / ".cache/omarock/art").absolute()
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(folder, 0o700)
+
+    urls = []
+    for line in sys.stdin.buffer.read((MAX_URL + 2) * MAX_URLS).split(b"\n"):
+        url = line.strip().decode("utf-8", "replace")
+        if url and url not in urls: urls.append(url)
+    urls = urls[:MAX_URLS]
+
+    lock, answered, waiting = threading.Lock(), set(), list(urls)
+
+    def answer(url, reply):
+        with lock:
+            if url in answered: return
+            answered.add(url)
+            sys.stdout.write(json.dumps(dict(url=url, **reply)) + "\n")
+            sys.stdout.flush()
+
+    def work():
+        while True:
+            with lock:
+                if not waiting: return
+                url = waiting.pop(0)
+            try:
+                reply = make(url, folder, deadline, max_bytes)
+            except Exception as e:  # noqa: BLE001
+                reply = {"refused": "omarock-art failed (" + type(e).__name__ + ")", "again": FAILED_FOR}
+            answer(url, reply)
+
+    workers = [threading.Thread(target=work, daemon=True) for _ in range(min(WORKERS, len(urls)))]
+    for worker in workers: worker.start()
+    # Each address has deadline seconds; one stuck past it anyway (a name
+    # lookup, say) is answered here, and left behind.
+    end = time.monotonic() + deadline * -(-len(urls) // WORKERS) + 5
+    for worker in workers: worker.join(max(0, end - time.monotonic()))
+    for url in urls: answer(url, {"refused": "no answer in time", "again": FAILED_FOR})
+    try:
+        prune(folder)
+    except OSError:
+        pass
+    sys.stdout.flush()
+    os._exit(0)
+
+
+if __name__ == "__main__": main()
