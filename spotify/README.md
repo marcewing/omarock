@@ -134,6 +134,11 @@ By hand, run the tools from your omarock clone: the plugin's folder,
   minutes. If Spotify still says too many requests, omarock-spotify asks
   nothing more until the time Spotify gives is up, and the panel says when to
   try again.
+- **What it passes on is bounded.** It reads at most 4 MB of an answer from
+  Spotify, within 30 s, follows no redirect and no page off Spotify's API, and
+  passes on at most 1,000 songs of an album or playlist, each name at most
+  1,000 characters: the panel reads what it's given on the shell's one thread.
+  An album longer than that plays its first 1,000 songs.
 - **`tools/omarock-sp`** drives it from a terminal: `status`, `search`, `play`,
   `pause`, `next`, `on` and `off` (make Spotify omarock's source, or not), and more
   (`--help`).

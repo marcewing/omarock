@@ -101,12 +101,15 @@ rm -rf ~/.local/share/omarock/sxm ~/.local/share/omarock/sxm-venv ~/.config/omar
 
 It stops fetching a channel 20 s after its last listener leaves. The now-playing
 feed is polled every 15 s while a channel plays, or for 5 minutes after omarock
-last asked.
+last asked. It passes on at most 1,000 channels and entries of what's on now
+(SiriusXM has about 400), each text at most 1,000 characters: the panel reads
+them on the shell's one thread.
 
 ## Testing
 
-`sxm/test_relay.py` checks the relay's listeners, and that only omarock's own
-requests, from your account, are answered. Run it with the venv's Python:
+`sxm/test_relay.py` checks the relay's listeners, that only omarock's own
+requests, from your account, are answered, and that what it passes on is
+bounded. Run it with the venv's Python:
 `~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py`.
 
 Don't test with `ffplay` or `mpv`: they play to your default output, not through
