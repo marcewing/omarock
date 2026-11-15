@@ -59,7 +59,9 @@ mpd with mpd's `null` output, or a private PipeWire.
 | `ScrollingText.qml` | One line that scrolls when it doesn't fit: the bar's song (a setting) and the now playing card's song, artist and album |
 | `Places.js`, `places.tsv` | Where "Your area" is, and the regions near it, from GeoNames' cities of 15,000 people or more (`tools/build-places` makes the file) |
 | `TimeMachine.js`, `ChartClient.qml`, `YearPicker.qml`, `Keeper.js` | Time Machine: the year filter for Apple Music and Spotify (mpd's is `Mpd.yearPattern`), Billboard's year-end chart read from Wikipedia's wikitext, its songs found on Apple Music or Spotify (cached in `~/.cache/omarock/charts`), and the box that asks for the year (`t`); the panel keeps the queue to the year (`Panel.keepQueueInYear`, `MpdClient.removeAfterYear`); with a panel on each bar, one keeps the queue (`Keeper.js`, shared by them all) |
-| `StdinProcess.qml` | A command given its input on stdin, never its command line: how the panel writes its files (the settings, History, its caches) |
+| `StdinProcess.qml` | A command given its input on stdin, never its command line: how the panel writes its files (the settings, History, its caches) and sends HTTP |
+| `Job.qml` | Every command the panel runs is one (StdinProcess too): a Process stopped past its deadline, and whose start that fails ends as an exit with code 127 and no output (below, "Bounded answers, finite helpers") |
+| `Fetch.qml`, `Reply.js` | HTTP for the panel, through curl, capped and on time, the request on curl's stdin; and the look over an answer from outside before it's parsed (pure, tested) |
 | `History.js`, `HistoryClient.qml` | History (`H`): what's been played here, from every source, in `~/.local/share/omarock/history.jsonl` (a line of JSON a play), for `historyDays`. `Panel.tickHistory` counts how long the song playing has been heard (half of it or 4 minutes; a station's song 30 s; the file-only `historyAfter` for tests); one panel adds plays (`Keeper.js`'s "history" job). Rows replay by where they were heard (`Panel.activateHistory`); `tools/omarock-history` reads it |
 | `audio/` | The optional PipeWire bus (one volume, one pinned output) and its guard: "omarock's sound output" in the settings |
 | `spotify/` | omarock-spotify (the bridge API for Spotify), Soloist's unit and the shim loaded into Soloist (`omarock-soloist-shim.c`: its key off its command line, its control port for your account alone), the Web API client, MPRIS |
@@ -134,6 +136,64 @@ mpd with mpd's `null` output, or a private PipeWire.
   live panel's and setup windows' items for any that isn't, and types,
   deletes, undoes and pastes, with `fake-wl-paste` playing a normal, an
   endless, a slow and a late clipboard.
+- **Bounded answers, finite helpers.** The shell runs every plugin and the
+  bar on one thread, so no answer from outside may crash it or hold it. Qt
+  6.12's `JSON.parse` crashes the whole shell (SIGSEGV) on one array of more
+  than about 540,000 members, 1.1 MB of `[0,0,…]`, and Qt's XMLHttpRequest
+  keeps every byte of an answer until it ends, with no cap, no word while it
+  comes and no deadline of its own (a 114 MB answer arrives over loopback in
+  0.6 s). So:
+  - **HTTP goes through curl** (`Fetch.qml`): the request on curl's stdin as
+    its config (`-K -`), the address and headers (the bridge's token) never
+    on a command line; `--max-filesize` stops an answer as it passes the
+    cap, `--max-time` the request at its deadline, counted from when it was
+    asked for, waiting included, and a watchdog kills a curl that doesn't
+    end; only http and https, no redirects, no proxy, no `~/.curlrc`. The
+    status comes back, and the body only if it came whole. A few run at
+    once (the bridge's 6, as Qt allowed a host), the rest wait their turn.
+    Each client's cap comes from the real service's largest answers: the
+    bridge 16 MB (a library playlist of thousands of songs was 5 MB, the
+    largest genre 0.6 MB), 1 MB for a status (at most 200 songs of the
+    queue) or a POST's answer, 64 KB for health; omarock-spotify 8 MB (at
+    most 1,000 songs a list); omarock-sxm 2 MB (its channels are 200 KB);
+    Radio Browser 1 MB; the setup window's health check 64 KB; Wikipedia's
+    chart 1 MB (`ChartClient`'s own curl). An answer refused for its size
+    says "…'s answer was too big to read".
+  - **Every answer is looked over before it's parsed** (`Reply.parse`): one
+    pass, skipping over strings, refuses one over the cap, with an array or
+    object of more than 100,000 members, or nested deeper than 256, and cuts
+    a string over 20,000 characters (laying out megabytes of one title
+    would hold the shell too). At worst it takes about half a second over
+    16 MB in the shell, as long as `JSON.parse` itself: the caps keep both
+    short.
+  - **The services bound what they pass on**: omarock-spotify reads at most
+    4 MB of Spotify's answer within 30 s, start to end (urllib's timeout is
+    for each read, so a trickle renewed it for ever), never follows a
+    redirect or a page off Spotify's API, reads at most 1,000 songs of an
+    album, cuts each text it passes on to 1,000 characters (an album's name
+    went into each of its songs) and refuses an answer over 8 MB;
+    omarock-sxm passes on at most 1,000 channels and entries of what's on
+    now, each text 1,000 characters.
+  - **Every command the panel runs is a `Job`**, with a deadline. A start
+    that fails (no such program; no fork under a pids or memory limit) ends
+    as an exit with code 127 and no output: Quickshell 0.3.2 then says only
+    that it isn't running, with no started, no exited and no end of its
+    output, so whatever waited on those (Time Machine's chart fetch, the
+    radio's cache, mpd's socket probe) waited until the plugin reloaded. A
+    pipeline whose children could outlive it runs them under `timeout -k`,
+    which stops them all; the lists other machines and programs fill
+    (Bonjour's, the tailnet's, PipeWire's outputs) are capped with `head -c`.
+  - Time Machine reads at most 600 characters of a service's title:
+    `titleKey`'s patterns grow with the square of a run of spaces.
+  - The radio keeps at most 1,000 stations it has seen, besides the
+    favorites, the local ones and the one playing.
+
+  `--only bounded` has the fakes answer as a hostile server could
+  (`tools/capture/hostile.py`: 1.2 MB of `[0,0,…]`, an endless answer, one
+  that trickles) and checks that each client fails within its deadline with
+  its usual words while the shell stays up, and works after; a curl that
+  can't start, or never ends (`stuck-curl`), is a failed request, not a lost
+  one.
 - **Opt-in sources.** A source's switch (`spotify`, `appleMusic`, `siriusXM`,
   `radio`) gives it a button and lets omarock talk to its service; switched off,
   omarock doesn't contact it.
@@ -260,6 +320,11 @@ everything else:
   says, never ends ("endless"), doesn't answer ("slow") or answers a second
   late ("late"). The harness's `WAYLAND_DISPLAY` names no display, and the
   fake fails without one, as the real one does.
+- `hostile.py`, with which the bridge's, omarock-spotify's, omarock-sxm's and
+  Radio Browser's fakes answer as a hostile server could (`POST
+  /v1/fake/hostile`), and `stuck-curl`, a curl that never ends: `--only
+  bounded`. The panel's sh, jq and curl are the real ones, writing their
+  command lines down while a scenario asks (`argv-log`).
 
 The panel finds the fakes through settings that are in no settings screen,
 only in the file (Settings.js): `spotifyService`, `sxmService`, `radioBrowser`,
@@ -481,6 +546,17 @@ is installed by `./install spotify`. It ends with "0 failure(s)".
   jump.
 - A property whose name starts with `on` and a capital is taken for a signal
   handler's name, and silently never works.
+- **A Process that fails to start** (Quickshell 0.3.2) logs "Process failed
+  to start" and sets `running` false: no `started`, no `exited`, and its
+  StdioCollector's `streamFinished` never comes. `running = false` sends
+  SIGTERM, and `running` reads true until the process has exited. On a
+  normal exit the order is `started`, the output's `streamFinished`,
+  `exited`, then `runningChanged` to false. QML can emit a Process's
+  `exited` and a collector's `streamFinished` itself, which is how `Job`
+  ends a start that failed; a Process type's own handlers run before those
+  set where it's used.
+- A JS object given to `createObject` as a `var` property's first value
+  arrives as a copy: `Fetch` keeps a request's entry in a closure instead.
 - **A read-only text field (Qt 6.12)** still selects, copies, moves its
   cursor and says `accepted` on Enter, and its `insert()` and `remove()`
   still work, keeping a binding on `text` and sending `textEdited`; its own
