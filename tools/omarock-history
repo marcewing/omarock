@@ -9,6 +9,13 @@
 #   omarock-history --json       the entries themselves, oldest first
 #   omarock-history clear        forget them all
 set -euo pipefail
+# Text from outside (a station's or a playlist's name, a service's error),
+# with anything a terminal would act on taken out: control characters, C1
+# ones, and those that reorder text. Tabs and line ends stay.
+printable() {
+  LC_ALL=C sed -e 's/[\x00-\x08\x0b-\x1f\x7f]//g' -e 's/\xc2[\x80-\x9f]//g' \
+    -e 's/\xe2\x80[\x8b-\x8f\xaa-\xae]//g' -e 's/\xe2\x81[\xa6-\xa9]//g'
+}
 file=$HOME/.local/share/omarock/history.jsonl
 days="" json=false
 while (($#)); do
@@ -36,5 +43,5 @@ else
     | [(.at / 1000 | strflocaltime("%a %d %b %H:%M")), ($names[.source] // .source),
        .title + (if (.artist // "") != "" then " — " + .artist else "" end)
          + (if .station then " (" + .station + ")" elif (.album // "") != "" then " (" + .album + ")" else "" end)]
-    | join("  ")' <<<"$entries"
+    | join("  ")' <<<"$entries" | printable
 fi

@@ -35,10 +35,17 @@
 # key only as an argument, so it's given a stand-in, "@key", and
 # omarock-soloist-shim.so (built by tools/install-spotify) hands it the key.
 #
-# Nothing here downloads a program and runs it. Soloist, Spotify's player, is
-# the one omarock doesn't get from Arch or this clone: you download it from
-# Spotify's page, and tools/update-soloist installs it from your Downloads
-# folder and checks it with omarock's shim.
+# What comes from elsewhere than Arch and this clone, and how it's pinned:
+# - Apple Music's patched mpd-mpris (optional; tools/build-mpd-mpris) builds
+#   mpd-mpris's source from GitHub at a pinned commit, with its Go modules
+#   checked against its go.sum.
+# - SiriusXM's omarock-sxm (tools/install-sxm) installs aiosxm and its
+#   dependencies from PyPI, each file checked against its SHA-256 in
+#   sxm/requirements.txt.
+# - Soloist, Spotify's player, you download yourself from Spotify's page: it
+#   has no version or checksum to pin it by, so tools/update-soloist installs
+#   a download only once you've seen it and said yes, checks it with omarock's
+#   shim, and Soloist's unit starts only that build.
 #
 # Each run says how it went in ~/.local/state/omarock/setup.json, which
 # omarock's settings follow: what it set up or removed, and whether it's still
@@ -80,6 +87,13 @@ bold=$'\e[1m' dim=$'\e[2m' reset=$'\e[0m' green=$'\e[32m' red=$'\e[31m' yellow=$
 spacing=$(mktemp -t omarock-spacing.XXXXXX)
 gap() { [[ -s $spacing ]] || { printf '\n' >&2; printf 1 >"$spacing"; }; }
 printed() { : >"$spacing"; }
+# Text from outside (a device's name on the network, an output's, a file's,
+# a bridge's error), with anything a terminal would act on taken out: control
+# characters, C1 ones, and those that reorder text.
+printable() {
+  printf '%s' "$1" | LC_ALL=C sed -e 's/[\x00-\x08\x0b-\x1f\x7f]//g' -e 's/\xc2[\x80-\x9f]//g' \
+    -e 's/\xe2\x80[\x8b-\x8f\xaa-\xae]//g' -e 's/\xe2\x81[\xa6-\xa9]//g'
+}
 ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; printed; }
 bad() { printf '  %s✗%s %s\n' "$red" "$reset" "$*"; printed; }
 note() { printf '  %s–%s %s\n' "$yellow" "$reset" "$*"; printed; }
@@ -315,7 +329,7 @@ full_path() {  # TYPED DEFAULT
 }
 # avahi-browse's \DDD escapes (decimal bytes): "Studio\032Mac" is "Studio Mac".
 avahi_name() {
-  python3 -I -c 'import re, sys; print(re.sub(rb"\\(\d{3})", lambda m: bytes([int(m[1])]), sys.argv[1].encode()).decode("utf-8", "replace"))' "$1"
+  printable "$(python3 -I -c 'import re, sys; print(re.sub(rb"\\(\d{3})", lambda m: bytes([int(m[1])]), sys.argv[1].encode()).decode("utf-8", "replace"))' "$1")"
 }
 
 mpd_socket=""
@@ -973,7 +987,8 @@ step_radio() {
 output_name() {
   local desc
   desc=$(pactl -f json list sinks 2>/dev/null | jq -r --arg n "$1" '.[] | select(.name == $n) | .description // empty' | head -1)
-  [[ -n $desc && $desc != "(null)" ]] && echo "$desc" || echo "$1"
+  [[ -n $desc && $desc != "(null)" ]] && printable "$desc" || printable "$1"
+  echo
 }
 
 step_bus() {
@@ -995,6 +1010,7 @@ step_bus() {
     local name desc names=() descs=() args=() i
     local -A seen=()
     while IFS=$'\t' read -r name desc; do
+      desc=$(printable "$desc")
       [[ $name == omarock || -z $name || -z $desc || $desc == "(null)" ]] && continue
       names+=("$name") descs+=("$desc")
       seen[$desc]=$((${seen[$desc]:-0} + 1))
@@ -1081,9 +1097,9 @@ soloist_offer() {
   saved=$(date -d "@$(jq -r '.saved // 0' <<<"$d")" '+%b %-d at %H:%M')
   if [[ $(jq -r '.origin // ""' <<<"$d") == https://soloist-builds.spotifycdn.com/* ]]; then
     from=yes
-    explain "It's $(basename "$(jq -r .path <<<"$d")") ($(numfmt --to=iec --suffix=B "$(jq -r '.size // 0' <<<"$d")"), saved $saved), from Spotify's soloist-builds.spotifycdn.com."
+    explain "It's $(printable "$(basename "$(jq -r .path <<<"$d")")") ($(numfmt --to=iec --suffix=B "$(jq -r '.size // 0' <<<"$d")"), saved $saved), from Spotify's soloist-builds.spotifycdn.com."
   else
-    explain "It's $(basename "$(jq -r .path <<<"$d")") ($(numfmt --to=iec --suffix=B "$(jq -r '.size // 0' <<<"$d")"), saved $saved). Your browser didn't record where it came from: install it only if you downloaded it from Spotify's page yourself."
+    explain "It's $(printable "$(basename "$(jq -r .path <<<"$d")")") ($(numfmt --to=iec --suffix=B "$(jq -r '.size // 0' <<<"$d")"), saved $saved). Your browser didn't record where it came from: install it only if you downloaded it from Spotify's page yourself."
   fi
   confirm "Install this Soloist?" $from
 }
@@ -1317,7 +1333,7 @@ sys.exit(0 if d.get("username") and d.get("password") and d["username"] != "you@
 step_sxm() {
   step "SiriusXM"
   if [[ ! -f $share/sxm/INSTALLED ]]; then
-    explain "Omarock plays SiriusXM using omarock-sxm. It's unofficial! It signs in as SiriusXM's web player does. SiriusXM's terms forbid that, so your account could be limited or closed, and it may stop working whenever SiriusXM changes its player (see: sxm/README.md)."
+    explain "Omarock plays SiriusXM using omarock-sxm. It's unofficial! It signs in as SiriusXM's web player does. SiriusXM's terms forbid that, so your account could be limited or closed, and it may stop working whenever SiriusXM changes its player (see: sxm/README.md). It installs aiosxm and its dependencies from PyPI, each file checked against the hash this clone pins."
     confirm "Set it up anyway?" no terms || return 1
   fi
   if [[ ! -f $share/sxm/INSTALLED ]]; then
@@ -1471,7 +1487,7 @@ step_apple() {
         ok "paired with the bridge"
         break
       fi
-      bad "${said%.}"
+      bad "$(printable "${said%.}")"
       # Not the code, or none open: another try (./install pair on the Mac opens a new one).
       ((rc == 3 || rc == 4)) || return 1
     done
@@ -1503,7 +1519,7 @@ step_apple() {
     remove_flac "omarock's patched libFLAC isn't needed anymore: the bridge's stream keeps mpd in step with Arch's own."
   fi
   if [[ ! -f $units/mpd-mpris.service.d/omarock-mpris.conf ]]; then
-    explain "mpd-mpris also asks mpd for the stream's cover art at every play and pause, which holds mpd for seconds. A patched mpd-mpris doesn't (a minute to build; needs Go)."
+    explain "mpd-mpris also asks mpd for the stream's cover art at every play and pause, which holds mpd for seconds. A patched mpd-mpris doesn't: built here from mpd-mpris's source on GitHub, at a pinned commit, and its Go modules, checked against its go.sum (a minute; needs Go)."
     if confirm "Build the patched mpd-mpris?" no mpris; then
       run sudo pacman -S --needed --noconfirm go git \
         && run "$repo/tools/build-mpd-mpris" \

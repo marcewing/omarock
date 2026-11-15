@@ -142,7 +142,8 @@ print(json.dumps({"username": login.get("username", ""), "password": login.get("
       -H "X-Omarock-Client: $client" --data-binary @- "$bridge/v1/pair" 2>/dev/null)
     status=${reply##*$'\n'}
     reply=${reply%$'\n'*}
-    said=$(jq -r '.error // empty' <<<"$reply" 2>/dev/null)
+    # The bridge's own words, with anything a terminal would act on taken out.
+    said=$(jq -r '.error // empty | gsub("[\\x{00}-\\x{08}\\x{0B}-\\x{1F}\\x{7F}-\\x{9F}\\x{200B}-\\x{200F}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]"; "")' <<<"$reply" 2>/dev/null)
     case $status in
       200)
         # The token goes from the reply into its file, never printed or on a command line.

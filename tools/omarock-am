@@ -44,7 +44,14 @@ if [[ -z ${MPD_HOST:-} ]]; then
   export MPD_HOST=${MPD_HOST:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mpd/socket}
 fi
 
-die() { echo "omarock-am: $*" >&2; exit 1; }
+# Text from outside (a station's or a playlist's name, a service's error),
+# with anything a terminal would act on taken out: control characters, C1
+# ones, and those that reorder text. Tabs and line ends stay.
+printable() {
+  LC_ALL=C sed -e 's/[\x00-\x08\x0b-\x1f\x7f]//g' -e 's/\xc2[\x80-\x9f]//g' \
+    -e 's/\xe2\x80[\x8b-\x8f\xaa-\xae]//g' -e 's/\xe2\x81[\xa6-\xa9]//g'
+}
+die() { printf 'omarock-am: %s\n' "$*" | printable >&2; exit 1; }
 
 call() {  # METHOD PATH [JSON]
   [[ -n $BRIDGE ]] || die "no bridge set up: put \"bridge\" in $CONFIG (apple-bridge/README.md), or set OMAROCK_BRIDGE"
@@ -84,7 +91,7 @@ show_status() {
      else "\(.state): nothing loaded" end),
     "shuffle \(.shuffle) · repeat \(.repeat) · \(.queueLength) in the queue",
     (.queue | to_entries[] | "\(if .key == $idx then ">" else " " end) \(.key): \(.value.title) — \(.value.artist)")
-  ' --argjson idx "$(jq '.queueIndex - .queueOffset' <<<"$1")" <<<"$1"
+  ' --argjson idx "$(jq '.queueIndex - .queueOffset' <<<"$1")" <<<"$1" | printable
 }
 
 # mpd back on the live stream once a change has reached it: 2 s after the
@@ -120,7 +127,7 @@ rejoin() {
 }
 
 list_items() {  # items on stdin → "kind source id  title — artist"
-  jq -r '.[] | "\(.kind) \(.source) \(.id)\t\(.title // .name)\(if .artist then " — " + .artist else "" end)\(if .year then " (\(.year))" else "" end)"'
+  jq -r '.[] | "\(.kind) \(.source) \(.id)\t\(.title // .name)\(if .artist then " — " + .artist else "" end)\(if .year then " (\(.year))" else "" end)"' | printable
 }
 
 cmd=${1:-status}
@@ -143,17 +150,17 @@ case $cmd in
     q=$(jq -rn --arg q "$*" '$q | @uri')
     call GET "/v1/search?scope=all&limit=10&q=$q" | jq -r '
       to_entries[] | .key as $where | .value | to_entries[] | select(.value | length > 0) |
-      "== \($where) \(.key)", (.value[] | "  \(.kind) \(.source) \(.id)\t\(.title // .name)\(if .artist then " — " + .artist else "" end)\(if .year then " (\(.year))" else "" end)")'
+      "== \($where) \(.key)", (.value[] | "  \(.kind) \(.source) \(.id)\t\(.title // .name)\(if .artist then " — " + .artist else "" end)\(if .year then " (\(.year))" else "" end)")' | printable
     ;;
   album|artist|playlist)
     [[ $# -eq 2 ]] || die "$cmd SOURCE ID"
     data=$(call GET "/v1/${cmd}s/$1/$2")
     case $cmd in
-      album) jq -r '.album | "\(.title) — \(.artist) (\(.year // "?"))\(if .recordLabel then ", " + .recordLabel else "" end)"' <<<"$data"
+      album) jq -r '.album | "\(.title) — \(.artist) (\(.year // "?"))\(if .recordLabel then ", " + .recordLabel else "" end)"' <<<"$data" | printable
              jq '.tracks' <<<"$data" | list_items ;;
-      artist) jq -r '.artist.name' <<<"$data"; echo "-- top songs"; jq '.topSongs // []' <<<"$data" | list_items
+      artist) jq -r '.artist.name' <<<"$data" | printable; echo "-- top songs"; jq '.topSongs // []' <<<"$data" | list_items
               echo "-- albums"; jq '.albums // []' <<<"$data" | list_items ;;
-      playlist) jq -r '.playlist | "\(.name)\(if .curator then " — " + .curator else "" end)"' <<<"$data"
+      playlist) jq -r '.playlist | "\(.name)\(if .curator then " — " + .curator else "" end)"' <<<"$data" | printable
                 jq '.tracks' <<<"$data" | list_items ;;
     esac
     ;;

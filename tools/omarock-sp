@@ -37,7 +37,14 @@ held_by_other() {
   [[ -n $uid ]] || return 1
   echo "$uid"
 }
-die() { echo "omarock-sp: $*" >&2; exit 1; }
+# Text from outside (a station's or a playlist's name, a service's error),
+# with anything a terminal would act on taken out: control characters, C1
+# ones, and those that reorder text. Tabs and line ends stay.
+printable() {
+  LC_ALL=C sed -e 's/[\x00-\x08\x0b-\x1f\x7f]//g' -e 's/\xc2[\x80-\x9f]//g' \
+    -e 's/\xe2\x80[\x8b-\x8f\xaa-\xae]//g' -e 's/\xe2\x81[\xa6-\xa9]//g'
+}
+die() { printf 'omarock-sp: %s\n' "$*" | printable >&2; exit 1; }
 call() {  # METHOD PATH [JSON]
   local out code uid
   if uid=$(held_by_other "$BASE"); then die "another account (uid $uid) holds omarock-spotify's port ($BASE): not using it"; fi
@@ -53,7 +60,7 @@ show_status() {
     (if .song then "\(.state): \(.song.title) — \(.song.artist // "?") (\(.song.album // "?"), \(.song.year // "?")) \(.position | floor)s/\(.song.duration // 0 | floor)s"
      else "\(.state): nothing loaded" end),
     "shuffle \(.shuffle) · repeat \(.repeat) · \(.queueLength) in the queue · \(if .current then "omarock'"'"'s source" else "not omarock'"'"'s source" end)",
-    (.queueIndex as $i | .queue | to_entries[] | "\(if .key == $i then ">" else " " end) \(.key): \(.value.title) — \(.value.artist // "")")' <<<"$1"
+    (.queueIndex as $i | .queue | to_entries[] | "\(if .key == $i then ">" else " " end) \(.key): \(.value.title) — \(.value.artist // "")")' <<<"$1" | printable
 }
 item() { jq -cn --arg k "$1" --arg i "$2" '{kind: $k, id: $i, source: "catalog"}'; }
 cmd=${1:-status}
@@ -67,7 +74,7 @@ case "$cmd" in
       def rows($label): .[] | "\($label) \(.kind) \(.id)\t\(.title // .name)\(if .artist then " — " + .artist else "" end)\(if .year then " (\(.year))" else "" end)";
       (.library // {} | (.playlists, .artists, .albums, .songs) | rows("yours")),
       (.catalog // {} | (.artists, .albums, .songs, .playlists) | rows("spotify")),
-      (if .catalogError then "catalog: " + .catalogError else empty end)' ;;
+      (if .catalogError then "catalog: " + .catalogError else empty end)' | printable ;;
   play)
     [[ $# -ge 2 ]] || die "play song|album|playlist|artist ID [START]"
     show_status "$(call POST /v1/play "$(jq -cn --argjson it "$(item "$1" "$2")" --argjson s "${3:-0}" '{items: [$it], mode: "play", start: $s}')")" ;;
@@ -80,7 +87,7 @@ case "$cmd" in
   prev|previous) show_status "$(call POST /v1/previous '{}')" ;;
   seek) show_status "$(call POST /v1/seek "$(jq -cn --argjson p "${1:?SECONDS}" '{position: $p}')")" ;;
   album|artist|playlist) call GET "/v1/${cmd}s/catalog/${1:?ID}" | jq . ;;
-  playlists) call GET /v1/library/playlists | jq -r '.[] | "\(.id)\t\(.name) (\(.trackCount // 0) songs)"' ;;
+  playlists) call GET /v1/library/playlists | jq -r '.[] | "\(.id)\t\(.name) (\(.trackCount // 0) songs)"' | printable ;;
   info) call GET "/v1/info/catalog/${1:?song|album}/${2:?ID}" | jq . ;;
   login)
     url=$(call GET /v1/login | jq -r .url)
