@@ -81,10 +81,22 @@ By hand, run the tools from your omarock clone: the plugin's folder,
    on the same network, choose your machine's name under *Connect to a device*,
    and play something. Soloist keeps the sign-in.
    - Behind a firewall (Omarchy turns ufw on), the device won't show until you
-     let Soloist's discovery in, for the pairing only.
-   - Its port changes each time it starts: find it with `ss -ltnp | grep soloist`,
-     then `sudo ufw allow PORT/tcp`. Add `sudo ufw allow 5353/udp` if mDNS is blocked.
-   - Remove the rules once it's paired.
+     let Soloist's discovery in, for the pairing only. `./install spotify` does
+     it for you: it opens Soloist's port and mDNS to your local network alone,
+     and closes them after the pairing, or 11 minutes on at the latest.
+   - By hand: its port changes each time it starts (`ss -ltnp | grep soloist`
+     shows it), and your local network is the one `ip route` names (say
+     192.168.1.0/24). Tag them as `./install` tags its own, so `sudo ufw status`
+     tells them apart:
+     ```bash
+     sudo ufw allow from 192.168.1.0/24 to any port PORT proto tcp comment omarock-pairing
+     sudo ufw allow from 192.168.1.0/24 to any port 5353 proto udp comment omarock-pairing
+     ```
+     Once it's paired, take them out:
+     ```bash
+     sudo ufw delete allow from 192.168.1.0/24 to any port PORT proto tcp
+     sudo ufw delete allow from 192.168.1.0/24 to any port 5353 proto udp
+     ```
 6. **Sign in to the Web API:** `tools/omarock-sp login`. It opens Spotify's
    sign-in page; afterwards `tools/omarock-sp health` says `"authorized": true`.
 7. **Switch Spotify on** in omarock's settings (`,` in the panel). A Spotify

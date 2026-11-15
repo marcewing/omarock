@@ -1172,11 +1172,31 @@ firewall_timer=omarock-pairing-firewall
 # open: ufw keeps rules across a reboot, and the root timer isn't kept.
 pairing_tag=omarock-pairing
 pairing_marker=$state_dir/pairing-firewall
-pairing_close="ufw status numbered | sed -n 's/^\\[ *\\([0-9]*\\)\\].*# $pairing_tag *\$/\\1/p' | sort -rn | while read -r n; do ufw --force delete \"\$n\" >/dev/null; done"
+# Run as root (sudo, and the timer): takes out every rule carrying the tag,
+# by what it is ("delete allow from NET to any port P proto X"), not by its
+# number, which changes as rules come and go; one at a time (flock), should
+# the timer and a run sweep at once. ufw lists added rules active or not.
+# Succeeds only when none is left.
+sweep_pairing_rules() {
+  exec 9>/run/lock/omarock-pairing-firewall
+  flock -w 30 9 || return 1
+  ufw show added 2>/dev/null | sed -n "s/^ufw allow \(from .* proto [a-z]*\) comment 'omarock-pairing'\$/\1/p" \
+    | while read -r rule; do ufw delete allow $rule >/dev/null; done
+  ! ufw show added 2>/dev/null | grep -q "comment 'omarock-pairing'\$"
+}
+pairing_close="$(declare -f sweep_pairing_rules); sweep_pairing_rules"
 close_pairing_rules() {  # leftovers from an earlier pairing, if the marker says so
   [[ -f $pairing_marker ]] || return 0
   explain "An earlier pairing may have left Soloist's firewall rules open (the machine restarted during it, say). They come out now."
-  run sudo sh -c "$pairing_close" && rm -f "$pairing_marker"
+  run sudo bash -c "$pairing_close" && rm -f "$pairing_marker"
+}
+# Whether ufw has a rule for RULE ("from NET to any port P proto X") already,
+# whatever it does (allow, deny...), logs or says: ufw counts any of them as
+# the same rule, and would put the pairing's in its place (then take it out).
+rule_there() {
+  local re
+  re=$(sed 's/[][\.*^$+?(){}|]/\\&/g' <<<"$1")
+  sudo ufw show added 2>/dev/null | matches -E "^ufw (allow|deny|reject|limit)( (log|log-all))? $re( comment '.*')?\$"
 }
 lan_networks() {
   local dev
@@ -1191,7 +1211,7 @@ lan_networks() {
 }
 cleanup_firewall() {
   ((${#added_rules[@]})) || return 0
-  run sudo sh -c "$pairing_close" && rm -f "$pairing_marker"
+  run sudo bash -c "$pairing_close" && rm -f "$pairing_marker"
   sudo systemctl stop "$firewall_timer.timer" 2>/dev/null
   added_rules=()
 }
@@ -1261,11 +1281,12 @@ step_spotify() {
   ok "omarock-spotify and Soloist run"
 
   # Pairing: once, from the Spotify app on a phone or computer on this network.
+  # Rules an earlier pairing left come out either way.
+  close_pairing_rules
   if sp_paired; then
     ok "Soloist is signed in to your account"
   else
     explain "Now you must pair Soloist with your account."
-    close_pairing_rules
     if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
       local port nets=()
       port=$(ss -ltnpH 2>/dev/null | awk '/"soloist"/ && $4 !~ /^127\./ {n = split($4, a, ":"); print a[n]; exit}')
@@ -1285,13 +1306,13 @@ step_spotify() {
         # this timer loses none.
         sudo systemctl stop "$firewall_timer.timer" 2>/dev/null
         mkdir -p "$state_dir" && date +%s >"$pairing_marker"
-        run sudo systemd-run --quiet --collect --unit="$firewall_timer" --on-active=11min /bin/sh -c "$pairing_close" \
+        run sudo systemd-run --quiet --collect --unit="$firewall_timer" --on-active=11min /bin/bash -c "$pairing_close" \
           || note "if this window is closed before the pairing ends, the rules stay: ./install spotify takes them out next time"
         for net in "${nets[@]}"; do
           for spec in "$port tcp" "5353 udp"; do
             rule="from $net to any port ${spec% *} proto ${spec#* }"
             # One that was there already stays, and isn't taken out after.
-            sudo ufw show added 2>/dev/null | matches -xF "ufw allow $rule" && continue
+            rule_there "$rule" && continue
             run sudo ufw allow $rule comment "$pairing_tag" >/dev/null && added_rules+=("$rule")
           done
         done

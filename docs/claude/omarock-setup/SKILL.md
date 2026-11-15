@@ -129,8 +129,10 @@ Follow `spotify/README.md`. What trips people up:
 - **The redirect URI** must be exactly `http://127.0.0.1:8730/callback`.
 - **The key file** must be mode 600.
 - **Pairing:** it needs the phone to find Soloist on the local network. With ufw
-  on, allow Soloist's current TCP port for the pairing only (the user runs the
-  sudo commands), then remove the rule.
+  on, `./install spotify` opens Soloist's port and mDNS to the local network
+  only, tagged, and closes them after (the user answers its sudo). By hand,
+  spotify/README.md step 5 has the commands, the local network only and
+  tagged; the user runs them, and takes the rules out once it's paired.
 - **Soloist comes from the user's own download.** omarock never downloads it:
   the user gets `soloist_release_x86_64.tar.gz` from Spotify's Soloist page
   (Reference, Downloads and updates) into `~/Downloads`, and

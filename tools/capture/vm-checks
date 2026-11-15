@@ -230,6 +230,12 @@ echo "== the pairing's firewall rules (tagged; closed even after a crash and a r
 sudo ufw status | matches '^Status: active' || { sudo ufw allow 22/tcp >/dev/null; sudo ufw --force enable >/dev/null; }
 tagged() { sudo ufw status numbered | grep -c '# omarock-pairing' || true; }
 marker=${XDG_STATE_HOME:-$HOME/.local/state}/omarock/pairing-firewall
+# A rule of yours for one the pairing opens (ufw counts it as the same rule
+# whatever its comment, logging or action): left as it is, never taken out.
+lan=$(ip -j route show default | jq -r '.[0].dev' | xargs -I{} ip -j -4 addr show dev {} scope global \
+  | jq -r '.[0].addr_info[0] | "\(.local)/\(.prefixlen)"' | python3 -I -c 'import ipaddress, sys; print(ipaddress.ip_interface(sys.stdin.read().strip()).network)')
+sudo ufw allow log from "$lan" to any port 5353 proto udp comment 'mine' >/dev/null
+mine() { sudo ufw show added | grep -c "^ufw allow log from $lan to any port 5353 proto udp comment 'mine'\$" || true; }
 printf '%s\n' "Install this Soloist?=n" "Open them for the pairing (sudo ufw)?=y" "Sign in now?=n" >"$work/answers-fw"
 pair_crash() {  # NAME: ./install spotify opens the rules, then dies (SIGKILL: no traps) during the wait
   local pid
@@ -254,7 +260,17 @@ pair_crash b
 # --wait: a simple service is "started" at once; the check needs its run over.
 sudo systemctl start --wait omarock-pairing-firewall.service
 check "the root timer's run takes out every tagged rule ($(tagged) left)" [ "$(tagged)" = 0 ]
+check "and your own rule for the same port is still there, as it was ($(mine))" [ "$(mine)" = 1 ]
+sudo ufw delete allow log from "$lan" to any port 5353 proto udp >/dev/null
 pair_crash c
+sudo systemctl stop omarock-pairing-firewall.timer
+# ufw switched off by then: its rules are still listed, and still go.
+sudo ufw --force disable >/dev/null
+sudo bash -c "$(sed -n '/^sweep_pairing_rules() {/,/^}/p' "$repo/install"); sweep_pairing_rules"
+check "with ufw off, the sweep still takes them out ($(sudo ufw show added | grep -c "comment 'omarock-pairing'" || true) left)" \
+  bash -c "! sudo ufw show added | grep -q \"comment 'omarock-pairing'\""
+sudo ufw --force enable >/dev/null
+pair_crash d
 sudo systemctl stop omarock-pairing-firewall.timer
 
 echo "== taken off again"
