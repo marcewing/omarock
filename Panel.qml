@@ -762,7 +762,9 @@ Panel {
       root.switchToSxm(channelId)
       return
     }
-    root.playLive(sxm.prefix + channelId, [sxm.prefix], root.channelName(channelId))
+    // mpd connects to whatever holds omarock-sxm's port: only while it's ours.
+    sxm.whenOurs(function() { root.playLive(sxm.prefix + channelId, [sxm.prefix], root.channelName(channelId)) },
+                 function(why) { root.say(why) })
   }
 
   function channelName(channelId) {
@@ -1032,8 +1034,16 @@ Panel {
         return
       }
       retry.tries++
-      // Each bar's panel follows the retry; one of them plays (Keeper.js).
-      if (Keeper.claim(root.keeperId, "reconnect")) client.send("play")
+      // Each bar's panel follows the retry; one of them plays (Keeper.js),
+      // a SiriusXM stream only while omarock-sxm's port is this account's.
+      if (Keeper.claim(root.keeperId, "reconnect")) {
+        if (sxm.prefix !== "" && retry.file.indexOf(sxm.prefix) === 0)
+          sxm.whenOurs(function() { client.send("play") }, function(why) {
+            root.say("Couldn't reconnect to " + retry.name + ": " + why)
+            root.stopStreamRetry()
+          })
+        else client.send("play")
+      }
     }
     streamRetryTimer.interval = Mpd.streamRetryDelay(retry.tries) * 1000
     streamRetryTimer.restart()

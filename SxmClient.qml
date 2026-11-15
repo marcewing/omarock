@@ -55,15 +55,34 @@ Item {
   // channels), what's on now about 160 KB.
   property int maxBytes: 2097152
 
-  // HTTP through curl, capped and on time (Fetch.qml). timeoutMs: 10 s
-  // unless the caller says.
-  function request(method, path, body, callback, timeoutMs) {
-    if (root.loopbackPort > 0 && !listener.ours) {
-      if (callback) callback(null, listener.owner !== ""
+  // then(), once this account is found holding omarock-sxm's port, checked
+  // just before (an account can bind it whenever omarock-sxm restarts); else
+  // refused(why). Found held by another account while mpd plays SiriusXM
+  // from it, mpd stops, and the art goes (available).
+  function whenOurs(then, refused) {
+    if (root.loopbackPort === 0) return then()
+    listener.verify(function() {
+      if (!root || typeof root.whenOurs !== "function") return
+      if (listener.ours) return then()
+      if (listener.owner !== "") {
+        root.available = false
+        var file = root.mpd && root.mpd.currentSong ? String(root.mpd.currentSong.file || "") : ""
+        if (root.prefix !== "" && file.indexOf(root.prefix) === 0 && root.mpd.status.state === "play") root.mpd.send("stop")
+      }
+      refused(listener.owner !== ""
         ? "omarock-sxm's port (127.0.0.1:" + root.loopbackPort + ") is held by another account (uid " + listener.owner + "), so omarock doesn't use it"
         : "SiriusXM isn't running (omarock-sxm)")
-      return
-    }
+    })
+  }
+
+  // HTTP through curl, capped and on time (Fetch.qml). timeoutMs: 10 s
+  // unless the caller says. Each request after a fresh look at who holds the
+  // port (whenOurs).
+  function request(method, path, body, callback, timeoutMs) {
+    root.whenOurs(function() { root.send(method, path, body, callback, timeoutMs) },
+                  function(why) { if (callback) callback(null, why) })
+  }
+  function send(method, path, body, callback, timeoutMs) {
     fetch.request({ url: root.baseUrl + path, method: method, json: body, maxBytes: root.maxBytes, timeoutMs: timeoutMs || 10000,
                     // What tells omarock-sxm the request is omarock's, not a web page's.
                     headers: { "X-Omarock": "1" } }, function(reply) {
@@ -97,7 +116,6 @@ Item {
   // something's wrong only then.
   property bool healthKnown: false
   function checkHealth(callback) {
-    if (root.loopbackPort > 0) return listener.verify(function() { root.checkHealthNow(callback) })
     root.checkHealthNow(callback)
   }
   function checkHealthNow(callback) {
