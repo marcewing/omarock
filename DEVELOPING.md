@@ -194,6 +194,7 @@ python3 -I audio/test-bus.py
 python3 -I spotify/test_service.py
 python3 -I spotify/test_soloist_shim.py
 dbus-run-session -- python3 -I spotify/test_mpris.py
+apple-bridge/test-scripts.zsh                           # on a Mac: the bridge scripts
 tools/capture/argv-survey capture [out-dir]             # before a release (long)
 OMAROCK_THROWAWAY=yes tools/capture/argv-installer      # in a test VM only
 OMAROCK_THROWAWAY=yes tools/capture/vm-checks           # in a test VM only
@@ -232,6 +233,13 @@ The panel finds the fakes through settings that are in no settings screen,
 only in the file (Settings.js): `spotifyService`, `sxmService`, `radioBrowser`,
 `chartSource` and `appleTokenFile`. Pointing them elsewhere on a real machine
 works the same.
+
+`apple-bridge/test-scripts.zsh` runs the Mac installer's and `build.sh`'s
+helpers against a stand-in bridge on a scratch port, with a scratch support
+folder and no control socket, so they ask over TCP, as they do when the bridge
+is down and another account may hold its port. zsh's math runs any `$(…)` in an
+array subscript (`path[$(cmd)]`), so only digits from the bridge may reach
+`(( ))`: it serves such values and checks that nothing runs.
 
 It drives the panel with real key presses (QtTest's event injector) and clicks,
 saves screenshots, and fails on any QML warning from the plugin, or if the panel
