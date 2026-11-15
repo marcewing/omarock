@@ -505,10 +505,10 @@ def spotify_scenario(host, output, socket_path, failures):
           "its heading has Spotify's count, said once: " + s["headingLine"] + " | " + str(s["levelButtons"]["current"]), failures)
     # /v1/play itself, not /v1/playlists/… (the playlist's own GET), and a new one.
     plays = spotify_plays
-    before = len(plays())
+    played = len(plays())
     host.call("press", "Up")
     host.call("press", "Return")
-    wait_for(lambda: len(plays()) > before, "play the playlist")
+    wait_for(lambda: len(plays()) > played, "play the playlist")
     check(plays()[-1][2] == {"items": [{"kind": "playlist", "id": "c-pl-1", "source": "catalog"}],
                              "mode": "play", "start": 0},
           "it still plays: " + json.dumps(plays()[-1][2]), failures)
