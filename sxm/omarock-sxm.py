@@ -15,6 +15,7 @@ now-playing feed, and only while omarock is asking.
 """
 import asyncio
 import base64
+import itertools
 import json
 import logging
 import os
@@ -30,7 +31,7 @@ from aiosxm import SxmClient
 from aiosxm.models import build_image_url
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 HOST, PORT = "127.0.0.1", int(os.environ.get("OMAROCK_SXM_PORT", "8720"))
 CONFIG = Path(os.environ.get("OMAROCK_SXM_CONFIG", Path.home() / ".config/omarock/siriusxm.json"))
 BITRATE = "256k"
@@ -55,6 +56,15 @@ SAMPLE_RATES = (96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 1
 LOGIN_HOST = "api.edge-gateway.siriusxm.com"
 NETWORK_WAIT = 300
 NETWORK_POLL = 2
+# What's passed on to the panel, which reads it on the shell's one thread:
+# SiriusXM has about 400 channels, and what's on now for each, so at most
+# CHANNELS_MOST of either, each text at most TEXT_MOST characters.
+CHANNELS_MOST = 1000
+TEXT_MOST = 1000
+# A segment is 10 s of 256 kbps (320 KB), its playlist a few KB: more than
+# these isn't one.
+SEGMENT_MOST = 4 * 1024 * 1024
+PLAYLIST_MOST = 1024 * 1024
 
 log = logging.getLogger("omarock-sxm")
 
@@ -81,7 +91,7 @@ async def wait_for_network(host, limit):
 
 def art_url(key, base):
     """A template omarock fills with {w} and {h}, like Apple's artwork."""
-    if not key:
+    if not key or len(key) > TEXT_MOST:
         return None
     token = base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
     return f"{base}/art/{token}/{{w}}x{{h}}"
@@ -148,7 +158,7 @@ class Relay:
                 # segment paths that get_segment resolves; the sequence numbers,
                 # and so the IVs, stay right.
                 text = await stream.get_proxied_playlist("key", BITRATE, window=8)
-                target, segments = parse_playlist(text)
+                target, segments = parse_playlist(text) if len(text) <= PLAYLIST_MOST else (10.0, [])
                 if not segments:
                     await asyncio.sleep(2)
                     continue
@@ -164,6 +174,10 @@ class Relay:
                     # A segment outside the stream's folder comes as a signed CDN URL.
                     data = await (client.request("GET", uri) if uri.startswith("https://")
                                   else stream.get_segment(uri, BITRATE))
+                    if len(data) > SEGMENT_MOST:
+                        log.warning("%s: segment %d is %d bytes: skipped", name, segment["seq"], len(data))
+                        next_seq = segment["seq"] + 1
+                        continue
                     audio = strip_id3(decrypt(data, key, segment["iv"], segment["seq"]))
                     if audio[:1] != b"\xff":
                         log.warning("%s: segment %d doesn't start with an ADTS frame (%s)",
@@ -343,24 +357,29 @@ class Service:
         now = self.now_playing.get(channel_id)
         if not now:
             return ""
+        # ICY's metadata block holds 4,080 bytes at most.
         if now.is_ad:
-            return now.show or ""
+            return short(now.show)
         parts = [p for p in (now.artist, now.title) if p]
-        return " - ".join(parts) if parts else (now.show or "")
+        return short(" - ".join(parts) if parts else now.show)
+
+
+def short(text):
+    return str(text or "")[:TEXT_MOST]
 
 
 def channel_json(channel, base, favorites=()):
     image = channel.image("tile", "1x1") or channel.image("logo", "1x1")
-    return {"id": channel.id, "number": channel.channel_number or "", "name": channel.title,
-            "shortName": channel.title_short or "", "genre": channel.genre or "",
-            "description": channel.description or "", "logo": art_url(image.key if image else None, base),
+    return {"id": channel.id, "number": short(channel.channel_number), "name": short(channel.title),
+            "shortName": short(channel.title_short), "genre": short(channel.genre),
+            "description": short(channel.description), "logo": art_url(image.key if image else None, base),
             "stream": f"{base}/stream/{channel.id}", "favorite": channel.id in favorites,
             "available": not channel.unentitled and not channel.off_air}
 
 
 def now_json(now, base):
-    return {"artist": now.artist or "", "title": now.title or "", "show": now.show or "",
-            "isAd": now.is_ad, "startedAt": now.started_at or "",
+    return {"artist": short(now.artist), "title": short(now.title), "show": short(now.show),
+            "isAd": now.is_ad, "startedAt": short(now.started_at),
             "art": art_url(now.image_key or now.show_image_key, base)}
 
 
@@ -457,18 +476,21 @@ def routes(service):
         service.asked_at = time.monotonic()
         try:
             client = await service.client()
-            found = [c for c in await client.get_channels() if c.is_linear]
-            favorites = {c.id for c in await client.get_library_channels()}
+            found = [c for c in await client.get_channels() if c.is_linear and len(str(c.id)) <= TEXT_MOST][:CHANNELS_MOST]
+            favorites = {c.id for c in (await client.get_library_channels())[:CHANNELS_MOST]}
         except Exception as e:  # noqa: BLE001
-            return error(502, str(e) or type(e).__name__)
-        found.sort(key=lambda c: (int(c.channel_number) if (c.channel_number or "").isdigit() else 10**6, c.title))
+            return error(502, short(e) or type(e).__name__)
+        found.sort(key=lambda c: (int(c.channel_number) if (c.channel_number or "").isdigit() and len(c.channel_number) < 10
+                                  else 10**6, short(c.title)))
         return web.json_response([channel_json(c, base, favorites) for c in found])
 
     async def now_playing(request):
         service.asked_at = time.monotonic()
         if time.time() - service.now_playing_at > NOW_PLAYING_EVERY * 2:
             await service.refresh_now_playing()
-        return web.json_response({cid: now_json(now, base) for cid, now in service.now_playing.items()})
+        playing = [(cid, now) for cid, now in itertools.islice(service.now_playing.items(), CHANNELS_MOST)
+                   if len(str(cid)) <= TEXT_MOST]
+        return web.json_response({cid: now_json(now, base) for cid, now in playing})
 
     async def favorite(request):
         channel_id = request.match_info["id"]

@@ -3,6 +3,7 @@ omarock's own requests, from this account, are answered: run with the service's 
 ~/.local/share/omarock/sxm-venv/bin/python sxm/test_relay.py"""
 import asyncio
 import importlib.util
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -98,6 +99,61 @@ async def web_pages():
     finally:
         await runner.cleanup()
     print("ok: only omarock's own requests, from this account")
+    await forwarded()
+
+
+async def forwarded():
+    """What SiriusXM says goes on to the panel, which reads it on the shell's
+    one thread: at most CHANNELS_MOST channels and entries of what's on now,
+    each text at most TEXT_MOST, and an ICY title that fits its block."""
+    import aiohttp
+    from aiohttp import web
+    huge = "x" * 200000
+
+    def channel(n):
+        return SimpleNamespace(id=f"c{n}", is_linear=True, channel_number=str(n), title=huge, title_short=huge, genre=huge,
+                               description=huge, unentitled=False, off_air=False, image=lambda kind, ratio: None)
+    now = SimpleNamespace(artist=huge, title=huge, show=huge, is_ad=False, started_at=huge, image_key=huge, show_image_key=None)
+
+    class Client:
+        async def get_channels(self):
+            return [SimpleNamespace(**dict(vars(channel(0)), id="y" * 200000))] + [channel(n) for n in range(5000)]
+
+        async def get_library_channels(self):
+            return [channel(n) for n in range(5000)]
+
+    async def client():
+        return Client()
+    service = SimpleNamespace(asked_at=0.0, client=client, now_playing={f"c{n}": now for n in range(5000)},
+                              now_playing_at=time.time(), relays={})
+    runner = web.AppRunner(sxm.routes(service))
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    sxm.PORT = site._server.sockets[0].getsockname()[1]
+    base = f"http://127.0.0.1:{sxm.PORT}"
+    try:
+        async with aiohttp.ClientSession() as http:
+            async def get(path):
+                async with http.get(base + path, headers={"X-Omarock": "1"}) as reply:
+                    return await reply.json()
+            channels = await get("/v1/channels")
+            assert len(channels) == sxm.CHANNELS_MOST, f"{len(channels)} channels passed on"
+            longest = max(len(v) for c in channels for v in c.values() if isinstance(v, str))
+            assert longest <= sxm.TEXT_MOST + 100, f"a channel's text of {longest}"
+            assert all(len(c["id"]) <= sxm.TEXT_MOST for c in channels), "a channel id too long to be one is left out"
+            playing = await get("/v1/nowplaying")
+            assert len(playing) == sxm.CHANNELS_MOST, f"{len(playing)} entries of what's on now"
+            entry = next(iter(playing.values()))
+            assert max(len(v) for v in entry.values() if isinstance(v, str)) <= sxm.TEXT_MOST and entry["art"] is None, \
+                "what's on now is cut short, art too long to be one left out"
+    finally:
+        await runner.cleanup()
+    service = sxm.Service.__new__(sxm.Service)
+    service.now_playing = {"c1": SimpleNamespace(artist="ü" * 3000, title="ü" * 3000, show="", is_ad=False)}
+    title = service.title_for("c1")
+    assert len(f"StreamTitle='{title}';".encode()) <= 255 * 16, "the ICY title fits its block"
+    print("ok: what's passed on to the panel is bounded")
 
 
 asyncio.run(main())
