@@ -64,8 +64,12 @@ By hand, run the tools from your omarock clone: the plugin's folder,
    on. Then:
    ```bash
    tools/install-spotify --start    # installs both services, and omarock's shim
-   tools/update-soloist install     # installs Soloist from ~/Downloads, and checks it
+   tools/update-soloist install     # shows the download in ~/Downloads, asks, installs and checks it
    ```
+   omarock can't tell where a download came from (Omarchy's Chromium doesn't
+   record it, and a web page can start one under any name), so it shows you the
+   file it found (its name, size, and when it was saved) and installs it only
+   if you say yes; and only a file of yours that other accounts can't change.
    `update-soloist` reads the download without running it: an x86-64 program
    built to work with omarock's shim (below), and not expired. It installs it,
    starts it with the shim, and watches its log, where the shim says it handed
@@ -127,7 +131,8 @@ By hand, run the tools from your omarock clone: the plugin's folder,
 - **Soloist builds expire after 90 days.** Ten days before, a dot on Spotify
   in the panel's header, and on the gear, says so. Download a new build from
   Spotify, then **Update…** on the Spotify tab of omarock's settings (or
-  `./install spotify`, or `tools/update-soloist install`) installs and checks it.
+  `./install spotify`, or `tools/update-soloist install`) shows it, asks, and
+  installs and checks it.
   A newer build waiting in `~/Downloads` gets the dot too.
 - **A Soloist put in by hand** (over `~/.local/lib/omarock-soloist/soloist`)
   isn't started until it's checked: **Update…**, or `tools/update-soloist check`.

@@ -11,7 +11,8 @@
 # you downloaded from Spotify, which tools/update-soloist installed and checked
 # with the shim: this starts only that build (its hash, in soloist.sha256), and
 # anything else (none yet, or one replaced by hand) stops with 79 until
-# update-soloist checks it. Spotify's builds expire after 90 days: an expired
+# update-soloist checks it; so does a build whose check never finished (its
+# soloist.checking left over 2 minutes). Spotify's builds expire after 90 days: an expired
 # one exits with 10. Without its key it says so and stops (78), rather than
 # printing its usage every 5 s. None of the three is restarted.
 # It waits for the network first: Soloist tries to log in once, at start, and a
@@ -28,7 +29,7 @@ After=pipewire.service omarock-bus.service
 Wants=omarock-bus.service
 
 [Service]
-ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; shim=%h/.local/share/omarock/spotify/omarock-soloist-shim.so; [ -r "$$shim" ] || { echo "omarock-soloist: no $$shim: run tools/install-spotify again" >&2; exit 78; }; (cd %h/.local/lib/omarock-soloist 2>/dev/null && sha256sum --check --status soloist.sha256 2>/dev/null) || { echo "omarock-soloist: this Soloist is not the build omarock checked (none yet, or replaced by hand): Update... in the settings of omarock, Spotify, checks it" >&2; exit 79; }; until getent hosts apresolve.spotify.com >/dev/null; do [ -n "$$waiting" ] || echo "omarock-soloist: waiting for the network" >&2; waiting=1; sleep 2; done; if [ -e %h/.local/share/omarock/audio/omarock-bus.conf ]; then set -- --pipewire-device omarock --initial-volume 100; else set -- --initial-volume 40; fi; export LD_PRELOAD="$$shim" OMAROCK_SOLOIST_KEY="$$key"; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key @key --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 "$$@" --ws 127.0.0.1:8731'
+ExecStart=/bin/sh -c 'key=%h/.config/omarock/soloist-key; [ -s "$$key" ] || { echo "omarock-soloist: no Soloist key in $$key (spotify/README.md, step 3)" >&2; exit 78; }; shim=%h/.local/share/omarock/spotify/omarock-soloist-shim.so; [ -r "$$shim" ] || { echo "omarock-soloist: no $$shim: run tools/install-spotify again" >&2; exit 78; }; (cd %h/.local/lib/omarock-soloist 2>/dev/null && sha256sum --check --status soloist.sha256 2>/dev/null && { [ ! -e soloist.checking ] || [ $$(( $$(date +%%s) - $$(stat -c %%Y soloist.checking) )) -lt 120 ]; }) || { echo "omarock-soloist: this Soloist is not the build omarock checked (none yet, replaced by hand, or its check never finished): Update... in the settings of omarock, Spotify, checks it" >&2; exit 79; }; until getent hosts apresolve.spotify.com >/dev/null; do [ -n "$$waiting" ] || echo "omarock-soloist: waiting for the network" >&2; waiting=1; sleep 2; done; if [ -e %h/.local/share/omarock/audio/omarock-bus.conf ]; then set -- --pipewire-device omarock --initial-volume 100; else set -- --initial-volume 40; fi; export LD_PRELOAD="$$shim" OMAROCK_SOLOIST_KEY="$$key"; exec %h/.local/lib/omarock-soloist/soloist --device-name %H --api-key @key --data-dir %h/.local/share/omarock-soloist --cache-dir %h/.cache/omarock-soloist --cache-size 500 "$$@" --ws 127.0.0.1:8731'
 Restart=on-failure
 RestartSec=5
 RestartPreventExitStatus=10 78 79

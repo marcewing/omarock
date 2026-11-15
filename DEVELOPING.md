@@ -172,19 +172,35 @@ mpd with mpd's `null` output, or a private PipeWire.
   request has an `Origin` or `Sec-Fetch-` header, as every browser's does and
   omarock-spotify's and the Spotify apps' never do: it looks at the request
   with `MSG_PEEK` (Soloist still reads all of it), for up to a second.
-- **No download-and-run.** Nothing omarock runs fetches a program and runs it.
-  Soloist, the one program it doesn't get from Arch or this clone, you download
-  from Spotify's page (Spotify publishes only an unversioned "latest" build,
-  with no checksums or signatures, and doesn't allow passing it on).
+- **What comes from elsewhere, pinned.** Two optional pieces fetch code from
+  outside Arch and this clone: Apple Music's patched mpd-mpris
+  (`tools/build-mpd-mpris`) builds mpd-mpris's source from GitHub at a pinned
+  commit, its Go modules checked against its go.sum (`-mod=readonly`); and
+  omarock-sxm (`tools/install-sxm`) installs aiosxm and its dependencies from
+  PyPI with `--require-hashes`, every file's SHA-256 in `sxm/requirements.txt`
+  (`tools/pin-sxm` writes it). Each says so where it asks.
+- **Soloist, your own download.** Soloist is the one program with nothing to
+  pin it by: you download it from Spotify's page (Spotify publishes only an
+  unversioned "latest" build, with no checksums or signatures, and doesn't
+  allow passing it on), and omarock can't tell where a download came from
+  (Firefox records it, in `user.xdg.origin.url`; Omarchy's Chromium doesn't,
+  and a web page can start one under any name). So a download is installed
+  only once you've seen it (name, size, when it was saved) and said yes, in
+  `./install` or `update-soloist install`, and only if it's yours: another
+  account's file, one other accounts can change, or one in a folder they can,
+  is refused. Reading it is bounded (100 MB, a few hundred files, its program
+  256 MB, a minute a step), on disk, not in `/tmp`.
   `tools/update-soloist` reads the download without running it (an x86-64
   program importing glibc's `__libc_start_main` and `accept`/`accept4`, which
   the shim needs; its build number, the time it was built, says whether it's
   expired), installs it, and checks it: Soloist's unit starts it with the shim,
   and its log has to say within 30 s that the shim handed over the key and
   guards the control port and the discovery port (it reaches each once from
-  this machine). Then its hash goes into `soloist.sha256`, which the
-  unit checks at every start (exit 79 for anything else), and a copy is kept;
-  a build that fails is swapped back for the last good one.
+  this machine). Its hash goes into `soloist.sha256`, which the unit checks
+  at every start (exit 79 for anything else), with `soloist.checking` beside
+  it until the check passes; then a copy is kept. A build that fails, or whose
+  check is cut short, is swapped back for the last good one, and one whose
+  check never finished (`soloist.checking` left over) isn't started.
 
 ## Tests
 

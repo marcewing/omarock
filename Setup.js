@@ -126,7 +126,7 @@ var pages = {
         fields: [{ key: "pairCode", type: "pair", label: "Pairing code", placeholder: "6 digits", required: true,
           needs: "the pairing code from the Mac" }] },
       { title: "Smooth playback (optional, recommended)",
-        text: ["A fix for mpd-mpris that isn't in Arch's package yet (patches/README.md). It's built here, for omarock only, from a pinned release, and sudo asks for your password to install the packages it builds with (those you don't have yet; they stay afterwards)."],
+        text: ["A fix for mpd-mpris that isn't in Arch's package yet (patches/README.md). It's built here, for omarock only, from mpd-mpris's source on GitHub at a pinned commit and its Go modules (checked against its go.sum), and sudo asks for your password to install the packages it builds with (those you don't have yet; they stay afterwards)."],
         fields: [
           { key: "mpris", type: "check", defaultValue: true, label: "A patched mpd-mpris (a minute; installs go and git)", arg: "mpris",
             description: "Without it, mpd-mpris (the media keys' go-between) asks mpd for the stream's cover at every play and pause, which holds mpd for seconds." }
