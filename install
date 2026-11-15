@@ -1784,26 +1784,30 @@ un_sxm() {
 # the patches that were for its stream. The bridge on the Mac stays.
 # The bridge's stream in mpd (its address has a secret, which stays good for as
 # long as the Mac keeps its token): out of the queue, which mpd also keeps in
-# its state file; the stored playlists that hold it are named. Matched by the
-# secret, which travels in the environment, never on a command line.
+# its state file; the stored playlists that hold it are named. Matched by its
+# shape (/omarock-, 32 hex digits, .ogg: any Mac's, set up now or before), so
+# no secret is on a command line. When mpd doesn't answer, that's said, and
+# --uninstall's mpd question says it before asking.
 streams_left=()
+streams_unchecked=""
+stream_shape='/omarock-[0-9a-f]{32}[.]ogg'
 un_streams() {
-  local stream pos name
-  stream=$(jq -r '.stream // empty' "$config/apple.json" 2>/dev/null)
-  [[ -z $stream ]] && stream=$(setting appleStream "")
-  [[ $stream == http*://*/omarock-?*.ogg ]] || return 0
-  command -v mpc >/dev/null && mpc status >/dev/null 2>&1 || return 0
-  export OMAROCK_SECRET="/${stream##*/}"
+  local pos name
+  command -v mpc >/dev/null || return 0
+  if ! mpc status >/dev/null 2>&1; then
+    streams_unchecked=yes
+    note "mpd isn't answering, so its queue and playlists couldn't be checked for the Mac's stream (its address has a secret): with mpd running, ./install --remove apple-music looks again"
+    return 0
+  fi
   mapfile -t pos < <(mpc -f '%position% %file%' playlist 2>/dev/null \
-    | awk 'index($2, ENVIRON["OMAROCK_SECRET"]) {print $1}' | sort -rn)
+    | awk -v re="$stream_shape" '$2 ~ re {print $1}' | sort -rn)
   if ((${#pos[@]})); then
     explain "mpd's queue has the Mac's stream (its address has a secret): it comes out."
     for name in "${pos[@]}"; do run mpc -q del "$name"; done
   fi
   while IFS= read -r name; do
-    mpc playlist "$name" 2>/dev/null | awk 'index($0, ENVIRON["OMAROCK_SECRET"]) {found = 1} END {exit !found}' && streams_left+=("$name")
+    mpc playlist "$name" 2>/dev/null | awk -v re="$stream_shape" '$0 ~ re {found = 1} END {exit !found}' && streams_left+=("$name")
   done < <(mpc lsplaylists 2>/dev/null)
-  unset OMAROCK_SECRET
   ((${#streams_left[@]})) && note "mpd's playlists with the Mac's stream in them (its address has a secret): ${streams_left[*]}. Take it out of them, or delete them, if mpd will ever be open to others"
   return 0
 }
@@ -2025,6 +2029,18 @@ un_mpd() {
   explain "omarock also set mpd up for itself. Other mpd clients can use these too, so they stay unless you say otherwise."
   if [[ -n $gone ]]; then explain "In $conf, mpd's unix socket (and any TCP address it turned off, back on):"; sed 's/^/    /' <<<"$gone"; fi
   if ((${#dropins[@]})); then explain "Drop-ins (the socket's folder, mpd coming back after a crash, mpd writing its files for you alone, mpd-mpris following mpd and finding it on the socket), and MPD_HOST for other clients:"; listing "${dropins[@]}"; fi
+  # What a yes opens, said before it's asked.
+  local opens=""
+  if [[ -n $gone ]]; then
+    mpd_socket_undo "$conf" write
+    grep -q '^[[:space:]]*bind_to_address' "$conf.new" || opens=yes
+    rm -f -- "$conf.new"
+  fi
+  if [[ -n $opens ]]; then
+    explain "With these out, mpd listens where it does by default: port 6600 on every network interface, so other accounts here, and other machines, can control it and read its queue and playlists."
+    ((${#streams_left[@]})) && bad "mpd's playlists ${streams_left[*]} hold the Mac's stream address (it has a secret): take it out of them, or delete them, first"
+    [[ -n $streams_unchecked ]] && bad "and mpd's queue and playlists couldn't be checked for the Mac's stream (its address has a secret), as mpd didn't answer"
+  fi
   confirm "Take these out too, and restart mpd?" no || { ok "kept them"; return 0; }
   if [[ -n $gone ]]; then
     backup "$conf"
@@ -2043,7 +2059,6 @@ un_mpd() {
     && note "the patched mpd-mpris you kept still looks for mpd on the socket: ./install --remove apple-music takes it out"
   if [[ -n $gone ]] && ! grep -q '^[[:space:]]*bind_to_address' "$conf"; then
     note "mpd listens where it does by default now: port 6600 on every network interface, and its socket"
-    ((${#streams_left[@]})) && bad "and anyone who reaches it can read the Mac's stream address in mpd's playlists ${streams_left[*]}: take it out of them, or delete them"
   fi
 }
 
