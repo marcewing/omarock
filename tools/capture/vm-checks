@@ -132,6 +132,15 @@ check "omarock-sp won't use omarock-spotify's port held by another account" grep
 "$repo/tools/omarock-doctor" >"$work/logs/doctor-held.log" 2>&1 || true
 check "and the doctor says another account holds it" grep -q "holds omarock-spotify's port" "$work/logs/doctor-held.log"
 wait "$held"
+# An IPv6 socket on :: takes connections to 127.0.0.1 too, and is listed
+# only in /proc/net/tcp6.
+as_other python3 -I -c 'import socket, time; s = socket.create_server(("::", 8730), family=socket.AF_INET6, dualstack_ipv6=True); time.sleep(10)' & held=$!
+sleep 1
+out=$("$repo/tools/omarock-sp" raw GET /v1/health 2>&1 || true)
+check "nor when another account holds it on IPv6's ::, which takes 127.0.0.1's connections" grep -q 'another account (uid' <<<"$out"
+"$repo/tools/omarock-doctor" >"$work/logs/doctor-held6.log" 2>&1 || true
+check "and the doctor says so then too" grep -q "holds omarock-spotify's port" "$work/logs/doctor-held6.log"
+wait "$held"
 systemctl --user start omarock-spotify
 sleep 3
 greet='import socket, sys; s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5); s.settimeout(5); print(s.recv(16).decode().strip() or "closed")'

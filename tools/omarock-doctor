@@ -31,15 +31,17 @@ conf_value() { grep -E "^[[:space:]]*$2[[:space:]]" "$1" 2>/dev/null | head -1 |
 # machine can read that): omarock-sxm's can name the account.
 # held_by_other URL: for a service on 127.0.0.1:PORT, whether another account
 # holds that port (it could have bound it first, while the service was down)
-# and would get what's sent; it prints that account's uid. The listening
-# socket's owner, from /proc/net/tcp: 127.0.0.1's, else the wildcard's.
+# and would get what's sent; it prints that account's uid. Every listening
+# socket a connection to 127.0.0.1:PORT could reach, from /proc/net/tcp and
+# tcp6: 127.0.0.1's and the wildcard's, and IPv6's :: and ::ffff:127.0.0.1
+# (an IPv6 socket on :: takes IPv4 connections too, and is only in tcp6).
 held_by_other() {
   local port uid
   [[ $1 =~ ^http://127\.0\.0\.1:([0-9]+)(/|$) ]] || return 1
   port=$(printf '%04X' "${BASH_REMATCH[1]}")
-  uid=$(awk -v p=":$port" '$4 == "0A" && $2 == "0100007F" p {print $8; exit}' /proc/net/tcp)
-  [[ -n $uid ]] || uid=$(awk -v p=":$port" '$4 == "0A" && $2 == "00000000" p {print $8; exit}' /proc/net/tcp)
-  [[ -n $uid && $uid != "$(id -u)" ]] || return 1
+  uid=$(awk -v p=":$port" -v me="$(id -u)" '$4 == "0A" && $8 != me && ($2 == "0100007F" p || $2 == "00000000" p ||
+    $2 == "0000000000000000FFFF00000100007F" p || $2 == "00000000000000000000000000000000" p) {print $8; exit}' /proc/net/tcp /proc/net/tcp6)
+  [[ -n $uid ]] || return 1
   echo "$uid"
 }
 health() { held_by_other "$1" >/dev/null && return 0; curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
