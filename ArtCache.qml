@@ -34,7 +34,9 @@ Item {
     var address = String(url || "")
     if (address === "" || root.version < 0) return ""
     if (address.indexOf("file://") === 0) return address
-    if (!/^https?:\/\//i.test(address) || address.length > 4096) return ""
+    // An address with a space or a control character in it (a line break
+    // would make it two on the helper's stdin) is no address.
+    if (!/^https?:\/\//i.test(address) || address.length > 4096 || /[\u0000-\u0020\u007f]/.test(address)) return ""
     var known = Store.answers[address]
     if (known && (known.until === 0 || known.until > Date.now())) return known.file
     if (!Store.pending[address]) {

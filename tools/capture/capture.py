@@ -4561,6 +4561,11 @@ def remote_art_scenario(host, output, socket_path, failures):
           f"the cache folder is 0700 and its {len(made)} files 0600", failures)
     check(ztxt.exists() and b"zTXt" not in ztxt.read_bytes() and b"tEXt" not in ztxt.read_bytes()
           and ztxt.stat().st_size < 1000, "the zTXt PNG is kept without its text", failures)
+    # A line break would make one address two on the helper's stdin.
+    split = urls["good.png"] + "\n" + base + "split.png"
+    check(host.call("artLocal", split) == "" and host.call("artState", split) == ""
+          and host.call("artLocal", file_url := "file://" + str(ztxt)) == file_url,
+          "an address with a line break isn't asked for; a file:// one shows as it is", failures)
 
     # Tuned: the station's logo on the card and the bar; a song's ICY art
     # once it has a file, the station's logo when it's refused.
@@ -4589,6 +4594,13 @@ def remote_art_scenario(host, output, socket_path, failures):
     walk("expanded, radio playing")
     host.grab(output / "expanded-art.png")
     host.call("expand", "false")
+    # Back on the most listened local station, which the radio comes back to
+    # (the scenarios after this one expect it).
+    host.call("press", "/")
+    host.call("typeKeys", "kexp")
+    wait_for(lambda: host.state()["query"] == "kexp" and not host.state()["searching"], "station search")
+    host.call("press", "Return")
+    wait_for(lambda: host.state()["nowPlaying"].startswith("KEXP"), "KEXP")
 
     # Apple Music's art goes the same way, in the card, the bar, the list and
     # the info card.

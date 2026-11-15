@@ -392,6 +392,8 @@ ShellRoot {
     }
     // What the art cache says of an address: "file", "refused: why", "waiting" or "".
     function artState(url: string): string { return host.panel.art ? host.panel.art.stateOf(url) : "no cache" }
+    // What an Image given url would show (and asking is what fetches it).
+    function artLocal(url: string): string { return host.panel.art ? host.panel.art.local(url) : "no cache" }
     // The text input with the keys: its text, cursor and selection, why its
     // last paste was turned down, whether its cursor shows.
     function field(): string {
