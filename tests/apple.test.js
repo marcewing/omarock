@@ -304,3 +304,15 @@ test("the bridge's stream: a host in any case, and the same secret by another ad
   assert.equal(Apple.streamSecret("http://h:8000/omarock.ogg"), "")
   assert.equal(Apple.streamBase("HTTP://My-Mac.LOCAL:8000/omarock.ogg"), "http://my-mac.local:8000/omarock")
 })
+
+test("mpd gets the stream by the address the Mac's .local name was checked to lead to", () => {
+  const url = "http://Studio-Mac.local:8000/omarock-0123456789abcdef0123456789abcdef.ogg"
+  assert.equal(Apple.streamAt(url, "studio-mac.local", "198.51.100.8"),
+    "http://198.51.100.8:8000/omarock-0123456789abcdef0123456789abcdef.ogg")
+  assert.equal(Apple.streamAt(url, "studio-mac.local.", "2001:db8::5"),
+    "http://[2001:db8::5]:8000/omarock-0123456789abcdef0123456789abcdef.ogg")
+  assert.equal(Apple.streamAt(url, "studio-mac.local", ""), url, "not checked yet: as it is")
+  assert.equal(Apple.streamAt(url, "other-mac.local", "198.51.100.8"), url, "another Mac's")
+  assert.equal(Apple.streamAt("http://100.64.0.10:8000/omarock.ogg", "", ""), "http://100.64.0.10:8000/omarock.ogg")
+  assert.ok(Apple.isStream(Apple.streamAt(url, "studio-mac.local", "198.51.100.8"), url), "still the same stream")
+})

@@ -26,6 +26,19 @@ function streamBase(url) {
   return (m ? m[1] : u).replace(/^[a-z]+:\/\/[^\/]*/i, function(h) { return h.toLowerCase() })
 }
 
+// The stream's address as mpd should have it: for a Mac reached by its
+// .local name, the address that name was checked to lead to
+// (tools/omarock-resolve), not the name, which mpd would look up again itself
+// each time it connects, and which any account here can answer for while
+// the Mac is away. Any other address is left as it is.
+function streamAt(url, localHost, address) {
+  var u = String(url || "")
+  if (!localHost || !address) return u
+  var m = /^(https?:\/\/)([^\/:\[\]]+)(:\d+)?(\/.*)?$/i.exec(u)
+  if (!m || m[2].replace(/\.$/, "").toLowerCase() !== String(localHost).replace(/\.$/, "").toLowerCase()) return u
+  return m[1] + (address.indexOf(":") >= 0 ? "[" + address + "]" : address) + (m[3] || "") + (m[4] || "")
+}
+
 // The secret in the stream's address from bridge 0.9.0, "" in any other.
 function streamSecret(url) {
   var m = /\/omarock-([0-9a-f]{32})\.ogg$/.exec(String(url || ""))
@@ -575,6 +588,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     streamBase: streamBase,
     streamSecret: streamSecret,
+    streamAt: streamAt,
     bridgeStream: bridgeStream,
     isStream: isStream,
     artUrl: artUrl,
