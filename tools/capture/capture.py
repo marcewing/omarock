@@ -46,7 +46,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
                 "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js", "StdinProcess.qml", "ListenerCheck.qml",
-                "GuardedField.qml", "Editing.js",
+                "GuardedField.qml", "Editing.js", "Job.qml", "Reply.js",
                 "tools/omarock-account", "tools/omarock-sources", "tools/update-soloist", "tools/omarock-resolve"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")

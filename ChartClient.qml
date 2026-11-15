@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Io
 import "TimeMachine.js" as TimeMachine
 import "ChartStore.js" as Store
+import "Reply.js" as Reply
 
 // Time Machine's Top 100: Billboard's year-end chart, read from Wikipedia's
 // page for the year (TimeMachine.parseChart), and its songs found on Apple
@@ -11,8 +12,10 @@ import "ChartStore.js" as Store
 Item {
   id: root
 
-  // Wikipedia, or the harness's stand-in.
+  // Wikipedia, or the harness's stand-in; and the program that asks it (the
+  // harness gives one that can't start).
   property string source: "https://en.wikipedia.org"
+  property string curl: "curl"
   property string cacheDir: ""
   // The most read of an answer or a cache file (a year's page is under 20
   // KB), and how long Wikipedia has to answer.
@@ -66,23 +69,23 @@ Item {
     root.fetches = root.fetches.slice(1)
     fetcher.code = -1
     fetcher.body = null
-    fetcher.late = false
     var url = root.source + "/w/api.php?action=parse&format=json&formatversion=2&redirects=1&prop=wikitext&page="
       + encodeURIComponent(TimeMachine.chartPage(fetcher.current.year))
     // curl stops at maxBytes (63), as they arrive since curl 8.4, and at
     // maxSeconds (28). Wikipedia asks API clients to say who they are.
-    fetcher.command = ["curl", "-s", "--proto", "=http,https", "--max-filesize", String(root.maxBytes),
+    fetcher.command = [root.curl, "-q", "-s", "--proto", "=http,https", "--max-filesize", String(root.maxBytes),
       "--max-time", String(root.maxSeconds), "-A", root.userAgent, "-H", "Api-User-Agent: " + root.userAgent, "--url", url]
     fetcher.running = true
-    fetchDeadline.restart()
   }
-  Process {
+  // Should curl not keep its own deadline, it's stopped 5 s after; one that
+  // can't start ends as 127 (Job), so the next year's fetch goes on.
+  Job {
     id: fetcher
+    deadline: (root.maxSeconds + 5) * 1000
     property var current: null
     // Its exit code (-1 until it exits) and what it wrote (null until it ends).
     property int code: -1
     property var body: null
-    property bool late: false
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -97,22 +100,12 @@ Item {
     }
     function finish() {
       if (fetcher.code < 0 || fetcher.body === null || !fetcher.current) return
-      fetchDeadline.stop()
       var fetch = fetcher.current
       var body = fetcher.body
       fetcher.current = null
       fetcher.body = null
       Qt.callLater(root.nextFetch)
-      root.fetched(fetch, fetcher.late ? 28 : fetcher.code, body)
-    }
-  }
-  // curl's own deadline, should it not keep it.
-  Timer {
-    id: fetchDeadline
-    interval: (root.maxSeconds + 5) * 1000
-    onTriggered: if (fetcher.running) {
-      fetcher.late = true
-      fetcher.running = false
+      root.fetched(fetch, fetcher.code, body)
     }
   }
 
@@ -123,12 +116,12 @@ Item {
     var page = TimeMachine.chartPage(year)
     var chart = null
     var error = ""
-    var data = null
-    if (code === 63 || text.length > root.maxBytes)
+    var read = code === 0 ? Reply.parse(text, root.maxBytes) : { data: null, error: "" }
+    var data = read.data
+    if (code === 63 || Reply.refused(read.error))
       error = "Wikipedia's page for " + year + "'s chart is too big to read"
     else if (code !== 0) error = "Can't reach Wikipedia for " + year + "'s chart"
     else {
-      try { data = text ? JSON.parse(text) : null } catch (e) {}
       if (data && data.error)
         error = data.error.code === "missingtitle" ? "Wikipedia has no page for " + year + "'s chart"
           : "Wikipedia said: " + String(data.error.info || data.error.code).slice(0, 200)
@@ -273,14 +266,15 @@ Item {
     reader.command = ["head", "-c", String(root.maxBytes), reader.current.path]
     reader.running = true
   }
-  Process {
+  // One that can't start reads nothing (Job), so whoever waits on it goes on.
+  Job {
     id: reader
+    deadline: 10000
     property var current: null
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var data = null
-        try { data = text ? JSON.parse(text) : null } catch (e) {}
+        var data = Reply.parse(text, root.maxBytes).data
         var callback = reader.current ? reader.current.callback : null
         reader.current = null
         if (callback) callback(data)

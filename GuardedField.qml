@@ -248,8 +248,11 @@ Ui.TextField {
   Component {
     id: pasteJobs
 
-    Process {
+    // A Job: one that can't start ends at once, pasting nothing; pasteDeadline
+    // comes before its own deadline.
+    Job {
       id: job
+      deadline: 6000
       property int seq: 0
       property int revision: 0
       stdout: StdioCollector { id: out; waitForEnd: true }
@@ -259,7 +262,7 @@ Ui.TextField {
         else job.destroy()
       }
       onExited: function(exitCode, exitStatus) {
-        field.pasted(job, Editing.pasteOutcome(out.data.byteLength, exitCode, exitStatus === 0), out.text)
+        field.pasted(job, Editing.pasteOutcome(out.data ? out.data.byteLength : 0, exitCode, exitStatus === 0), out.text)
         job.destroy()
       }
     }

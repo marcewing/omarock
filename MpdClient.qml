@@ -836,8 +836,10 @@ Item {
     if (root.active && root.socketPath !== "" && !idleSocket.connected) socketProbe.running = true
   }
 
-  Process {
+  // One that can't run counts as no socket: tried again in 3 s.
+  Job {
     id: socketProbe
+    deadline: 5000
     command: ["test", "-S", root.socketPath]
     onExited: function(exitCode) {
       if (exitCode !== 0) {

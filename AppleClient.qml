@@ -279,14 +279,19 @@ Item {
   property var health: ({})
   property bool healthKnown: false
   // The .local name's addresses, and this machine's, from one helper; then
-  // the health check. Its output is a few lines (one name's addresses).
-  Process {
+  // the health check. Its output is a few lines (one name's addresses). The
+  // lookup has 5 s (mDNS can take that long for a name that doesn't answer);
+  // one that can't run, or runs over (Job), finds no address, so the waiting
+  // checks still go, and find the name not verified.
+  Job {
     id: hostCheck
+    deadline: 8000
     property var waiting: []
-    command: ["sh", "-c", "getent ahosts \"$1\" | awk '{print $1}' | sort -u | head -n 64; echo ==; ip -o addr show | awk '{sub(/\\/.*/, \"\", $4); print $4}' | head -n 256", "sh", root.localHost]
+    command: ["sh", "-c", "timeout -k 1 5 getent ahosts \"$1\" | awk '{print $1}' | sort -u | head -n 64; echo ==; ip -o addr show | awk '{sub(/\\/.*/, \"\", $4); print $4}' | head -n 256", "sh", root.localHost]
     stdout: StdioCollector {
       onStreamFinished: {
-        var parts = text.split("==")
+        // Stopped before it listed this machine's addresses: nothing found.
+        var parts = text.indexOf("==") >= 0 ? text.split("==") : []
         var found = (parts[0] || "").split("\n").filter(function(a) { return a !== "" })
         var mine = (parts[1] || "").split("\n").filter(function(a) { return a !== "" })
         root.pointsHere = found.some(function(a) { return /^127\./.test(a) || a === "::1" || mine.indexOf(a) >= 0 })

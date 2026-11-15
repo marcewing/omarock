@@ -8,10 +8,12 @@ import Quickshell.Io
 // /proc/net/tcp and tcp6: 127.0.0.1's and the wildcard's, and IPv6's :: and
 // ::ffff:127.0.0.1 (an IPv6 socket on :: takes IPv4 connections too, and is
 // only in tcp6). Ours only if every one is this account's.
-// verify(then) checks again, then calls then().
-Process {
+// verify(then) checks again, then calls then(). One that can't run finds
+// nobody's: not ours.
+Job {
   id: check
 
+  deadline: 5000
   property int port: 0
   property bool ours: false
   // The account that holds the port instead, or "" (ours, or nobody's).

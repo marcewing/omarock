@@ -316,8 +316,10 @@ Rectangle {
     pairer.command = [root.accountTool, "bridge-pair", url]
     pairer.running = true
   }
-  // Whether the bridge takes the token saved here.
-  Process {
+  // Whether the bridge takes the token saved here. These two are Jobs: one
+  // that can't start, or doesn't end, still ends (127, or stopped), so the
+  // field doesn't stay on "Checking…".
+  Job {
     id: tokenChecker
     property string url: ""
     property int seq: 0
@@ -331,7 +333,7 @@ Rectangle {
   }
   // The code typed, traded for the token: on stdin, and the token goes
   // into its file.
-  Process {
+  Job {
     id: pairer
     property string url: ""
     property string code: ""

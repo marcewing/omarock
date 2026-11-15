@@ -4,6 +4,7 @@ import Quickshell.Io
 import "Mpd.js" as Mpd
 import "Places.js" as Places
 import "Radio.js" as Radio
+import "Reply.js" as Reply
 
 // Internet radio: stations from Radio Browser (radio-browser.info, free and
 // keyless), played by mpd straight from the station's stream. Favorites are
@@ -43,6 +44,8 @@ Item {
   // timeZone setting, else TZ, else the machine's); and where the cache goes.
   property string timeZone: ""
   property string cacheDir: ""
+  // The most of a cache file read (the local stations' is tens of KB).
+  readonly property int cacheBytes: 4194304
   // The area found (Places.area), and how finding it goes: "" (none set),
   // "finding", "found" or "unknown" (no place by that name).
   property var area: null
@@ -147,13 +150,13 @@ Item {
     id: titlesWriter
     stderr: StdioCollector {}
   }
-  Process {
+  Job {
     id: titlesReader
+    deadline: 10000
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var votes = null
-        try { votes = text ? JSON.parse(text) : null } catch (e) {}
+        var votes = Reply.parse(text, root.cacheBytes).data
         // Learned while this was being read: those stay.
         if (votes && typeof votes === "object") root.titleVotes = Object.assign(votes, root.titleVotes)
       }
@@ -300,8 +303,9 @@ Item {
     zoneReader.callbacks = zoneReader.callbacks.concat([callback])
     zoneReader.running = true
   }
-  Process {
+  Job {
     id: zoneReader
+    deadline: 5000
     property var callbacks: []
     command: ["readlink", "/etc/localtime"]
     stdout: StdioCollector {
@@ -400,12 +404,14 @@ Item {
     id: cacheWriter
     stderr: StdioCollector {}
   }
-  Process {
+  // One that can't run reads no cache (Job): the area is looked up again.
+  Job {
     id: cacheReader
+    deadline: 10000
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        try { root.cached = text ? JSON.parse(text) : null } catch (e) { root.cached = null }
+        root.cached = Reply.parse(text, root.cacheBytes).data
         root.cacheRead = true
         root.findArea()
       }
@@ -418,9 +424,9 @@ Item {
       root.findArea()
       return
     }
-    cacheReader.command = ["cat", root.cacheDir + "/radio-local.json"]
+    cacheReader.command = ["head", "-c", String(root.cacheBytes), root.cacheDir + "/radio-local.json"]
     cacheReader.running = true
-    titlesReader.command = ["cat", root.cacheDir + "/radio-titles.json"]
+    titlesReader.command = ["head", "-c", String(root.cacheBytes), root.cacheDir + "/radio-titles.json"]
     titlesReader.running = true
   }
 

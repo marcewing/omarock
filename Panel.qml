@@ -17,6 +17,7 @@ import "Paging.js" as Paging
 import "TimeMachine.js" as TimeMachine
 import "Keeper.js" as Keeper
 import "History.js" as History
+import "Reply.js" as Reply
 
 // omarock's popup. Laid out like crmne.hyprmoncfg: a compact panel with an
 // Expand button, and an expanded panel in the same popup with the sources,
@@ -3759,7 +3760,7 @@ Panel {
     root.pairNote = { text: "Pairing…", kind: "" }
     pairing.running = true
   }
-  Process {
+  Job {
     id: pairing
     property string code: ""
     stdinEnabled: true
@@ -3779,8 +3780,11 @@ Panel {
   }
 
   // Saves an account, a key or the music folder (saveAccount).
-  Process {
+  // The service restarting with what was saved (mpd, for the music folder)
+  // may take systemd's 90 s to stop.
+  Job {
     id: accountWriter
+    deadline: 120000
     property string key: ""
     property string secret: ""
     stdinEnabled: true
@@ -3804,7 +3808,7 @@ Panel {
   }
 
   // What's set up (tools/omarock-sources state), for the settings screen.
-  Process {
+  Job {
     id: sourcesReader
     command: [root.sourcesTool, "state"]
     stdout: StdioCollector {
@@ -3818,9 +3822,11 @@ Panel {
   }
 
   // Stops or starts a source's services as its switch changes, one at a
-  // time, then reads what's set up again.
-  Process {
+  // time, then reads what's set up again. A service may take systemd's 90 s
+  // to stop.
+  Job {
     id: sourceSwitcher
+    deadline: 120000
     property var queue: []
     stderr: StdioCollector { id: sourceSwitcherErrors; waitForEnd: true }
     onExited: function(exitCode) {
@@ -3854,7 +3860,7 @@ Panel {
   }
 
   // What's set (tools/omarock-account show), for the settings screen.
-  Process {
+  Job {
     id: accountReader
     command: [root.accountTool, "show"]
     stdout: StdioCollector {
@@ -3906,8 +3912,9 @@ Panel {
     onFileChanged: reload()
   }
 
-  Process {
+  Job {
     id: appleConfigPrivate
+    deadline: 5000
     property string made: ""
     command: ["chmod", "go=", appleConfigFile.path]
   }
@@ -3916,8 +3923,9 @@ Panel {
   // whatever an older omarock or a tool run by hand left: its settings, keys
   // and sign-ins, what you've played, the services and programs it installed,
   // its caches. Once, as the panel loads.
-  Process {
+  Job {
     id: ownPrivate
+    deadline: 60000
     readonly property string home: Quickshell.env("HOME")
     command: ["sh", "-c", 'for d; do [ -d "$d" ] && [ -n "$(find "$d" -perm /077 ! -type l -print -quit 2>/dev/null)" ] && chmod -R go= "$d"; done; exit 0',
       "sh", root.configDir, home + "/.local/share/omarock", home + "/.local/state/omarock", home + "/.cache/omarock",
@@ -5291,9 +5299,11 @@ Panel {
     root.floatingNext = root.floatingNext.concat([window])
     if (!windowRuler.running) windowRuler.running = true
   }
-  Process {
+  // A compositor that doesn't answer doesn't keep the window from showing.
+  Job {
     id: windowRuler
-    command: ["sh", "-c", 'hyprctl eval "$1" >/dev/null 2>&1; exit 0', "sh", root.windowRule]
+    deadline: 5000
+    command: ["sh", "-c", 'timeout -k 1 3 hyprctl eval "$1" >/dev/null 2>&1; exit 0', "sh", root.windowRule]
     onExited: {
       var windows = root.floatingNext
       root.floatingNext = []
@@ -5309,10 +5319,11 @@ Panel {
     interval: 400
     onTriggered: if (!windowFloater.running) windowFloater.running = true
   }
-  Process {
+  Job {
     id: windowFloater
+    deadline: 10000
     property string title: ""
-    command: ["sh", "-c", 'w=$(hyprctl clients -j 2>/dev/null | jq -r --arg t "$1" '
+    command: ["timeout", "-k", "1", "8", "sh", "-c", 'w=$(hyprctl clients -j 2>/dev/null | jq -r --arg t "$1" '
       + '\'first(.[] | select(.title == $t and (.floating | not)) | .address) // empty\' 2>/dev/null); [ -n "$w" ] || exit 0; '
       + 'hyprctl dispatch "hl.dsp.window.float({ action = \\"on\\", window = \\"address:$w\\" })" >/dev/null 2>&1 '
       + '|| hyprctl dispatch setfloating "address:$w" >/dev/null 2>&1; '
@@ -5321,9 +5332,11 @@ Panel {
   }
 
   // Saves the setup window's values (startSetup), one at a time, each over
-  // stdin, never on a command line.
-  Process {
+  // stdin, never on a command line. A service restarting may take systemd's
+  // 90 s to stop.
+  Job {
     id: setupWriter
+    deadline: 120000
     property string piece: ""
     property var queue: []
     property var args: []
@@ -5352,24 +5365,35 @@ Panel {
   property var tailnetFound: []
   property var networkFound: []
   function showMacs() { setupView.macs = Setup.macList(root.tailnetFound, root.networkFound) }
-  Process {
+  // What the tailnet's and the network's peers say about themselves is read
+  // up to a cap, in 5 s: timeout(1) stops avahi-browse or tailscale, and its
+  // children, with SIGKILL 1 s later should SIGTERM not. A tailnet's status
+  // is a few KB a peer; a Mac on the network a line of a few hundred bytes.
+  readonly property int listBytes: 4194304
+  readonly property int bonjourBytes: 262144
+  Job {
     id: tailnetReader
-    command: ["sh", "-c", "command -v tailscale >/dev/null && tailscale status --json 2>/dev/null"]
+    deadline: 8000
+    command: ["sh", "-c", "command -v tailscale >/dev/null && timeout -k 1 5 tailscale status --json 2>/dev/null | head -c \"$1\"",
+      "sh", String(root.listBytes)]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.tailnetFound = Setup.tailnetMacs(text)
+        root.tailnetFound = Reply.check(text, root.listBytes) === "" ? Setup.tailnetMacs(text) : []
         root.showMacs()
       }
     }
   }
-  Process {
+  Job {
     id: networkReader
-    command: ["sh", "-c", "command -v avahi-browse >/dev/null && timeout 5 avahi-browse -lrpt _omarock._tcp 2>/dev/null"]
+    deadline: 8000
+    command: ["sh", "-c", "command -v avahi-browse >/dev/null && timeout -k 1 5 avahi-browse -lrpt _omarock._tcp 2>/dev/null | head -c \"$1\"",
+      "sh", String(root.bonjourBytes)]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.networkFound = Setup.bonjourMacs(text)
+        // A line cut short at the cap is left out.
+        root.networkFound = Setup.bonjourMacs(text.slice(0, text.lastIndexOf("\n") + 1))
         root.showMacs()
       }
     }
@@ -5385,9 +5409,10 @@ Panel {
     running: setupFloat.visible && setupView.piece === "spotify" && !setupView.busy
     onTriggered: if (!soloistReader.running) soloistReader.running = true
   }
-  Process {
+  Job {
     id: soloistReader
-    command: [root.soloistTool, "status"]
+    deadline: 35000
+    command: ["timeout", "-k", "2", "30", root.soloistTool, "status"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: if (setupView.piece === "spotify") setupView.setLive("soloistDownload", Setup.soloistState(text))
@@ -5395,15 +5420,19 @@ Panel {
   }
 
   // PipeWire's outputs and the default one, for the sound output's setup
-  // window: the default on the first line, then the outputs as JSON.
-  Process {
+  // window: the default on the first line, then the outputs as JSON. Any
+  // program can make an output, and name it.
+  Job {
     id: outputsReader
-    command: ["sh", "-c", "printf '%s\\n' \"$(pactl get-default-sink 2>/dev/null)\"; pactl -f json list sinks 2>/dev/null"]
+    deadline: 8000
+    command: ["timeout", "-k", "1", "6", "sh", "-c", "printf '%s\\n' \"$(pactl get-default-sink 2>/dev/null | head -c 4096)\"; pactl -f json list sinks 2>/dev/null | head -c \"$1\"",
+      "sh", String(root.listBytes)]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         var at = text.indexOf("\n")
-        setupView.outputs = Setup.outputList(at < 0 ? "" : text.slice(at + 1))
+        var sinks = at < 0 ? "" : text.slice(at + 1)
+        setupView.outputs = Reply.check(sinks, root.listBytes) === "" ? Setup.outputList(sinks) : []
         setupView.defaultOutput = at < 0 ? "" : text.slice(0, at).trim()
       }
     }
