@@ -13,8 +13,8 @@ makes. For each it answers a line of JSON on stdout, as each is done:
 
 - http and https only, at most 3 redirects, each checked the same way (none
   from https to http), and 10 s in all; at most 2 MiB read, refused as soon as
-  it's more. A server on this machine (omarock-sxm's art) only if this
-  account runs it.
+  it's more. A server on this machine (omarock-sxm's art, or an address of
+  this machine's own) only if this account runs it.
 - Only what its bytes say it is, never what the server says: JPEG and PNG, at
   most 4096 pixels a side. A PNG keeps only the chunks that draw it (IHDR,
   PLTE, tRNS, IDAT, IEND), and its image data must inflate to its size and no
@@ -167,14 +167,16 @@ def connect(host, port, until):
         except OSError:
             sock.close()
             continue
-        # Any account here can listen on a loopback port the service it
-        # stands for left free (omarock-sxm's art, say): only this account's.
+        # Any account here can listen on a port the service it stands for left
+        # free (omarock-sxm's art on 127.0.0.1, say). A server on this machine
+        # is in its socket table, and only this account's will do; one on
+        # another machine isn't in it. A loopback one not found there can't
+        # be checked.
         peer, ours = sock.getpeername()[:2], sock.getsockname()[:2]
-        if loopback(peer[0]):
-            found = owners(peer, ours)
-            if not found or any(uid != os.getuid() for uid in found):
-                sock.close()
-                raise failed("a server on this machine another account runs")
+        found = owners(peer, ours)
+        if any(uid != os.getuid() for uid in found) or (not found and loopback(peer[0])):
+            sock.close()
+            raise failed("a server on this machine another account runs")
         return sock
     if time.monotonic() >= until: raise failed("no answer in time")
     raise failed("can't reach its server")

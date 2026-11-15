@@ -319,7 +319,11 @@ def main():
         art.owners = lambda peer, ours, found=found: found
         why = refused("", lambda: art.connect("127.0.0.1", port, time.monotonic() + 2))
         check(f"a loopback server that's {what} is refused", why == "a server on this machine another account runs", repr(why))
-    art.owners = real
+    art.owners, art.loopback, near = (lambda peer, ours: []), (lambda ip: False), art.loopback
+    sock = art.connect("127.0.0.1", port, time.monotonic() + 2)
+    check("one on another machine (not in this one's socket table) is fine", sock is not None)
+    sock.close()
+    art.owners, art.loopback = real, near
     listener.close()
 
     # ---- The checks themselves ----
