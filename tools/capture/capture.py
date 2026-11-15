@@ -417,6 +417,11 @@ def spotify_requests(path_prefix=""):
     return [(r["method"], r["path"], r["body"]) for r in map(json.loads, lines) if r["path"].startswith(path_prefix)]
 
 
+def spotify_plays():
+    """The fake omarock-spotify's POST /v1/play requests (not /v1/playlists/…)."""
+    return [r for r in spotify_requests("/v1/play") if r[1] == "/v1/play"]
+
+
 def spotify_post(path, body=None):
     """As another client (omarock-sp, or a phone through Spotify Connect)."""
     request = urllib.request.Request(BRIDGE["spotify"] + path, data=json.dumps(body or {}).encode(),
@@ -498,12 +503,15 @@ def spotify_scenario(host, output, socket_path, failures):
           "a playlist Spotify won't list: Play, and why: " + ", ".join(s["rows"]), failures)
     check(s["headingLine"] == "Playlist · 3 songs · Apple Music Punk" and s["levelButtons"]["current"][-1] == "Add to playlist",
           "its heading has Spotify's count, said once: " + s["headingLine"] + " | " + str(s["levelButtons"]["current"]), failures)
+    # /v1/play itself, not /v1/playlists/… (the playlist's own GET), and a new one.
+    plays = spotify_plays
+    before = len(plays())
     host.call("press", "Up")
     host.call("press", "Return")
-    wait_for(lambda: spotify_requests("/v1/play"), "play the playlist")
-    check(spotify_requests("/v1/play")[-1][2] == {"items": [{"kind": "playlist", "id": "c-pl-1", "source": "catalog"}],
-                                                  "mode": "play", "start": 0},
-          "it still plays: " + json.dumps(spotify_requests("/v1/play")[-1][2]), failures)
+    wait_for(lambda: len(plays()) > before, "play the playlist")
+    check(plays()[-1][2] == {"items": [{"kind": "playlist", "id": "c-pl-1", "source": "catalog"}],
+                             "mode": "play", "start": 0},
+          "it still plays: " + json.dumps(plays()[-1][2]), failures)
     wait_for(lambda: host.state()["browse"] == "" and host.state()["nowPlaying"].startswith("Something I Learned"), "playing")
 
     # P: Spotify playlists.
@@ -4714,11 +4722,11 @@ def history_scenario(host, output, socket_path, failures):
     # Spotify's song plays there, by its id; the station's is looked up.
     # By name, not place: what was heard again since (a second is enough
     # here) goes on top.
-    before = len(spotify_requests("/v1/play"))
+    before = len(spotify_plays())
     s = open_history()
     host.call("activate", s["rows"].index("history:Sunspots"), "open")
-    wait_for(lambda: len(spotify_requests("/v1/play")) > before, "Spotify asked to play it")
-    body = spotify_requests("/v1/play")[-1][2] or {}
+    wait_for(lambda: len(spotify_plays()) > before, "Spotify asked to play it")
+    body = spotify_plays()[-1][2] or {}
     check(song["id"] in json.dumps(body), "a Spotify song plays on Spotify by its id: " + json.dumps(body), failures)
     wait_for(lambda: host.state()["source"] == "spotify", "Spotify the source")
     heard_again(song["title"])
@@ -5521,7 +5529,7 @@ def time_machine_scenario(host, output, socket_path, failures):
           "with the setting on Spotify, it's looked up there: " + host.state()["subtitles"][0], failures)
     host.call("activate", 0, "open")
     wait_for(lambda: host.state()["spotifyMode"], "Spotify plays the chart")
-    play = spotify_requests("/v1/play")[-1][2]
+    play = spotify_plays()[-1][2]
     check(play["mode"] == "play" and len(play["items"]) == 5 and play["start"] == 0,
           "Play the Top 100 plays them all on Spotify: " + json.dumps(play), failures)
     host.call("setSetting", "lookup", "Apple Music", "false")
