@@ -53,8 +53,32 @@ printable() {
 }
 die() { printf 'omarock-am: %s\n' "$*" | printable >&2; exit 1; }
 
+# bridge_reach BRIDGE: where its name leads, checked (tools/omarock-resolve:
+# a .local name is any account's to publish here, through avahi, while the
+# Mac is away, and one answered from this machine gets no token). Sets
+# reach_opts, curl's --resolve to the address checked, so curl doesn't look
+# the name up again; fails, saying why in reach_why, when the name points
+# here or nothing answers.
+reach_opts=() reach_why=""
+bridge_reach() {
+  local hp=${1#*://} host port addr rc
+  hp=${hp%%/*}
+  if [[ $hp == \[*\]* ]]; then host=${hp%%]*}]; port=${hp#"$host"}; else host=${hp%:*}; port=${hp#"$host"}; fi
+  port=${port#:}
+  [[ -n $port ]] || port=80
+  addr=$("$(dirname "$0")/omarock-resolve" "$host" 2>&1)
+  rc=$?
+  ((rc == 0)) || { reach_why=$addr; return $rc; }
+  reach_opts=()
+  [[ $addr == "$host" ]] || reach_opts=(--resolve "$host:$port:$([[ $addr == *:* ]] && echo "[$addr]" || echo "$addr")")
+}
 call() {  # METHOD PATH [JSON]
   [[ -n $BRIDGE ]] || die "no bridge set up: put \"bridge\" in $CONFIG (apple-bridge/README.md), or set OMAROCK_BRIDGE"
+  # Once a run: the name checked, and curl kept to the address it gave.
+  if [[ -z ${reached:-} ]]; then
+    bridge_reach "$BRIDGE" || die "not sending the bridge anything: $reach_why"
+    reached=yes
+  fi
   local token=""
   [[ -r $TOKEN_FILE ]] && token=$(<"$TOKEN_FILE")
   local args=(-sS --max-time 30 -X "$1" -w '\n%{http_code}')
@@ -63,7 +87,7 @@ call() {  # METHOD PATH [JSON]
   # The token goes to curl on stdin (-K -), never on its command line,
   # where anyone on this machine could read it (ps).
   out=$(printf 'header = "Authorization: Bearer %s"\n' "${token//[$'\n\r "\\']/}" \
-    | curl -K - "${args[@]}" "$BRIDGE$2") || die "can't reach the bridge at $BRIDGE"
+    | curl -K - "${args[@]}" "${reach_opts[@]}" "$BRIDGE$2") || die "can't reach the bridge at $BRIDGE"
   code=${out##*$'\n'}
   out=${out%$'\n'*}
   if [[ $code != 2* ]]; then

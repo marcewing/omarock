@@ -45,6 +45,25 @@ held_by_other() {
   echo "$uid"
 }
 health() { held_by_other "$1" >/dev/null && return 0; curl -s -m 5 -H 'X-Omarock: 1' "$1/v1/health" 2>/dev/null; }
+# bridge_reach BRIDGE: where its name leads, checked (tools/omarock-resolve:
+# a .local name is any account's to publish here, through avahi, while the
+# Mac is away, and one answered from this machine gets no token). Sets
+# reach_opts, curl's --resolve to the address checked, so curl doesn't look
+# the name up again; fails, saying why in reach_why, when the name points
+# here or nothing answers.
+reach_opts=() reach_why=""
+bridge_reach() {
+  local hp=${1#*://} host port addr rc
+  hp=${hp%%/*}
+  if [[ $hp == \[*\]* ]]; then host=${hp%%]*}]; port=${hp#"$host"}; else host=${hp%:*}; port=${hp#"$host"}; fi
+  port=${port#:}
+  [[ -n $port ]] || port=80
+  addr=$("$(dirname "$0")/omarock-resolve" "$host" 2>&1)
+  rc=$?
+  ((rc == 0)) || { reach_why=$addr; return $rc; }
+  reach_opts=()
+  [[ $addr == "$host" ]] || reach_opts=(--resolve "$host:$port:$([[ $addr == *:* ]] && echo "[$addr]" || echo "$addr")")
+}
 
 id=marcewing.omarock
 plugin=$HOME/.config/omarchy/plugins/$id
@@ -291,8 +310,14 @@ if [[ $(setting appleMusic false) == true ]] || [[ -e $HOME/.config/omarock/appl
   tokenfile=$(setting appleTokenFile "$HOME/.config/omarock/bridge-token")
   tokenfile=${tokenfile/#\~/$HOME}
   private_file "$tokenfile" "the bridge's token" "apple-bridge/README.md, the Linux side"
+  # Where its name leads, checked: a .local name answered from this machine
+  # (any account here can publish one) gets nothing, the token least.
+  if [[ -n $bridge ]] && ! bridge_reach "$bridge"; then
+    bad "omarock sends the bridge nothing: $reach_why"
+    bridge=""
+  fi
   if [[ -n $bridge ]]; then
-    h=$(health "$bridge")
+    h=$(curl -s -m 5 "${reach_opts[@]}" -H 'X-Omarock: 1' "$bridge/v1/health" 2>/dev/null)
     if [[ -n $h ]]; then
       python3 -I -c '
 import json, sys
@@ -307,13 +332,13 @@ print("  " + ("\033[32m✓\033[0m the bridge answers, and may use Apple Music" i
       # answers, and says where its stream is (from 0.9.0 only with it).
       if [[ -r $tokenfile ]]; then
         code_stream=$(printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "$(tr -d '\n\r"\\' <"$tokenfile")" \
-          | curl -s -m 5 -K - -w '\n%{http_code}' "$bridge/v1/status" 2>/dev/null | tail -1)
+          | curl -s -m 5 "${reach_opts[@]}" -K - -w '\n%{http_code}' "$bridge/v1/status" 2>/dev/null | tail -1)
         if [[ $code_stream == 401 ]]; then
           bad "the bridge refused omarock's token: pair again (./install pair on the Mac, then its code in the settings' Apple Music tab)"
         elif [[ $code_stream == 200 ]]; then
           ok "the bridge accepts omarock's token"
           stream=$(printf 'header = "Authorization: Bearer %s"\nheader = "X-Omarock: 1"\n' "$(tr -d '\n\r"\\' <"$tokenfile")" \
-            | curl -s -m 5 -K - "$bridge/v1/health" 2>/dev/null \
+            | curl -s -m 5 "${reach_opts[@]}" -K - "$bridge/v1/health" 2>/dev/null \
             | python3 -I -c 'import json, sys; print(json.load(sys.stdin).get("stream") or "")' 2>/dev/null)
           [[ -n $stream ]] && ok "the bridge gives omarock its stream" || bad "the bridge doesn't say where its stream is"
         fi

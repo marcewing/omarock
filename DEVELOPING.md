@@ -66,7 +66,7 @@ mpd with mpd's `null` output, or a private PipeWire.
 | `sxm/` | omarock-sxm, the SiriusXM relay |
 | `apple-bridge/` | The Apple Music bridge, a macOS app, and its API (`API.md`) |
 | `patches/` | The mpd-mpris patch that makes Apple Music's stream play well, and the mpd one (merged upstream) |
-| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-mpd-mpris`; `pin-sxm` writes `sxm/requirements.txt`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`), and the test harness (`capture/`) |
+| `tools/` | Installers (`install-audio`, `install-spotify`, `install-sxm`, `update-soloist`, `build-mpd-mpris`; `pin-sxm` writes `sxm/requirements.txt`), CLIs (`omarock-am`, `omarock-sp`, `omarock-volume`, `omarock-account`, `omarock-sources`, `omarock-resolve`), and the test harness (`capture/`) |
 | `tests/` | node tests for the pure helpers |
 
 ## How it works
@@ -172,6 +172,17 @@ mpd with mpd's `null` output, or a private PipeWire.
   request has an `Origin` or `Sec-Fetch-` header, as every browser's does and
   omarock-spotify's and the Spotify apps' never do: it looks at the request
   with `MSG_PEEK` (Soloist still reads all of it), for up to a second.
+- **The Mac's .local name, checked.** Any account here can publish a .local
+  name through avahi while the Mac is away, and would then get what's sent
+  to it: the bridge's token, a pairing code, the stream's secret.
+  `tools/omarock-resolve` looks a .local name up through the avahi daemon
+  itself (its D-Bus API, as nss-mdns does), which says whether the answer is
+  a record published here, and refuses that, and any address that reaches
+  this machine anyway (127.0.0.0/8, 0.0.0.0/8, its own addresses, ::1, ::,
+  IPv4 in IPv6's form, with or without a scope). The tools then connect to
+  the address it gave (curl's `--resolve`), rather than looking the name up
+  again. A DNS or tailnet name, or an address, is taken as it is. The
+  harness's `fake-busctl` answers for the names `$HOME/.fake-hosts` lists.
 - **What comes from elsewhere, pinned.** Two optional pieces fetch code from
   outside Arch and this clone: Apple Music's patched mpd-mpris
   (`tools/build-mpd-mpris`) builds mpd-mpris's source from GitHub at a pinned

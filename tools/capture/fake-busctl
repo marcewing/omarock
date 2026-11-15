@@ -1,0 +1,19 @@
+#!/bin/bash
+# The harness's busctl, for avahi's ResolveHostName only (tools/omarock-resolve):
+# a name in the test HOME's .fake-hosts ("NAME ADDRESS [FLAGS]" lines) answers
+# as avahi would, FLAGS avahi's (4, multicast, unless given: 8 a record
+# published on this machine). Anything else isn't answered, as avahi times out.
+# Nothing reaches the real D-Bus.
+args=()
+for a in "$@"; do [[ $a == --* ]] || args+=("$a"); done
+# call org.freedesktop.Avahi / org.freedesktop.Avahi.Server ResolveHostName iisiu IF PROTO NAME FAMILY FLAGS
+[[ ${args[0]:-} == call && ${args[4]:-} == ResolveHostName && -r $HOME/.fake-hosts ]] || exit 1
+name=${args[8]:-} family=${args[9]:-}
+while read -r n addr flags; do
+  [[ ${n,,} == "${name,,}" ]] || continue
+  [[ $family == 1 && $addr == *:* || $family == 0 && $addr != *:* ]] || continue
+  printf '{"type":"iisisu","data":[2,%s,"%s",%s,"%s",%s]}\n' "$family" "$name" "$family" "$addr" "${flags:-4}"
+  exit 0
+done <"$HOME/.fake-hosts"
+echo "Call failed: Timeout reached" >&2
+exit 1

@@ -1,0 +1,73 @@
+#!/bin/bash
+# omarock-resolve NAME: where omarock reaches the Mac called NAME (its
+# bridge), checked, so that curl, the panel and mpd connect to that address
+# rather than looking the name up again, which could then answer otherwise.
+#
+# A .local name is any account's to publish on this machine, through avahi,
+# while the Mac is away: one answered from this machine would get the
+# bridge's token, a pairing code, the stream's secret. So a .local name is
+# looked up through the avahi daemon itself (its D-Bus API, which nss-mdns
+# asks too), which says whether the answer is a record published here, and
+# that's refused, as is an address that reaches this machine anyway:
+# 127.0.0.0/8, 0.0.0.0/8, this machine's own, ::1, ::, an IPv4 address in its
+# IPv6 form. IPv4 first, then IPv6 (not a link-local address: it needs an
+# interface named).
+#
+# Any other name (DNS, a tailnet's) and an address are printed as they are:
+# no account here can answer for them.
+#
+#   0  the address, on stdout
+#   9  it points to this machine (why on stderr)
+#   6  nothing answers for it
+#   2  not a name
+# Within 12 s at most (6 s an address family).
+set -uo pipefail
+name=${1:-}
+[[ -n $name ]] || { echo "omarock-resolve: no name given" >&2; exit 2; }
+shopt -s nocasematch
+if [[ $name != *.local && $name != *.local. ]]; then
+  printf '%s\n' "$name"
+  exit 0
+fi
+[[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "omarock-resolve: not a name: $name" >&2; exit 2; }
+
+mine=$(ip -o addr show 2>/dev/null | awk '{sub(/\/.*/, "", $4); print tolower($4)}')
+# Whether ADDRESS reaches this machine.
+here() {
+  local a=${1,,} v4
+  a=${a%%%*}
+  [[ $a == ::ffff:* ]] && v4=${a#::ffff:} && [[ $v4 == *.* ]] && a=$v4
+  case $a in
+    127.*|0.*|::1|::|0:0:0:0:0:0:0:0|0:0:0:0:0:0:0:1) return 0 ;;
+  esac
+  grep -qxF -- "$a" <<<"$mine"
+}
+# avahi's answer for one address family (0 IPv4, 1 IPv6): "ADDRESS FLAGS".
+ask() {
+  busctl --json=short --timeout=6 -- call org.freedesktop.Avahi / org.freedesktop.Avahi.Server \
+    ResolveHostName iisiu -1 -1 "${name%.}" "$1" 0 2>/dev/null \
+    | jq -r 'select(.data | length == 6) | "\(.data[4]) \(.data[5])"' 2>/dev/null
+}
+answered=""
+for family in 0 1; do
+  read -r address flags < <(ask "$family") || continue
+  [[ -n ${address:-} && ${flags:-} =~ ^[0-9]+$ ]] || continue
+  answered=yes
+  # AVAHI_LOOKUP_RESULT_LOCAL (8), _OUR_OWN (16): a record published here.
+  if ((flags & 24)); then
+    echo "$name points to this machine, not a Mac: something here is answering for that name" >&2
+    exit 9
+  fi
+  if here "$address"; then
+    echo "$name points to this machine ($address), not a Mac" >&2
+    exit 9
+  fi
+  # A link-local IPv6 address is reached only through a named interface.
+  [[ ${address,,} == fe80:* ]] && continue
+  printf '%s\n' "$address"
+  exit 0
+done
+if [[ -n $answered ]]; then echo "$name has only a link-local IPv6 address, which omarock can't use: give the Mac's IPv4 address" >&2
+else echo "nothing answers for $name" >&2
+fi
+exit 6

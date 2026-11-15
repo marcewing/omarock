@@ -47,7 +47,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
                 "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js", "StdinProcess.qml", "ListenerCheck.qml",
                 "GuardedField.qml", "Editing.js",
-                "tools/omarock-account", "tools/omarock-sources", "tools/update-soloist"]
+                "tools/omarock-account", "tools/omarock-sources", "tools/update-soloist", "tools/omarock-resolve"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
 # The fake Apple Music bridge, when one runs: { port, log }.
@@ -89,6 +89,8 @@ def prepare(work):
     (fakes / "tailscale").symlink_to(TOOLS / "fake-tailscale")
     (fakes / "avahi-browse").symlink_to(TOOLS / "fake-avahi-browse")
     (fakes / "getent").symlink_to(TOOLS / "fake-getent")
+    # Never the real avahi: .local names as the test HOME's .fake-hosts says.
+    (fakes / "busctl").symlink_to(TOOLS / "fake-busctl")
     (fakes / "pactl").symlink_to(TOOLS / "fake-pactl")
     # Never the real compositor: hyprctl only logs, and lists no windows.
     (fakes / "hyprctl").symlink_to(TOOLS / "fake-hyprctl")
