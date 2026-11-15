@@ -229,3 +229,19 @@ test("Soloist's step: found in the Downloads folder (read, never run), or waited
   // tools/update-soloist didn't answer.
   assert.equal(Setup.soloistState("").kind, "bad")
 })
+
+test("the Spotify sign-in opened is Spotify's page for omarock's own app", () => {
+  const id = "0123456789abcdef0123456789abcdef"
+  const url = (extra = "", cid = id, redirect = Setup.REDIRECT) => "https://accounts.spotify.com/authorize?client_id=" + cid
+    + "&response_type=code&redirect_uri=" + encodeURIComponent(redirect) + "&scope=user-library-read&state=abc&code_challenge=x" + extra
+  assert.equal(Setup.signInOk(url(), id), true)
+  assert.equal(Setup.signInOk(url("", id, "http://127.0.0.1:9999/callback"), id, "http://127.0.0.1:9999/callback"), true)
+  assert.equal(Setup.signInOk(url("", "ffffffffffffffffffffffffffffffff"), id), false, "another app")
+  assert.equal(Setup.signInOk(url("", id, "https://evil.example/cb"), id), false, "another redirect")
+  assert.equal(Setup.signInOk(url("&client_id=" + id), id), false, "a parameter twice")
+  assert.equal(Setup.signInOk(url("#x"), id), false)
+  assert.equal(Setup.signInOk(url().replace("accounts.spotify.com", "accounts.spotify.com.evil.example"), id), false)
+  assert.equal(Setup.signInOk(url().replace("response_type=code", "response_type=token"), id), false)
+  assert.equal(Setup.signInOk(url(), ""), false, "no Client ID known")
+  assert.equal(Setup.signInOk(url().replace("client_id=", "client_id=%E0"), id), false, "bad escapes")
+})

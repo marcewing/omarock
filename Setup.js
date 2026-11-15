@@ -371,6 +371,30 @@ function macList(tailnet, network) {
   }).map(function(e) { return e.m })
 }
 
+// Whether URL, from omarock-spotify's /v1/login, is Spotify's own sign-in
+// page for omarock's own app: Spotify's authorize address, asking for a code,
+// with the Client ID you gave omarock and its own redirect, each once. Else
+// whatever answered as omarock-spotify could have the browser sign you in to
+// an app of its choosing, sending the sign-in where it likes.
+function signInOk(url, clientId, redirect) {
+  url = String(url || "")
+  var prefix = "https://accounts.spotify.com/authorize?"
+  if (!clientId || url.indexOf(prefix) !== 0 || url.indexOf("#") >= 0) return false
+  var params = {}
+  var pairs = url.slice(prefix.length).split("&")
+  for (var i = 0; i < pairs.length; i++) {
+    var at = pairs[i].indexOf("=")
+    var name, value
+    try {
+      name = decodeURIComponent((at < 0 ? pairs[i] : pairs[i].slice(0, at)).replace(/\+/g, " "))
+      value = at < 0 ? "" : decodeURIComponent(pairs[i].slice(at + 1).replace(/\+/g, " "))
+    } catch (e) { return false }
+    if (Object.prototype.hasOwnProperty.call(params, name)) return false
+    params[name] = value
+  }
+  return params.client_id === clientId && params.redirect_uri === (redirect || REDIRECT) && params.response_type === "code"
+}
+
 // One line for a Mac in the list: "Studio Mac  ·  100.64.0.10 (Tailscale)".
 function macLabel(m) {
   return m.name + "  ·  " + m.address + (m.via === "tailnet" ? "  (Tailscale)" : m.via === "network" ? "  (this network)" : "")
@@ -398,5 +422,5 @@ if (typeof module !== "undefined") {
     problem: problem, blocker: blocker, writes: writes, args: args, pairDigits: pairDigits, pairState: pairState,
     soloistState: soloistState, SOLOIST_PAGE: SOLOIST_PAGE,
     tailnetMacs: tailnetMacs, bonjourMacs: bonjourMacs, unescapeAvahi: unescapeAvahi, macList: macList, macLabel: macLabel,
-    outputList: outputList }
+    outputList: outputList, signInOk: signInOk }
 }

@@ -91,8 +91,19 @@ case "$cmd" in
   info) call GET "/v1/info/catalog/${1:?song|album}/${2:?ID}" | jq . ;;
   login)
     url=$(call GET /v1/login | jq -r .url)
-    # Only Spotify's own sign-in page: what answered shouldn't choose what opens.
-    [[ $url == https://accounts.spotify.com/authorize\?* ]] || die "omarock-spotify's sign-in isn't Spotify's page: not opening it"
+    # Only Spotify's own sign-in page, for omarock's app (spotify.json's Client
+    # ID and redirect, each once): what answered shouldn't choose what opens,
+    # nor which app you sign in to. The address goes to python on stdin.
+    printf '%s' "$url" | python3 -I -c '
+import json, sys, urllib.parse
+url = sys.stdin.read()
+try:
+    with open(sys.argv[1]) as f: conf = json.load(f)
+except Exception: conf = {}
+prefix = "https://accounts.spotify.com/authorize?"
+q = urllib.parse.parse_qs(url[len(prefix):], keep_blank_values=True) if url.startswith(prefix) and "#" not in url else {}
+ok = bool(conf.get("clientId")) and all(len(v) == 1 for v in q.values())     and q.get("client_id") == [conf.get("clientId")] and q.get("response_type") == ["code"]     and q.get("redirect_uri") == [conf.get("redirectUri") or "http://127.0.0.1:8730/callback"]
+sys.exit(0 if ok else 1)' "$HOME/.config/omarock/spotify.json" || die "omarock-spotify's sign-in isn't Spotify's page for omarock's app: not opening it"
     echo "Opening Spotify's sign-in. If no browser opens, visit:"; echo "$url"
     xdg-open "$url" >/dev/null 2>&1 || true ;;
   raw) call "${1:?METHOD}" "${2:?PATH}" "${@:3}" | jq . ;;
