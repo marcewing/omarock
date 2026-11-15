@@ -1,5 +1,5 @@
 #!/bin/sh
-# The harness's sh and jq: the real ones, but while $HOME/argv.log exists,
+# The harness's sh, jq and curl: the real ones, but while $HOME/argv.log exists,
 # each command line they're given is written there first, one argument a
 # line, so a scenario can check that no secret reaches a command line (where
 # other accounts on this machine can read it).

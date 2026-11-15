@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Setup.js" as Setup
+import "Reply.js" as Reply
 
 // A piece's setup (Set up… in the settings), in a window of its own
 // (Setup.js has what's in it): what it is and how it works, what it needs
@@ -223,7 +224,6 @@ Rectangle {
   // ---- The bridge, checked live (Apple Music) ----
 
   property int checkSeq: 0
-  property var requests: []
   function checkSoon() {
     if (root.piece === "apple-music") checkTimer.restart()
   }
@@ -368,28 +368,20 @@ Rectangle {
     }
   }
 
-  // A GET, given up after 5 s: callback(status, data), status 0 when nothing answered.
+  // A GET, given up after 5 s, through curl (Fetch.qml): callback(status,
+  // data), status 0 when nothing answered, or what answered sent more than a
+  // health's few hundred bytes. Any Mac on the network can say it's a bridge.
+  readonly property int maxBytes: 65536
   function get(url, token, callback) {
-    var xhr = new XMLHttpRequest()
-    var entry = { xhr: xhr, deadline: Date.now() + 5000 }
-    xhr.onreadystatechange = function() {
-      if (xhr.readyState !== XMLHttpRequest.DONE || !root) return
-      root.requests = root.requests.filter(function(e) { return e !== entry })
-      var data = null
-      try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null } catch (e) {}
-      callback(xhr.status, data)
-    }
-    xhr.open("GET", url)
-    if (token !== "") xhr.setRequestHeader("Authorization", "Bearer " + token)
-    root.requests = root.requests.concat([entry])
-    xhr.send()
+    fetch.request({ url: url, headers: token !== "" ? { "Authorization": "Bearer " + token } : {}, maxBytes: root.maxBytes,
+                    timeoutMs: 5000 }, function(reply) {
+      if (!root || typeof root.get !== "function") return
+      var read = Reply.parse(reply.text, root.maxBytes)
+      callback(reply.tooBig || Reply.refused(read.error) ? 0 : reply.status, read.data)
+    })
   }
-  Timer {
-    interval: 500
-    repeat: true
-    running: root.requests.length > 0
-    onTriggered: root.requests.forEach(function(e) { if (Date.now() > e.deadline) e.xhr.abort() })
-  }
+  Fetch { id: fetch }
+  readonly property var http: fetch  // for the harness
 
   // ---- The window ----
 

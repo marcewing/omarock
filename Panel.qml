@@ -112,6 +112,7 @@ Panel {
   readonly property bool bridgeMode: appleMode || spotifyMode
   readonly property var bridge: spotifyMode ? spotify : apple
   readonly property var appleClient: apple  // for the harness
+  readonly property var clients: ({ apple: apple, spotify: spotify, sxm: sxm, radio: radio, charts: charts, setup: setupView })  // for the harness
   // The service the rows on screen come from: the one playing, or the one
   // a lookup is in.
   readonly property var browseBridge: lookupService === "apple" ? apple : lookupService === "spotify" ? spotify : bridge
@@ -4002,6 +4003,9 @@ Panel {
     bridgeName: "omarock-spotify"
     unreachableText: "Can't reach omarock-spotify (systemctl --user status omarock-spotify)"
     unauthorizedText: "Spotify isn't signed in: run omarock-sp login"
+    // Its longest lists are a playlist's or an album's songs, at most 1,000
+    // (omarock-spotify), a KB or so each.
+    maxBytes: 8388608
     active: root.spotifyEnabled
     // Every 3 s while it's the source, or a release waits to go.
     retryMs: root.spotifyMode || spotify.releasePending ? 3000 : 30000

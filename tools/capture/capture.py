@@ -46,7 +46,7 @@ PLUGIN_FILES = ["BarWidget.qml", "Panel.qml", "MpdClient.qml", "Mpd.js", "Player
                 "Apple.js", "AppleClient.qml", "Sxm.js", "SxmClient.qml", "Radio.js", "RadioClient.qml", "Places.js", "places.tsv", "ScrollingText.qml", "Info.js", "InfoCard.qml",
                 "Settings.js", "Hints.js", "TimeMachine.js", "Keeper.js", "ChartStore.js", "ChartClient.qml", "YearPicker.qml",
                 "Setup.js", "SetupView.qml", "History.js", "HistoryClient.qml", "Paging.js", "Wave.js", "WavyOutline.qml", "Heard.js", "StdinProcess.qml", "ListenerCheck.qml",
-                "GuardedField.qml", "Editing.js", "Job.qml", "Reply.js",
+                "GuardedField.qml", "Editing.js", "Job.qml", "Reply.js", "Fetch.qml",
                 "tools/omarock-account", "tools/omarock-sources", "tools/update-soloist", "tools/omarock-resolve"]
 THEME = "/usr/share/omarchy/themes/ristretto/colors.toml"
 OUTPUT_COMMANDS = ("enableoutput", "disableoutput", "toggleoutput", "outputset")
@@ -98,9 +98,10 @@ def prepare(work):
     # them), and should something start to, it fails rather than reach one.
     (fakes / "ssh").symlink_to("/usr/bin/false")
     (fakes / "scp").symlink_to("/usr/bin/false")
-    # The real sh and jq, which log their command lines while a scenario asks.
+    # The real sh, jq and curl, which log their command lines while a scenario asks.
     (fakes / "sh").symlink_to(TOOLS / "argv-log")
     (fakes / "jq").symlink_to(TOOLS / "argv-log")
+    (fakes / "curl").symlink_to(TOOLS / "argv-log")
     # Never the real clipboard: the fields' pastes read a file in the test HOME.
     (fakes / "wl-paste").symlink_to(TOOLS / "fake-wl-paste")
     # A display that isn't there (a real Wayland client started here finds
@@ -6354,7 +6355,7 @@ def fake_soloist_download(archive):
 
 
 def logged_argv(home, steps):
-    """Every command line the panel's sh and jq are given while steps() runs
+    """Every command line the panel's sh, jq and curl are given while steps() runs
     (the harness's argv-log writes them down while $HOME/argv.log exists)."""
     log = home / "argv.log"
     log.write_text("")

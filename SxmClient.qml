@@ -1,5 +1,6 @@
 import QtQuick
 import "Sxm.js" as Sxm
+import "Reply.js" as Reply
 
 // SiriusXM, through the omarock-sxm service on this machine (sxm/README.md).
 // Where the player card and the bar read the player, it has MpdClient's
@@ -50,6 +51,12 @@ Item {
   }
   ListenerCheck { id: listener; port: root.loopbackPort }
 
+  // The most of an answer read: the channel list is about 200 KB (400
+  // channels), what's on now about 160 KB.
+  property int maxBytes: 2097152
+
+  // HTTP through curl, capped and on time (Fetch.qml). timeoutMs: 10 s
+  // unless the caller says.
   function request(method, path, body, callback, timeoutMs) {
     if (root.loopbackPort > 0 && !listener.ours) {
       if (callback) callback(null, listener.owner !== ""
@@ -57,36 +64,33 @@ Item {
         : "SiriusXM isn't running (omarock-sxm)")
       return
     }
-    var xhr = new XMLHttpRequest()
-    xhr.onreadystatechange = function() {
+    fetch.request({ url: root.baseUrl + path, method: method, json: body, maxBytes: root.maxBytes, timeoutMs: timeoutMs || 10000,
+                    // What tells omarock-sxm the request is omarock's, not a web page's.
+                    headers: { "X-Omarock": "1" } }, function(reply) {
       // A reply that arrives after a plugin reload destroyed this client
       // (Apple Music's long poll, say) has nowhere to go. Mid-teardown the
       // client may still be there with its functions gone ("Property
       // 'logTiming' … is not a function").
-      if (xhr.readyState !== XMLHttpRequest.DONE || !root || typeof root.request !== "function") return
-      var data = null
-      try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null } catch (e) {}
-      if (xhr.status >= 200 && xhr.status < 300) {
+      if (!root || typeof root.request !== "function") return
+      var read = Reply.parse(reply.text, root.maxBytes)
+      var data = read.data
+      var tooBig = reply.tooBig || Reply.refused(read.error)
+      if (reply.status >= 200 && reply.status < 300 && !tooBig) {
         if (callback) callback(data, "")
       } else {
-        var error = xhr.status === 0 ? "SiriusXM isn't running (omarock-sxm)"
-          : (data && data.error) || "SiriusXM said " + xhr.status
+        var error = reply.timedOut ? "omarock-sxm didn't answer"
+          : tooBig ? "SiriusXM's answer was too big to read"
+          : reply.status === 0 ? "SiriusXM isn't running (omarock-sxm)"
+          : (data && data.error ? String(data.error).slice(0, 300) : "") || "SiriusXM said " + reply.status
         // No answer: is the service still there? (Its art is shown only
         // while it is.)
-        if (xhr.status === 0 && path !== "/v1/health" && root.available) root.checkHealth()
+        if (reply.status === 0 && path !== "/v1/health" && root.available) root.checkHealth()
         if (callback) callback(null, error)
       }
-    }
-    xhr.open(method, root.baseUrl + path)
-    // What tells omarock-sxm the request is omarock's, not a web page's.
-    xhr.setRequestHeader("X-Omarock", "1")
-    if (body !== undefined && body !== null) {
-      xhr.setRequestHeader("Content-Type", "application/json")
-      xhr.send(JSON.stringify(body))
-    } else {
-      xhr.send()
-    }
+    })
   }
+  Fetch { id: fetch }
+  readonly property var http: fetch  // for the harness
 
   // Whether the service runs and has an account; then its channels.
   // Health has answered at least once (or failed to): the settings say

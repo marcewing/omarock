@@ -191,32 +191,37 @@ Item {
   // Read radio.json again: a file made after omarock loaded isn't watched.
   function rereadPlace() { placeFile.reload() }
 
-  function xhr(url, callback) {
-    var request = new XMLHttpRequest()
-    request.onreadystatechange = function() {
+  // A GET to Radio Browser, through curl, capped and on time (Fetch.qml).
+  // Its answers are lists of at most 100 stations, of a KB or two each.
+  property int maxBytes: 1048576
+  function xhr(url, callback, timeoutMs) {
+    fetch.request({ url: url, maxBytes: root.maxBytes, timeoutMs: timeoutMs || 15000 }, function(reply) {
       // A reply that arrives after a plugin reload destroyed this client
       // (Apple Music's long poll, say) has nowhere to go. Mid-teardown the
       // client may still be there with its functions gone ("Property
       // 'logTiming' … is not a function").
-      if (request.readyState !== XMLHttpRequest.DONE || !root || typeof root.xhr !== "function") return
-      var data = null
-      try { data = request.responseText ? JSON.parse(request.responseText) : null } catch (e) {}
-      if (request.status >= 200 && request.status < 300 && data !== null) callback(data, "")
-      else callback(null, request.status === 0 ? "Can't reach Radio Browser" : "Radio Browser said " + request.status)
-    }
-    request.open("GET", url)
-    request.send()
+      if (!root || typeof root.xhr !== "function") return
+      var read = Reply.parse(reply.text, root.maxBytes)
+      var tooBig = reply.tooBig || Reply.refused(read.error)
+      if (reply.status >= 200 && reply.status < 300 && read.data !== null && !tooBig) callback(read.data, "")
+      else callback(null, reply.timedOut ? "Radio Browser didn't answer"
+        : tooBig ? "Radio Browser's answer was too big to read"
+        : reply.status === 0 ? "Can't reach Radio Browser" : "Radio Browser said " + reply.status)
+    })
   }
+  Fetch { id: fetch }
+  readonly property var http: fetch  // for the harness
 
   // A server to ask: the setting, else one from Radio Browser's own list.
   function withServer(callback) {
     if (root.api !== "") return callback(root.api)
     if (root.server !== "") return callback(root.server)
     root.xhr("https://all.api.radio-browser.info/json/servers", function(list) {
-      var names = (list || []).map(function(s) { return s && s.name }).filter(Radio.serverOk)
+      // Only names under Radio Browser's own domain (Radio.serverOk).
+      var names = (Array.isArray(list) ? list : []).map(function(s) { return s ? s.name : "" }).filter(Radio.serverOk)
       root.server = "https://" + (names.length > 0 ? names[Math.floor(Math.random() * names.length)] : "de1.api.radio-browser.info")
       callback(root.server)
-    })
+    }, 10000)
   }
 
   function get(path, callback) {
@@ -228,9 +233,24 @@ Item {
     })
   }
 
+  // The stations seen, the latest last; at most keepStations of them besides
+  // the favorites, the local ones and the one playing, which always stay.
+  readonly property int keepStations: 1000
   function remember(list) {
-    var known = Object.assign({}, root.stations)
-    ;(list || []).forEach(function(s) { if (s && s.stationuuid) known[s.stationuuid] = s })
+    var fresh = (Array.isArray(list) ? list : []).filter(function(s) {
+      return s && typeof s.stationuuid === "string" && s.stationuuid !== ""
+    }).slice(-root.keepStations)
+    var stay = {}
+    root.favorites.concat(root.local).forEach(function(s) { if (s && s.stationuuid) stay[s.stationuuid] = true })
+    stay[root.currentUuid] = true
+    var old = Object.keys(root.stations)
+    var from = old.length - (root.keepStations - fresh.length)
+    var known = {}
+    old.forEach(function(uuid, i) { if (i >= from || stay[uuid]) known[uuid] = root.stations[uuid] })
+    fresh.forEach(function(s) {
+      delete known[s.stationuuid]
+      known[s.stationuuid] = s
+    })
     root.stations = known
   }
 

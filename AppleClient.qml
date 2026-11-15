@@ -3,6 +3,7 @@ import Quickshell.Io
 import "Apple.js" as Apple
 import "Heard.js" as Heard
 import "Info.js" as Info
+import "Reply.js" as Reply
 
 // The Apple Music bridge on the Mac (apple-bridge/API.md), over HTTP on the
 // tailnet. Where the player card and the bar read the player, it has
@@ -108,7 +109,7 @@ Item {
   property var playlists: []
   property real elapsed: 0
   property int pollSequence: 0
-  // Requests in flight, aborted when they outlive their deadline.
+  // Requests in flight (Fetch gives up on one at its deadline).
   property var inflight: []
 
   readonly property bool configured: baseUrl !== ""
@@ -171,50 +172,69 @@ Item {
       if (callback) callback(null, listener.owner !== "" ? root.heldText : root.unreachableText)
       return
     }
-    var xhr = new XMLHttpRequest()
-    var entry = { xhr: xhr, deadline: Date.now() + (timeoutMs || 10000), timedOut: false, path: path.split("?")[0],
+    var entry = { deadline: Date.now() + (timeoutMs || 10000), timedOut: false, path: path.split("?")[0],
       background: path.indexOf("&background=1") >= 0,
       sentAt: Date.now(), ahead: root.inflight.map(function(e) { return e.path }) }
-    xhr.onreadystatechange = function() {
+    var cap = root.bytesFor(method, entry.path)
+    var headers = {}
+    if (root.token !== "") headers["Authorization"] = "Bearer " + root.token
+    if (root.clientName !== "") headers["X-Omarock-Client"] = root.clientName
+    // What tells omarock-spotify the request is omarock's, not a web page's.
+    headers["X-Omarock"] = "1"
+    root.inflight = root.inflight.concat([entry])
+    fetch.request({ url: root.baseUrl + path, method: method, headers: headers, json: body, maxBytes: cap,
+                    timeoutMs: timeoutMs || 10000 }, function(reply) {
       // A reply that arrives after a plugin reload destroyed this client
       // (Apple Music's long poll, say) has nowhere to go. Mid-teardown the
       // client may still be there with its functions gone ("Property
       // 'logTiming' … is not a function").
-      if (xhr.readyState !== XMLHttpRequest.DONE || !root || typeof root.logTiming !== "function") return
+      if (!root || typeof root.logTiming !== "function") return
       root.inflight = root.inflight.filter(function(e) { return e !== entry })
-      root.logTiming(method, entry, xhr.status)
-      var data = null
-      try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null } catch (e) {}
-      if (xhr.status >= 200 && xhr.status < 300) {
+      entry.timedOut = reply.timedOut
+      root.logTiming(method, entry, reply.status)
+      var read = Reply.parse(reply.text, cap)
+      var data = read.data
+      var tooBig = reply.tooBig || Reply.refused(read.error)
+      if (reply.status >= 200 && reply.status < 300 && !tooBig) {
         root.reachable = true
         if (entry.path !== "/v1/health") root.tokenRefused = false
         if (callback) callback(data, "")
         return
       }
-      if (xhr.status === 401) root.tokenRefused = true
+      if (reply.status === 401) root.tokenRefused = true
       var error = entry.timedOut ? root.bridgeName + " didn't answer"
-        : xhr.status === 0 ? root.unreachableText
-        : xhr.status === 401 ? root.bridgeName + " refused omarock's token" + root.refusedHint
-        : (data && data.error) || root.bridgeName + " said " + xhr.status
-      if (xhr.status === 0) {
+        : tooBig ? root.bridgeName + "'s answer was too big to read"
+        : reply.status === 0 ? root.unreachableText
+        : reply.status === 401 ? root.bridgeName + " refused omarock's token" + root.refusedHint
+        : (data && data.error ? String(data.error).slice(0, 300) : "") || root.bridgeName + " said " + reply.status
+      if (reply.status === 0) {
         if (root.reachable) root.dropouts++
         root.reachable = false
       }
       if (callback) callback(null, error)
-    }
-    xhr.open(method, root.baseUrl + path)
-    if (root.token !== "") xhr.setRequestHeader("Authorization", "Bearer " + root.token)
-    if (root.clientName !== "") xhr.setRequestHeader("X-Omarock-Client", root.clientName)
-    // What tells omarock-spotify the request is omarock's, not a web page's.
-    xhr.setRequestHeader("X-Omarock", "1")
-    root.inflight = root.inflight.concat([entry])
-    if (body !== undefined && body !== null) {
-      xhr.setRequestHeader("Content-Type", "application/json")
-      xhr.send(JSON.stringify(body))
-    } else {
-      xhr.send()
-    }
+    })
   }
+
+  // The most of an answer read. The bridge's largest by far are its
+  // library's lists: a playlist of thousands of songs was 5 MB, the largest
+  // genre (Classical) 0.6 MB. A status has at most 200 songs of its queue
+  // (5 KB for a few), and health a few hundred bytes. Replies to POSTs are
+  // a status, or less.
+  property int maxBytes: 16777216
+  property int statusBytes: 1048576
+  property int healthBytes: 65536
+  function bytesFor(method, path) {
+    return path === "/v1/health" ? root.healthBytes
+      : method !== "GET" || path === "/v1/status" ? root.statusBytes : root.maxBytes
+  }
+
+  // HTTP through curl, capped and on time (Fetch.qml). Qt sent at most 6
+  // requests to a host at once, and so does this.
+  Fetch {
+    id: fetch
+    slots: 6
+  }
+  readonly property var http: fetch  // for the harness
 
   // For the journal, as MpdClient logs slow mpd commands: every transport
   // command (POST), and anything else over 2 s, with what was in flight when
@@ -729,18 +749,4 @@ Item {
     onTriggered: root.updateHeard()
   }
 
-  Timer {
-    interval: 1000
-    repeat: true
-    running: root.inflight.length > 0
-    onTriggered: {
-      var now = Date.now()
-      root.inflight.forEach(function(entry) {
-        if (entry.deadline < now && !entry.timedOut) {
-          entry.timedOut = true
-          entry.xhr.abort()
-        }
-      })
-    }
-  }
 }
