@@ -193,6 +193,10 @@ health_ok() { [[ -n $(health) ]]; }
 health_value() { health | plutil -extract "$1" raw -o - - 2>/dev/null; }
 health_true() { [[ $(health_value "$1") == true ]]; }
 health_is() { [[ $(health_value "$1") == "$2" ]]; }
+# Text from the bridge, for the terminal, with only printable characters: over TCP it can
+# come from whatever holds the port, and an escape code would reach the terminal (OSC 52
+# writes the clipboard). In the C locale, too, that leaves no escape (0x80-0x9F go).
+printable() { print -r -- "${1//[^[:print:]]/}"; }
 private_ok() { [[ -s $1 && $(stat -f %Lp "$1") == 600 ]]; }
 # The support folder holds the secrets and the control socket: only you may open it.
 support_private() { [[ -d $support && -O $support ]] && chmod go= "$support"; }
@@ -660,7 +664,7 @@ step_pair() {
   pair_state=$(pair_api POST /open)
   code=$(pair_value code)
   if [[ $code != <-> || ${#code} != 6 ]]; then
-    bad "the bridge didn't open a pairing code${pair_state:+: $(pair_value error)}"
+    bad "the bridge didn't open a pairing code${pair_state:+: $(printable "$(pair_value error)")}"
     return 1
   fi
   pair_tries=$(pair_number tries) pair_left=$(pair_number tries) secs=$(pair_number expiresIn)
@@ -686,7 +690,7 @@ step_pair() {
   fi
   case $(pair_value closed) in
     paired)
-      client=$(pair_value client)
+      client=$(printable "$(pair_value client)")
       ok "paired with ${client:-your Omarchy machine}" ;;
     expired) bad "the code expired: ./install pair opens a new one"; return 1 ;;
     tries) bad "the code was closed after $pair_tries wrong tries: ./install pair opens a new one"; return 1 ;;
@@ -715,7 +719,7 @@ pair_only() {
     exit 1
   fi
   if ! health_true controlSocket || ! control_ok; then
-    bad "the bridge here ($(health_value version)) is too old to pair: run ./install to update the bridge first"
+    bad "the bridge here ($(printable "$(health_value version)")) is too old to pair: run ./install to update the bridge first"
     exit 1
   fi
   support_private
