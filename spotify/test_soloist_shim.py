@@ -164,6 +164,17 @@ class Listening:
         return self.proc.stderr.read()
 
 
+HANDSHAKE = ("GET / HTTP/1.1\r\nHost: 127.0.0.1:8731\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+             "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n")
+
+
+def handshake(address, *headers):
+    """A connection that sends a WebSocket handshake at once, as clients do."""
+    sock = socket.create_connection(address)
+    sock.sendall((HANDSHAKE + "".join(h + "\r\n" for h in headers) + "\r\n").encode())
+    return sock
+
+
 def hello(sock):
     sock.settimeout(5)
     try:
@@ -197,11 +208,32 @@ def control_port(standin, env, how):
         check(f"{how}: an IPv6 socket's connection to 127.0.0.1 is this account's too",
               said == "accepted" and hello(v6) == b"hello\n", said)
         v6.close()
+        # A web page's WebSocket: the browser runs as this account, but its
+        # request always has an Origin header (or Sec-Fetch- ones), and
+        # omarock-spotify's never does.
+        address = ("127.0.0.1", soloist.port)
+        mine = handshake(address)
+        started = time.monotonic()
+        said = soloist.go()
+        check(f"{how}: a WebSocket handshake without Origin reaches Soloist at once",
+              said == "accepted" and hello(mine) == b"hello\n" and time.monotonic() - started < 0.5, said)
+        mine.close()
+        for header in ("Origin: http://127.0.0.1:9", "Origin: null", "origin: https://example.com",
+                       "Sec-Fetch-Mode: websocket"):
+            page = handshake(address, header)
+            time.sleep(0.1)
+            mine = handshake(address)
+            said = soloist.go()
+            check(f"{how}: one with '{header}' (a web page's) is closed; Soloist gets the next",
+                  said == "accepted" and hello(page) == b"" and hello(mine) == b"hello\n", said)
+            page.close()
+            mine.close()
     finally:
         log = soloist.stop()
-    check(f"{how}: its log says once that the port is guarded, and why it refused one (not another account's)",
+    check(f"{how}: its log says once that the port is guarded, and why it refused some (not another account's)",
           log.count(f"omarock-soloist: guards 127.0.0.1:{soloist.port}:") == 1
           and f"refused a connection to port {soloist.port} that closed before its owner could be checked" in log
+          and f"refused a connection to port {soloist.port} from a web page" in log
           and "from another account" not in log, log)
 
 
@@ -254,6 +286,8 @@ def discovery_port(standin, env):
           got["gone"] == "accepted" and "closed before its owner could be checked" in got["log"], got)
     check("discovery port: another machine's is handed over as it comes, even closed (a phone pairing)",
           got["other"] == "accepted", got)
+    check("discovery port: a web page's request from this machine is closed; Soloist gets the next",
+          got["page"] == "accepted" and got["page_hello"] == "" and "from a web page" in got["log"], got)
     check("and its log says once how the port is guarded",
           got["log"].count(f"guards 0.0.0.0:{got['port']}: of this machine's programs, only this account's") == 1, got["log"])
 
@@ -278,6 +312,13 @@ def in_netns(other_pid):
                        check=True, timeout=10)
         time.sleep(0.2)
         out["other"] = soloist.go()
+        page = handshake(("10.99.0.1", soloist.port), "Origin: http://10.99.0.1:9")
+        time.sleep(0.1)
+        mine = socket.create_connection(("10.99.0.1", soloist.port))
+        out["page"] = soloist.go()
+        out["page_hello"] = hello(page).decode()
+        page.close()
+        mine.close()
     finally:
         out["log"] = soloist.stop()
     print(json.dumps(out))

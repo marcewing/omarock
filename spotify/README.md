@@ -158,6 +158,8 @@ By hand, run the tools from your omarock clone: the plugin's folder,
     whoever pairs. Of the connections from this machine, the shim hands Soloist
     only those whose other end belongs to your account, by the kernel's socket
     table (`/proc/net/tcp`), and closes the rest before Soloist sees them.
+    Your browser runs as you too, so it also closes a web page's connection
+    (its request says where the page came from: an `Origin` header).
     Phones and computers on your network still reach the discovery port, to
     pair.
 

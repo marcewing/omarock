@@ -22,6 +22,14 @@
 //    can't be checked. A connection from another machine, a phone pairing
 //    say, reaches the discovery port as before.
 //
+// 3. Not for web pages. A browser runs as this account too, and a page can
+//    open a WebSocket to 127.0.0.1:8731 (Soloist checks no Origin: its
+//    server never shows it the request). A browser's request always carries
+//    an Origin header, or Sec-Fetch- ones; omarock-spotify's and the Spotify
+//    apps' never do. So a connection from this machine whose request has
+//    either is closed, after a look at the request (MSG_PEEK: Soloist still
+//    reads all of it) for up to a second.
+//
 // It says in Soloist's log that it handed over the key, and once per port
 // that it guards it: tools/update-soloist checks a new Soloist build by those
 // two lines. tools/install-spotify builds it (cc -shared) into
@@ -32,11 +40,13 @@
 #include <errno.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
@@ -184,7 +194,7 @@ static int ours_alone(const address *peer, const address *ours) {
 
 static pthread_mutex_t noted = PTHREAD_MUTEX_INITIALIZER;
 static unsigned short guarded[16];
-static time_t refused_said;
+static time_t refused_said[3];  // when each reason was last said
 
 // Says, once per port, that it's guarded.
 static void say_guarded(const address *listening) {
@@ -207,24 +217,60 @@ static void say_guarded(const address *listening) {
   }
 }
 
-// why: 0 another account's, -1 its far end had gone before it could be checked.
+// Whether a connection's request is a browser's: an Origin or Sec-Fetch-
+// header in its first 4 KB, looked at without taking it (MSG_PEEK), until
+// the headers end, the far end closes, or a second has gone. A connection
+// that sends nothing by then (a check that the port answers) isn't.
+static int from_a_page(int conn) {
+  char buf[4097];
+  struct timespec start, now;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  ssize_t n;
+  for (;;) {
+    n = recv(conn, buf, sizeof buf - 1, MSG_PEEK | MSG_DONTWAIT);
+    if (n >= 0) buf[n] = 0;
+    if (n == 0 || (n > 0 && (strstr(buf, "\r\n\r\n") || n == sizeof buf - 1))) break;
+    if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) return 0;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long left = 1000 - ((now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000);
+    if (left <= 0) break;
+    if (n > 0) {  // part of it: wait for more without spinning on what's there
+      struct timespec pause = {0, 10000000};
+      nanosleep(&pause, NULL);
+    } else {
+      struct pollfd p = {conn, POLLIN, 0};
+      poll(&p, 1, (int)left);
+    }
+  }
+  if (n <= 0) return 0;
+  for (char *line = strstr(buf, "\r\n"); line; line = strstr(line + 2, "\r\n")) {
+    if (line[2] == '\r') break;
+    if (!strncasecmp(line + 2, "origin:", 7) || !strncasecmp(line + 2, "sec-fetch-", 10)) return 1;
+  }
+  return 0;
+}
+
+// why: 0 another account's, -1 its far end had gone before it could be
+// checked, -2 a web page's.
 static void say_refused(int listener, int why) {
   address listening;
   socklen_t len = sizeof listening;
   unsigned short port = getsockname(listener, &listening.sa, &len) == 0 ? port_of(&listening) : 0;
   pthread_mutex_lock(&noted);
   time_t now = time(NULL);
-  int say = now - refused_said >= 60;
-  if (say) refused_said = now;
+  int say = now - refused_said[-why] >= 60;
+  if (say) refused_said[-why] = now;
   pthread_mutex_unlock(&noted);
   if (!say) return;
   if (why == 0) fprintf(stderr, "omarock-soloist: refused a connection to port %u from another account\n", port);
+  else if (why == -2) fprintf(stderr, "omarock-soloist: refused a connection to port %u from a web page\n", port);
   else fprintf(stderr, "omarock-soloist: refused a connection to port %u that closed before its owner could be checked\n", port);
 }
 
-// A connection Soloist may have: from this machine, only this account's;
-// from another machine, any (Connect discovery; a loopback listener gets
-// none). 1 when it may, else why not (as ours_alone).
+// A connection Soloist may have: from this machine, only this account's,
+// and not a web page's; from another machine, any (Connect discovery; a
+// loopback listener gets none). 1 when it may, else why not (as
+// say_refused).
 static int allowed(int listener, int conn) {
   address listening, peer, ours;
   socklen_t len = sizeof listening;
@@ -236,7 +282,9 @@ static int allowed(int listener, int conn) {
   if (getsockname(conn, &ours.sa, &len) != 0) return -1;
   if (peer.sa.sa_family != ours.sa.sa_family || !inet(&peer)) return 0;
   if (!loopback(&listening) && !this_machine(&peer)) return 1;
-  return ours_alone(&peer, &ours);
+  int ours_ok = ours_alone(&peer, &ours);
+  if (ours_ok != 1) return ours_ok;
+  return from_a_page(conn) ? -2 : 1;
 }
 
 static int (*real_accept)(int, struct sockaddr *, socklen_t *);

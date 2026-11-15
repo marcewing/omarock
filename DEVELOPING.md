@@ -166,7 +166,12 @@ mpd with mpd's `null` output, or a private PipeWire.
   `accept`: a connection from this machine (from a loopback address, or one of
   its interfaces' own: `getifaddrs`) reaches Soloist only if it's this
   account's. One from another machine (a phone pairing) isn't in this
-  machine's socket table, and is handed over as before.
+  machine's socket table, and is handed over as before. Your browser runs as
+  you, and a web page can open a WebSocket to 127.0.0.1 (Soloist checks no
+  Origin), so of this account's connections the shim also closes one whose
+  request has an `Origin` or `Sec-Fetch-` header, as every browser's does and
+  omarock-spotify's and the Spotify apps' never do: it looks at the request
+  with `MSG_PEEK` (Soloist still reads all of it), for up to a second.
 - **No download-and-run.** Nothing omarock runs fetches a program and runs it.
   Soloist, the one program it doesn't get from Arch or this clone, you download
   from Spotify's page (Spotify publishes only an unversioned "latest" build,

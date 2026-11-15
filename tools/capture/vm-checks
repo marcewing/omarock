@@ -148,6 +148,15 @@ mine=$(python3 -I -c "$greet" 127.0.0.1 8731 2>&1) theirs=$(as_other python3 -I 
 check "Soloist's control port takes this account's connection ($mine) and closes another's ($theirs)" \
   [ "$mine" = soloist -a "$theirs" = closed ]
 check "and the shim says so in Soloist's log" bash -c "journalctl --user --no-pager -q -o cat -u omarock-soloist | grep -q 'refused a connection to port 8731 from another account'"
+# A web page's WebSocket: this account's, but its request has an Origin.
+page='import socket, sys
+s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5)
+s.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" + sys.argv[3].encode() + b"\r\n")
+s.settimeout(5)
+try: print(s.recv(16).decode().strip() or "closed")
+except OSError: print("closed")'
+theirs=$(python3 -I -c "$page" 127.0.0.1 8731 $'Origin: http://127.0.0.1:9\r\n' 2>&1) mine=$(python3 -I -c "$page" 127.0.0.1 8731 '' 2>&1)
+check "and closes a web page's (an Origin header: $theirs), not one without ($mine)" [ "$theirs" = closed -a "$mine" = soloist ]
 # Its Spotify Connect discovery, on every interface: this machine's other
 # accounts are turned away, another machine isn't (a network namespace with
 # a veth pair plays the other machine: nothing outside the VM is involved).
