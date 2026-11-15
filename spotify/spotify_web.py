@@ -29,6 +29,7 @@ import json
 import math
 import os
 import secrets
+import socket
 import subprocess
 import sys
 import threading
@@ -59,6 +60,98 @@ class ApiError(Exception):
     pass
 
 
+# The most of an answer read (Spotify's are pages of 50 items or fewer, tens
+# of KB; an error's, a few hundred bytes), and how long one request has,
+# start to end. urllib's timeout is for each read: an answer that trickles
+# in a byte at a time renews it for ever.
+REPLY_MAX = 4 * 1024 * 1024
+ERROR_MAX = 64 * 1024
+TOTAL = 30
+READ = 20
+
+
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Spotify's API doesn't redirect: one that does gets its 3xx back, and
+    the token doesn't go along to wherever it points."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class Bounded:
+    """One request's connection, shut down at its deadline whatever it's
+    doing then: connecting, waiting for the answer, reading it."""
+
+    def __init__(self, seconds):
+        self.sock, self.late = None, False
+        self.timer = threading.Timer(seconds, self.shut)
+        self.timer.daemon = True
+
+    def shut(self):
+        self.late = True
+        sock = self.sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def opener(self):
+        bounded = self
+
+        def watched(base):
+            class Connection(base):
+                def connect(self):
+                    super().connect()
+                    bounded.sock = self.sock
+                    if bounded.late:
+                        bounded.shut()
+            return Connection
+
+        class Http(urllib.request.HTTPHandler):
+            def http_open(self, req):
+                return self.do_open(watched(http.client.HTTPConnection), req)
+
+        class Https(urllib.request.HTTPSHandler):
+            def https_open(self, req):
+                return self.do_open(watched(http.client.HTTPSConnection), req, context=self._context)
+        return urllib.request.build_opener(Http, Https, NoRedirects)
+
+    def open(self, request):
+        self.timer.start()
+        return self.opener().open(request, timeout=READ)
+
+    def read(self, reply, most, cut=False):
+        """The answer's bytes, at most most of them (cut: the rest dropped;
+        else an ApiError), by the deadline (else TimeoutError)."""
+        chunks, size = [], 0
+        read = getattr(reply, "read1", None) or reply.read
+        while True:
+            chunk = read(65536) if not self.late else b""
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > most:
+                if cut:
+                    chunks.append(chunk[:most - size + len(chunk)])
+                    break
+                raise ApiError("Spotify's answer was too big to read")
+            chunks.append(chunk)
+        # A shut socket reads as the end of the answer.
+        if self.late:
+            raise TimeoutError("past the deadline")
+        return b"".join(chunks)
+
+    def error_text(self, e):
+        """An error's answer, its first ERROR_MAX bytes; "" if it can't be read."""
+        try:
+            return self.read(e, ERROR_MAX, cut=True).decode(errors="replace") if e.fp else ""
+        except (OSError, http.client.HTTPException, ValueError):
+            return ""
+
+    def done(self):
+        self.timer.cancel()
+
+
 def config():
     data = json.loads(CONFIG.read_text())
     if not data.get("clientId"):
@@ -79,18 +172,23 @@ def save_tokens(data):
 def token_request(fields):
     request = urllib.request.Request(ACCOUNTS + "/api/token", data=urllib.parse.urlencode(fields).encode(),
                                      headers={"Content-Type": "application/x-www-form-urlencoded"})
+    bounded = Bounded(TOTAL)
     try:
-        with urllib.request.urlopen(request, timeout=20) as reply:
-            return json.load(reply)
+        with bounded.open(request) as reply:
+            return json.loads(bounded.read(reply, REPLY_MAX))
     except urllib.error.HTTPError as e:
-        text = e.read().decode(errors="replace")[:300]
+        text = bounded.error_text(e)[:300]
         if e.code in (400, 401):
             raise NotSignedIn(f"Spotify refused the sign-in ({e.code}): {text}")
         raise ApiError(f"Spotify's token service said {e.code}: {text}")
     except (OSError, http.client.HTTPException) as e:
         # Not tried again: a renewal Spotify carried out may have replaced
         # the refresh token sent.
-        raise unanswered(e)[1] from e
+        raise unanswered(TimeoutError() if bounded.late else e)[1] from e
+    except ValueError as e:
+        raise ApiError("Spotify's token service gave an answer that isn't JSON") from e
+    finally:
+        bounded.done()
 
 
 def unanswered(e):
@@ -275,6 +373,9 @@ def call(method, path, body=None):
     ApiError when Spotify doesn't answer or says too many requests (a GET
     dropped unanswered, or asked to wait 2 s or less, is tried once more
     first: it changes nothing)."""
+    # A page's "next" comes from the answer: only ever Spotify's API.
+    if path.startswith("http") and not path.startswith(API + "/"):
+        raise ApiError("Spotify's answer pointed somewhere else for the rest")
     url = path if path.startswith("http") else API + path
     data = json.dumps(body).encode() if body is not None else (b"" if method in ("PUT", "POST") else None)
     for attempt in (1, 2):
@@ -283,12 +384,13 @@ def call(method, path, body=None):
         not_paused()  # a 429 may have come while this waited its turn
         request = urllib.request.Request(url, data=data, method=method,
                                          headers={"Authorization": "Bearer " + access_token(), "Content-Type": "application/json"})
+        bounded = Bounded(TOTAL)
         try:
-            with urllib.request.urlopen(request, timeout=20) as reply:
-                text = reply.read().decode()
+            with bounded.open(request) as reply:
+                text = bounded.read(reply, REPLY_MAX).decode()
                 return reply.status, json.loads(text) if text.strip() else None
         except urllib.error.HTTPError as e:
-            text = e.read().decode(errors="replace")
+            text = bounded.error_text(e)
             if e.code == 429:
                 wait = pause_for(e.headers.get("Retry-After"), method, url)
                 if method == "GET" and attempt == 1 and wait <= 2:
@@ -300,10 +402,14 @@ def call(method, path, body=None):
             except ValueError:
                 return e.code, text
         except (OSError, http.client.HTTPException) as e:
-            again, error = unanswered(e)
+            again, error = unanswered(TimeoutError() if bounded.late else e)
             if not (again and method == "GET" and attempt == 1):
                 raise error from e
             time.sleep(0.3)
+        except ValueError as e:
+            raise ApiError("Spotify's answer wasn't JSON; try again") from e
+        finally:
+            bounded.done()
 
 
 def main():

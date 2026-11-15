@@ -15,6 +15,7 @@ spec = importlib.util.spec_from_file_location("omarock_spotify", HERE / "omarock
 service = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(service)
 REAL_CALL = service.spotify_web.call  # the tests below swap in their own
+REAL_TOKEN = service.spotify_web.token_request
 failures = []
 
 
@@ -99,6 +100,7 @@ def main():
     dropped()
     limited()
     paced()
+    bounded()
     print("all passed" if not failures else "FAILED: " + ", ".join(failures))
     sys.exit(1 if failures else 0)
 
@@ -699,6 +701,176 @@ def paced():
         web.due = 0.0
         api.shutdown()
         api.server_close()
+
+
+def bounded():
+    """What Spotify answers is read up to a cap, by a deadline, and only from
+    its API: an answer of gigabytes, one that trickles a byte at a time, a
+    "next" page without end or elsewhere, a redirect, an album's name of
+    megabytes copied into each of its songs. omarock-spotify passes the
+    answer on to the panel, which reads it on the shell's one thread."""
+    import http.client
+    import http.server
+    import json
+    import tempfile
+    web = service.spotify_web
+    web.call, web.token_request = REAL_CALL, REAL_TOKEN
+    folder = Path(tempfile.mkdtemp())
+    web.TOKENS = folder / "spotify-token.json"
+    web.TOKENS.write_text(json.dumps({"access_token": "a", "refresh_token": "r", "expires_at": time.time() + 3600}))
+    seen, stolen = [], []
+    track = lambda n: {"id": f"t{n}", "name": f"Song {n}", "duration_ms": 1000, "artists": [{"id": "ar", "name": "Bush"}]}
+
+    class Other(http.server.BaseHTTPRequestHandler):
+        """Somewhere else: nothing, not even the token, may come here."""
+        def log_message(self, *args): pass
+
+        def do_GET(self):
+            stolen.append((self.path, self.headers.get("Authorization")))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+        do_POST = do_GET
+
+    class Api(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+
+        def send(self, data, status=200):
+            body = json.dumps(data).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def answer(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            path = self.path.split("?")[0]
+            seen.append(path)
+            try:
+                if path in ("/endless", "/api/token/endless"):
+                    self.send_response(200)
+                    self.end_headers()
+                    while True:
+                        self.wfile.write(b"[" + b"0," * 32768)
+                if path in ("/trickle", "/api/token"):
+                    self.send_response(200)
+                    self.end_headers()
+                    for _ in range(200):
+                        self.wfile.write(b" ")
+                        self.wfile.flush()
+                        time.sleep(0.1)
+                    return
+                if path == "/slowheaders":
+                    self.wfile.write(b"HTTP/1.0 200 OK\r\n")
+                    for _ in range(200):
+                        self.wfile.write(b"X")
+                        self.wfile.flush()
+                        time.sleep(0.1)
+                    return
+                if path == "/redirect":
+                    self.send_response(302)
+                    self.send_header("Location", f"http://127.0.0.1:{other.server_address[1]}/stolen")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if path == "/albums/endless":
+                    return self.send({"id": "endless", "name": "Endless", "tracks": {
+                        "items": [track(i) for i in range(50)], "next": web.API + "/albums/endless/tracks"}})
+                if path == "/albums/endless/tracks":
+                    return self.send({"items": [track(i) for i in range(50)], "next": web.API + "/albums/endless/tracks"})
+                if path == "/albums/empty":
+                    return self.send({"id": "empty", "name": "Empty", "tracks": {"items": [track(1)], "next": web.API + "/albums/empty/tracks"}})
+                if path == "/albums/empty/tracks":
+                    return self.send({"items": [], "next": web.API + "/albums/empty/tracks"})
+                if path == "/albums/wide":
+                    return self.send({"id": "wide", "name": "W" * 50000, "tracks": {"items": [track(i) for i in range(40)], "next": None}})
+                if path == "/albums/away":
+                    return self.send({"id": "away", "name": "Away", "tracks": {
+                        "items": [track(1)], "next": f"http://127.0.0.1:{other.server_address[1]}/v1/albums/away/tracks"}})
+                if path == "/me/tracks":
+                    return self.send({"items": [{"n": i} for i in range(2000)], "next": web.API + "/me/tracks"})
+                if path == "/me/albums":
+                    return self.send({"items": [{"album": {"id": "a"}}], "next": web.API + "/me/albums"})
+                self.send({"error": {"status": 404, "message": "no"}}, 404)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        do_GET = do_POST = answer
+    api = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Api)
+    api.daemon_threads = True
+    other = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Other)
+    for s in (api, other):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    real = web.API, web.ACCOUNTS, web.TOTAL, web.REPLY_MAX, web.RATE, web.BURST, web.RESERVE, service.ANSWER_MAX
+    web.API, web.ACCOUNTS = f"http://127.0.0.1:{api.server_address[1]}", f"http://127.0.0.1:{api.server_address[1]}"
+    web.TOTAL, web.REPLY_MAX, web.RATE, web.BURST, web.RESERVE = 1.5, 65536, 1000.0, 1000, 0
+
+    def error(do):
+        began = time.monotonic()
+        try:
+            do()
+            return "", time.monotonic() - began
+        except (web.ApiError, service.ApiError, web.NotSignedIn) as e:
+            return str(e), time.monotonic() - began
+    try:
+        web.paused_until = web.due = 0.0
+        said, took = error(lambda: web.call("GET", "/endless"))
+        check("an endless answer stops at the cap, at once", "too big" in said and took < 1, f"{said!r} {took:.1f} s")
+        said, took = error(lambda: web.call("GET", "/trickle"))
+        check("an answer that trickles stops at the deadline", "in time" in said and took < web.TOTAL + 1, f"{said!r} {took:.1f} s")
+        said, took = error(lambda: web.call("GET", "/slowheaders"))
+        check("and headers that trickle", "in time" in said and took < web.TOTAL + 1, f"{said!r} {took:.1f} s")
+        said, took = error(lambda: web.token_request({"grant_type": "refresh_token"}))
+        check("the token service's answer has the deadline too", "in time" in said and took < web.TOTAL + 1, f"{said!r} {took:.1f} s")
+        status, _ = web.call("GET", "/redirect")
+        check("a redirect isn't followed, and the token stays here", status == 302 and not stolen, f"{status} {stolen}")
+        said, _ = error(lambda: web.call("GET", f"http://127.0.0.1:{other.server_address[1]}/v1/x"))
+        check("a page from anywhere but Spotify's API isn't asked for", "somewhere else" in said and not stolen, f"{said!r} {stolen}")
+
+        pages = service.Web()
+        seen.clear()
+        album = pages.album("endless")
+        asked = seen.count("/albums/endless/tracks")
+        check("an album's pages without end: its songs stop at ALBUM_TRACKS",
+              len(album["tracks"]) == service.ALBUM_TRACKS and asked < service.ALBUM_PAGES, f"{len(album['tracks'])} songs, {asked} pages")
+        seen.clear()
+        album = pages.album("empty")
+        check("an empty page ends it, whatever its next says",
+              len(album["tracks"]) == 1 and seen.count("/albums/empty/tracks") == 1, f"{seen}")
+        album = pages.album("wide")
+        longest = max(len(v) for t in album["tracks"] for v in t.values() if isinstance(v, str))
+        check("an album's name of 50 KB isn't copied into each song", longest <= service.TEXT_MOST and len(album["album"]["title"]) <= service.TEXT_MOST,
+              f"{longest}")
+        said, _ = error(lambda: pages.album("away"))
+        check("an album's next page elsewhere isn't asked for", "somewhere else" in said and not stolen, f"{said!r} {stolen}")
+        seen.clear()
+        liked = pages.pages("/me/tracks", most=500)
+        check("a page with more than asked is cut to the most", len(liked) == 500 and seen.count("/me/tracks") == 1, f"{len(liked)} {seen}")
+        seen.clear()
+        saved = pages.pages("/me/albums", most=500)
+        check("a page at a time without end stops after as many pages as the most takes",
+              len(saved) <= 11 and seen.count("/me/albums") <= 11, f"{len(saved)} items, {seen.count('/me/albums')} pages")
+
+        ours = service.ThreadingHTTPServer(("127.0.0.1", 0), service.Handler)
+        threading.Thread(target=ours.serve_forever, daemon=True).start()
+        service.WEB, saved_web = pages, service.WEB
+        service.ANSWER_MAX = 10000
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", ours.server_address[1], timeout=10)
+            conn.request("GET", "/v1/albums/catalog/endless", headers={"X-Omarock": "1"})
+            reply = conn.getresponse()
+            text = reply.read().decode()
+            check("an answer over ANSWER_MAX isn't passed on to the panel", reply.status == 502 and "too big" in text, f"{reply.status} {text[:200]}")
+        finally:
+            service.WEB = saved_web
+            ours.shutdown()
+            ours.server_close()
+    finally:
+        (web.API, web.ACCOUNTS, web.TOTAL, web.REPLY_MAX, web.RATE, web.BURST, web.RESERVE, service.ANSWER_MAX) = real
+        web.paused_until = web.due = 0.0
+        for s in (api, other):
+            s.shutdown()
+            s.server_close()
 
 if __name__ == "__main__":
     main()

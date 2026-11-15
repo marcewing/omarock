@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import soloist_ws  # noqa: E402
 import spotify_web  # noqa: E402
 
-VERSION = "0.3.7"
+VERSION = "0.3.8"
 SOLOIST_PORT = 8731
 SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 # omarock's sound output (audio/, ./install sound): Soloist plays into it
@@ -54,6 +54,17 @@ SOLOIST_DATA = Path.home() / ".local/share/omarock-soloist"
 BUS_CONF = Path.home() / ".local/share/omarock/audio/omarock-bus.conf"
 MPD_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "mpd/socket"
 SIGN_IN_DAYS = 182
+# What the panel is given: each name or text at most TEXT_MOST characters
+# (Spotify's longest are a few hundred), a list in one at most LIST_MOST
+# long, an image's address at most URL_MOST; an album at most ALBUM_TRACKS
+# songs, read in at most ALBUM_PAGES pages; and an answer at most
+# ANSWER_MAX bytes, which the panel reads whole.
+TEXT_MOST = 1000
+LIST_MOST = 20
+URL_MOST = 2048
+ALBUM_TRACKS = 1000
+ALBUM_PAGES = 25
+ANSWER_MAX = 8 * 1024 * 1024
 
 
 def log(message):
@@ -69,10 +80,11 @@ def fold(text):
 
 def artwork(images):
     """The largest image, as the bridge's artwork (a plain URL: no {w} {h})."""
-    images = [i for i in (images or []) if i and i.get("url")]
+    images = [i for i in (images or [])[:LIST_MOST] if isinstance(i, dict) and isinstance(i.get("url"), str)
+              and len(i["url"]) <= URL_MOST]
     if not images:
         return None
-    best = max(images, key=lambda i: i.get("width") or 0)
+    best = max(images, key=lambda i: i.get("width") if isinstance(i.get("width"), int) else 0)
     out = {"url": best["url"]}
     if best.get("width"): out["width"] = best["width"]
     if best.get("height"): out["height"] = best["height"]
@@ -92,9 +104,20 @@ def names(artists):
     return ", ".join(a["name"] for a in (artists or []) if a and a.get("name"))
 
 
+def short(value):
+    """A name or text at most TEXT_MOST characters, a list at most LIST_MOST
+    of them: an album's name goes into each of its songs, so one of
+    megabytes would make an answer of gigabytes."""
+    if isinstance(value, str):
+        return value[:TEXT_MOST]
+    if isinstance(value, list):
+        return [short(v) for v in value[:LIST_MOST]]
+    return value
+
+
 def clean(obj):
     """Fields Spotify doesn't give are left out, not null (apple-bridge/API.md)."""
-    return {k: v for k, v in obj.items() if v is not None and v != "" and v != []}
+    return {k: short(v) for k, v in obj.items() if v is not None and v != "" and v != []}
 
 
 def song(track, source="catalog", album=None):
@@ -137,7 +160,8 @@ def playlist_obj(playlist, me=""):
     items = playlist.get("items") or playlist.get("tracks") or {}
     return clean({"kind": "playlist", "id": playlist["id"], "source": "library" if mine else "catalog",
                   "name": playlist.get("name", ""), "curator": owner.get("display_name"),
-                  "description": re.sub(r"<[^>]+>", "", playlist.get("description") or "") or None,
+                  # Cut first: the pattern's time grows with the square of a run of "<".
+                  "description": re.sub(r"<[^>]+>", "", str(playlist.get("description") or "")[:TEXT_MOST]) or None,
                   "trackCount": items.get("total"), "canEdit": mine or bool(playlist.get("collaborative")),
                   "artwork": artwork(playlist.get("images"))})
 
@@ -542,12 +566,19 @@ class Web:
         return data
 
     def pages(self, path, limit=50, most=500):
-        """Every item of a paged list, up to most."""
+        """Every item of a paged list, up to most, in as many pages as that
+        takes (and one more): a page with nothing on it ends it, whatever
+        its "next" says, and one with more than asked for is cut."""
         items = []
         url = path + ("&" if "?" in path else "?") + f"limit={limit}"
-        while url and len(items) < most:
+        for _ in range(-(-most // limit) + 1):
+            if not url or len(items) >= most:
+                break
             data = self.get(url)
-            items += [i for i in data.get("items") or [] if i]
+            page = [i for i in (data.get("items") or []) if i]
+            if not page:
+                break
+            items += page[:most - len(items)]
             url = data.get("next")
         return items
 
@@ -585,11 +616,17 @@ class Web:
                 self.library_at = time.monotonic()
             return self.library
 
-    def followed_artists(self):
+    def followed_artists(self, most=500):
+        """As pages() does it: ten pages of 50 (and one more), an empty one the end."""
         items, url = [], "/me/following?type=artist&limit=50"
-        while url and len(items) < 500:
+        for _ in range(-(-most // 50) + 1):
+            if not url or len(items) >= most:
+                break
             data = self.get(url).get("artists") or {}
-            items += [a for a in data.get("items") or [] if a]
+            page = [a for a in (data.get("items") or []) if a]
+            if not page:
+                break
+            items += page[:most - len(items)]
             url = data.get("next")
         return items
 
@@ -612,24 +649,32 @@ class Web:
                 data = self.get("/search?" + urllib.parse.urlencode(
                     {"q": query, "type": "track,album,artist,playlist", "limit": n, "market": "from_token"}))
                 me = self.me_id()
+
+                def found(kind):
+                    return [i for i in ((data.get(kind) or {}).get("items") or [])[:n] if i]
                 out["catalog"] = {
-                    "songs": [song(t) for t in (data.get("tracks") or {}).get("items") or [] if t],
-                    "albums": [album_obj(a) for a in (data.get("albums") or {}).get("items") or [] if a],
-                    "artists": [artist_obj(a) for a in (data.get("artists") or {}).get("items") or [] if a],
-                    "playlists": [playlist_obj(p, me) for p in (data.get("playlists") or {}).get("items") or [] if p]}
+                    "songs": [song(t) for t in found("tracks")],
+                    "albums": [album_obj(a) for a in found("albums")],
+                    "artists": [artist_obj(a) for a in found("artists")],
+                    "playlists": [playlist_obj(p, me) for p in found("playlists")]}
             except (ApiError, spotify_web.ApiError, LookupError) as e:
                 out["catalog"] = {"songs": [], "albums": [], "artists": [], "playlists": []}
                 out["catalogError"] = str(e)
         return out
 
     def album(self, aid, source="catalog", library=False):
+        """An album and its songs: at most ALBUM_TRACKS, in ALBUM_PAGES pages
+        (Spotify's are 50 songs), an empty page the end."""
         data = self.get(f"/albums/{aid}?market=from_token")
-        tracks = [song(t, source, album=data) for t in (data.get("tracks") or {}).get("items") or [] if t]
-        nxt = (data.get("tracks") or {}).get("next")
-        while nxt:
-            page = self.get(nxt)
-            tracks += [song(t, source, album=data) for t in page.get("items") or [] if t]
+        page = data.get("tracks") or {}
+        tracks = []
+        for _ in range(ALBUM_PAGES):
+            items = [t for t in (page.get("items") or []) if t]
+            tracks += [song(t, source, album=data) for t in items[:ALBUM_TRACKS - len(tracks)]]
             nxt = page.get("next")
+            if not items or not nxt or len(tracks) >= ALBUM_TRACKS:
+                break
+            page = self.get(nxt)
         out = {"album": album_obj(data, source), "tracks": tracks}
         if library:
             # For the album view: the saved album, and the liked songs.
@@ -670,8 +715,8 @@ class Web:
         # Spotify took away artist top tracks (2026): a search by artist stands in.
         found = self.get("/search?" + urllib.parse.urlencode(
             {"q": f'artist:"{artist.get("name", "")}"', "type": "track", "limit": 10, "market": "from_token"}))
-        top = [song(t) for t in (found.get("tracks") or {}).get("items") or []
-               if t and any(a.get("id") == aid for a in t.get("artists") or [])]
+        top = [song(t) for t in ((found.get("tracks") or {}).get("items") or [])[:10]
+               if t and any(a.get("id") == aid for a in (t.get("artists") or [])[:LIST_MOST])]
         page = {"artist": artist_obj(artist, source), "albums": own,
                 "appearsOn": [album_obj(a) for a in appears], "topSongs": top}
         if len(self.artists) >= 100:
@@ -841,6 +886,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def reply(self, code, data, kind="application/json"):
         body = data if isinstance(data, bytes) else json.dumps(data).encode()
+        if len(body) > ANSWER_MAX:
+            code, kind = 502, "application/json"
+            body = json.dumps({"error": "Spotify's answer was too big to pass on"}).encode()
         self.send_response(code)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
